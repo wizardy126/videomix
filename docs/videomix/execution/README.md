@@ -8,7 +8,7 @@
    - implementa la tarea;
    - pasa `yarn tsc && yarn lint && yarn test run`;
    - rellena la sección **Notas de ejecución** del task-doc.
-   - **No hace commits.**
+   - **No hace commits** ni usa `git stash`, `git checkout` o `git reset`: el árbol de trabajo se comparte con otros agentes.
 3. **Revisión del orquestador**:
    - revisa el diff contra el task-doc y las convenciones;
    - repite la validación;
