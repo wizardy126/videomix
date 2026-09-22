@@ -26,7 +26,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | ID | Título | Hito | Modelo | Depende de | Estado |
 |---|---|---|---|---|---|
 | T01 | Rebranding e identidad de la app, CI | M0 | Sonnet | — | hecha |
-| T02 | Entorno de desarrollo: ffmpeg y medios de prueba | M0 | Sonnet | — | pendiente |
+| T02 | Entorno de desarrollo: ffmpeg y medios de prueba | M0 | Sonnet | — | hecha |
 | T03 | Tipos, esquema `.vmx` y geometría | M1 | Opus | T01 | hecha |
 | T04 | Store del proyecto y persistencia | M1 | Opus | T03 | pendiente |
 | T05 | Integración multi-fuente en la app | M2 | Opus | T04 | pendiente |
