@@ -128,10 +128,10 @@ El planificador intenta evitar estos casos, pero el generador debe soportarlos.
 
 ## 3. Planificador de montaje (puro)
 
-Carpeta: `src/renderer/src/videomix/planner/`.
+Carpeta: `src/renderer/src/videomix/planner/` (implementado en T10; detalles y justificación en [T10](execution/T10-planificador.md)).
 
-- **Entrada**: la lista ordenada de clips (duración e intervalo de proporciones de cada uno) y los ajustes (W, H, maxColumns, gap, reorderWindow, orden/semilla, duración de la transición).
-- **Salida**: `MixPlan`.
+- **Entrada** (`PlanMixInput`): la lista ordenada de `PlannerClip = { id, duration, aspectRange, rects? }` y `PlannerSettings = { width, height, maxColumns, gap, reorderWindow, order, transitionDuration }`. `getPlannerInput(project)` (`plannerInput.ts`) la construye desde `MixClip`/`MixSettings`; `rects` (máx./mín.) solo sirve para el aviso y la puntuación de upscale.
+- **Salida**: `MixPlan` (`planMix`). `validatePlan(plan, input)` comprueba las invariantes de §3.2 y devuelve la lista de problemas; `planMix` la ejecuta en desarrollo (`import.meta.env.DEV`). `formatPlan(plan)` da una vista textual compacta.
 
 ### 3.1 Salida: `MixPlan`
 
@@ -141,67 +141,90 @@ interface ColumnPlacement {        // un clip reproduciéndose en una columna
   column: number,                  // identificador estable de columna (no su índice visual)
   startTime: number,               // en el vídeo final (s)
   endTime: number,                 // startTime + duración del clip
+  transitionIn: number,            // xfade con el clip anterior de la columna (0 si es el primero); ≤ D
 }
 
 interface LayoutKeyframe {         // disposición de la fila a partir de un instante
   time: number,                    // inicio del cambio
-  transitionDuration: number,      // 0 = cambio instantáneo; >0 = animación de anchos
+  transitionDuration: number,      // 0 = cambio instantáneo; >0 = animación lineal desde el keyframe anterior
   columns: { column: number, x: number, width: number }[],  // en píxeles de salida, izquierda→derecha
-  fills: { x: number, width: number }[],                    // huecos sin clip (relleno)
+  fills: { x: number, width: number }[],                    // relleno estructural (la fila no llega a W)
 }
+
+type PlanWarning =
+  | { type: 'upscale', clipId, factor }                 // factor máximo > 2 (necesita rects)
+  | { type: 'pillarbox' | 'letterbox', clipId, time }   // la columna no encaja con el clip
+  | { type: 'transition-shortened', clipId, duration }  // xfade de entrada < D
+  | { type: 'fill', time, width };                      // keyframe con relleno estructural > 1 px
 
 interface MixPlan {
   width: number, height: number, duration: number,
-  placements: ColumnPlacement[],
-  layouts: LayoutKeyframe[],       // ordenados por tiempo; el primero en t=0
-  crops: Record<string, Rect[]>,   // opcional: cache de recortes por clip/layout; el generador puede recalcular con geometry
-  warnings: PlanWarning[],         // upscale > x2, letterbox forzado, clip demasiado corto, etc.
+  placements: ColumnPlacement[],   // en orden de elección, que coincide con el orden de inicio
+  layouts: LayoutKeyframe[],       // ordenados por tiempo; el primero en t=0; nunca se solapan
+  warnings: PlanWarning[],
 }
 ```
+
+**Semántica de los keyframes** (contrato con T11/T15):
+
+- Entre `time` y `time + transitionDuration` los `x`/anchos pasan linealmente del keyframe anterior a este; después quedan fijos hasta el siguiente keyframe.
+- Una columna que **no estaba** en el keyframe anterior es nueva: crece desde ancho 0 y su primer clip empieza justo en `time` (sin xfade).
+- Una columna que **desaparece** encoge hasta 0 y su último clip termina justo en `time + transitionDuration`.
+- Las columnas contiguas están separadas exactamente por `gap`; el relleno estructural se reparte a izquierda y derecha (bloque de columnas centrado, la parte izquierda par) y toca a sus vecinos sin separación.
+- **Final** (§4.3 de requisitos): cuando ya han empezado todos los clips, una columna cuyo clip termina **sigue en el layout sin clip**; su área se muestra como relleno y no se añade ningún keyframe (no hay re-layout ni re-expansión).
+- Durante una animación, el clip saliente de la columna que la dispara (y el de una columna de un evento fusionado) se muestra con anchos distintos a los suyos: el generador lo recorta con `getCropForAspect` (que devuelve pillarbox/letterbox si hace falta).
+- Se elimina `crops` del diseño original: el generador recalcula los recortes con `getCropForAspect(maxRect, minRect, width / H)`.
 
 ### 3.2 Reglas: invariantes que los tests deben verificar
 
 1. **Todos los clips aparecen exactamente una vez**, enteros: `endTime − startTime = duración del clip`.
-2. **Nunca hay más de `maxColumns` columnas visibles.**
-3. En cada instante, la suma de anchos de las columnas visibles, más los huecos, más el relleno, es igual a `W`.
-4. **Sustitución en columna**: el clip entrante empieza `transition.duration` antes de que termine el saliente. Ese solape es el xfade.
-5. **El orden relativo de la lista solo se altera dentro de la ventana `reorderWindow`**: un clip no puede adelantarse ni retrasarse más de N posiciones respecto a su índice en la lista. En modo aleatorio, la lista base es una permutación determinista a partir de la semilla.
-6. **Inicio**: todas las columnas iniciales empiezan en `t = 0`.
-7. **Final**: cuando no quedan clips, las columnas que terminan se convierten en relleno y no hay re-layout.
+2. **Nunca hay más de `maxColumns` columnas visibles**, tampoco durante una animación (unión de las columnas de los dos keyframes).
+3. En cada keyframe, columnas + huecos entre columnas + relleno cubren `[0, W]` sin solaparse.
+4. **Sustitución en columna**: el clip entrante empieza `transitionIn` antes de que termine el saliente, con `transitionIn = min(D, saliente/2, entrante/2)` (se acorta además en los casos límite descritos en §3.3). Ese solape es el xfade.
+5. **El orden solo se altera dentro de la ventana `reorderWindow`**: ordenando por `startTime` (empates por índice), ningún clip queda a más de N posiciones de su índice en la lista base. En modo aleatorio, la lista base es la permutación determinista de la semilla.
+6. **Inicio**: todas las columnas iniciales empiezan en `t = 0`; las columnas nuevas empiezan en el `time` de su keyframe.
+7. **Final**: no hay keyframes después del inicio del último clip; una columna que queda sin clip no desaparece (salvo si la quitó un re-layout justo cuando terminaba su último clip).
 8. **Determinismo**: la misma entrada produce el mismo plan.
 
-### 3.3 Algoritmo base: simulación por eventos (guía, ajustable por el implementador)
+Además: los keyframes no se solapan (`time ≥ anterior.time + anterior.transitionDuration`) y `transitionDuration ≤ D`.
 
-1. **Estado inicial**. Se toma la cola de clips y se elige el conjunto inicial:
-   - Se añaden clips en orden, respetando la ventana, mientras el conjunto sea factible (`Σ aMin ≤ T`) y `n ≤ maxColumns`.
-   - Se para cuando `Σ aMax ≥ T`: el fotograma se llena.
-   - Entre alternativas se elige la que minimice la puntuación de §3.4.
-2. **Evento "fin de clip"** en `t`: la columna `c` queda libre en `t − D`, siendo `D` la duración de la transición.
-   1. **Candidatos**: los clips de la ventana de la cola.
-   2. **Sustitución directa**: si algún candidato admite exactamente el ancho de `c` (`w_c / H ∈ [aMin, aMax]`), se toma el primero en orden. No hay re-layout.
-   3. **Re-layout**: si ninguno encaja, se evalúan estas opciones:
-      - (a) un candidato con re-reparto de anchos de toda la fila;
-      - (b) dos candidatos en el hueco, si `n < maxColumns`;
-      - (c) eliminar la columna y expandir las demás;
-      - (d) todas las combinaciones factibles dentro de la ventana.
+### 3.3 Algoritmo (implementado)
 
-      Se elige la de menor puntuación. El re-layout genera un `LayoutKeyframe` con `transitionDuration = D`, que empieza cuando empieza la transición del clip entrante.
-   4. Si quedan clips en la cola pero **ninguna opción es factible**, se permite relleno.
-3. **Eventos simultáneos**: si dos clips terminan a menos de `D` de distancia, se procesan juntos en un único re-layout. Así se evitan animaciones solapadas.
-4. **Cola vacía**: las columnas que terminan pasan a ser relleno.
+Simulación por eventos "termina el clip de una columna". `D` = duración de la transición; `p` = siguiente posición en el orden de reproducción.
 
-### 3.4 Puntuación (menor es mejor; pesos como constantes documentadas)
+1. **Ventana de orden**. Un conjunto de clips elegidos (en orden de índice base) ocupa las posiciones `p, p+1, …`; es válido si cada uno queda a ≤ N de su índice y el primer clip no elegido todavía cabe en su ventana (`p + m ≤ base + N`). Con esa comprobación siempre hay al menos una opción válida: tomar el primer clip pendiente.
+2. **Fila inicial**: se evalúan todos los subconjuntos de 1..`maxColumns` candidatos de la ventana, se reparten con `distributeWidths` y se elige el de menor puntuación. Un clip solo que no cabe ni con su mín. se pone a ancho completo con letterbox.
+3. **Evento** en `e` (fin del clip de la columna `c`; empates por posición visual):
+   1. **Sustitución directa**: el primer candidato en orden de la ventana cuyo intervalo admite el ancho de `c` (con la tolerancia `ASPECT_TOLERANCE`). Entra con `transitionIn` y no cambia el layout. Tiene prioridad absoluta, como piden los requisitos.
+   2. Si no hay ninguno, se puntúan y se elige la mejor de:
+      - **en su sitio con relleno**: un candidato en el ancho actual de `c`, con pillarbox o letterbox;
+      - **re-layout "sustituir"**: `c` recibe un candidato y, si caben, se añaden columnas nuevas a su derecha (todas las combinaciones de la ventana, lo que cubre las opciones a, b y d del diseño original);
+      - **re-layout "quitar"**: `c` desaparece y las demás se reparten el ancho (opción c).
 
-- Área de relleno (penalización fuerte).
-- Número de re-layouts.
-- Desviación respecto al orden de la lista.
-- Upscale > ×2.
-- Desviación de cada columna respecto a su `aPref`: mostrar menos de lo que el usuario marcó.
-- Número de columnas lejos de 2–3: ligera preferencia por el rango habitual.
+      El keyframe empieza cuando empieza el xfade del clip entrante en `c` (o `e − min(D, saliente/2)` si se quita) y dura lo mismo que ese xfade. Si el reparto deja todos los anchos iguales, no se genera keyframe.
+   3. **Eventos fusionados**: si hay re-layout, las columnas cuyo clip termina antes de `e + D` (o a la vez) se deciden en la misma opción: reciben su clip entrante (que empieza cuando le toca) y su ancho sale del mismo reparto. Así ninguna animación se solapa con otra. Solo pueden quedarse sin clip si con esa decisión se acaban los clips.
+   4. **Orden de inicio monótono**: el xfade se acorta si hace falta para que ningún clip empiece antes que el último elegido, y una opción se descarta si algún clip de la fila terminaría antes del último inicio. Así el orden de elección coincide con el de inicio. Un re-layout tampoco puede empezar antes de que acabe la animación anterior (se acorta su xfade o se descarta la opción).
+4. **Cola vacía**: las columnas se van quedando sin clip y su área es relleno; no hay más keyframes.
+
+**Poda y complejidad**: por evento se evalúan como mucho `SUBSET_BUDGET` = 1000 subconjuntos (la lista de candidatos se recorta, conservando los más antiguos, que son los que la ventana obliga a tomar). Cada evaluación cuesta `O(maxColumns)` más `distributeWidths`. Total `O(clips × 1000 × maxColumns)` en el peor caso; 200 clips con `maxColumns` = 6 y ventana 10 se planifican en unos 100 ms.
+
+### 3.4 Puntuación (menor es mejor; constantes en `planMix.ts`)
+
+| Término | Peso | Cálculo |
+|---|---|---|
+| Relleno de la fila | `FILL_WEIGHT` = 60 | fracción de `W` × segundos; se cuenta hasta que termina el primer clip que sigue en la fila, con un máximo de `ROW_FILL_SECONDS` = 5 s |
+| Pillarbox / letterbox de un clip | `FILL_WEIGHT` | área equivalente en ancho × duración del clip; letterbox suma además `LETTERBOX_WEIGHT` = 10 |
+| Re-layout | `RELAYOUT_WEIGHT` = 3 | por re-layout que cambia anchos |
+| Orden | `ORDER_WEIGHT` = 1 | por posición de desplazamiento de cada clip elegido |
+| Recorte respecto a `aPref` | `PREF_WEIGHT` = 4 | por columna, fracción del máx. que no se ve (`1 − min(a/aPref, aPref/a)`) |
+| Upscale > ×2 | `UPSCALE_WEIGHT` = 5 | por columna, por unidad de factor por encima de 2 (estimado con los rects) |
+| Columnas fuera de 2–3 | `COLUMN_COUNT_WEIGHT` = 0,5 | por columna de distancia |
+
+Escala orientativa: 1 % de relleno durante 5 s ≈ un re-layout ≈ 3 posiciones de desorden.
 
 ### 3.5 Aleatoriedad
 
-PRNG con semilla (p. ej. mulberry32) implementado en el módulo. No se usa `Math.random`. Así se preserva el determinismo y los tests son estables.
+`random.ts`: PRNG mulberry32 con semilla y barajado Fisher-Yates determinista (`getBaseOrder`). No se usa `Math.random`.
 
 ## 4. Render de vídeo con ffmpeg (provisional → ADR-001)
 

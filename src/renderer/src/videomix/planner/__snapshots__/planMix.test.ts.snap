@@ -1,0 +1,35 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`snapshots > flexible clips with a gap, 2 columns max 1`] = `
+"plan 1920x1080, 31.50s
+layout 0.00: c0=1920
+layout 11.00+0.50: c0=846 | c1=1066
+layout 20.50+0.50: fill=168 | c0=972 | c1=604 | fill=168
+c0: b 0.00-7.00 > d 6.50-11.50 > a 11.00-20.00 > c 19.50-31.50
+c1: f 11.00-21.00 > e 20.50-28.50
+warning: fill 336px @20.50"
+`;
+
+exports[`snapshots > mixed verticals and horizontals 1`] = `
+"plan 1920x1080, 44.00s
+layout 0.00: c0=608 | c1=608 | c2=704
+layout 13.50+0.50: c0=704 | c1=608 | c2=608
+layout 16.00+0.50: fill=116 | c0=1080 | c2=608 | fill=116
+layout 23.00+0.50: c0=1920
+c0: v1 0.00-12.00 > v5 11.50-18.50 > h1 18.00-28.00 > h2 27.50-38.50 > h3 38.00-44.00
+c1: v2 0.00-9.00 > v4 8.50-16.50
+c2: v3 0.00-14.00 > v6 13.50-23.50
+warning: fill 232px @16.00"
+`;
+
+exports[`snapshots > random order 1`] = `
+"plan 1920x1080, 35.00s
+layout 0.00: c0=1920
+layout 20.50+0.50: c0=656 | c1=608 | c2=656
+layout 25.00+0.50: fill=116 | c0=1080 | c1=608 | fill=116
+c0: c7 0.00-6.00 > c1 5.50-11.50 > c5 11.00-21.00 > c2 20.50-27.50 > c3 27.00-35.00
+c1: c0 20.50-25.50 > c4 25.00-34.00
+c2: c6 20.50-25.50
+warning: fill 232px @25.00
+warning: letterbox c3 @27.00"
+`;
