@@ -909,5 +909,16 @@
   "Fell back to default output file name": "Se ha vuelto al nombre de archivo de salida predeterminado",
   "\"{{property}}\" must be a number": "\"{{property}}\" debe ser un número",
   "\"{{property}}\" must be a string": "\"{{property}}\" debe ser una cadena",
-  "\"{{property}}\" must be an object of strings": "\"{{property}}\" debe ser un objeto de cadenas"
+  "\"{{property}}\" must be an object of strings": "\"{{property}}\" debe ser un objeto de cadenas",
+  "Add min": "Añadir mín.",
+  "Define a min rectangle: the area that must always be visible": "Definir un rectángulo mín.: la zona que siempre debe verse",
+  "Fill frame": "Rellenar fotograma",
+  "Free": "Libre",
+  "Horizontal": "Horizontal",
+  "Max": "Máx.",
+  "Max aspect ratio": "Proporción del máx.",
+  "Min": "Mín.",
+  "Min = Max": "Mín. = Máx.",
+  "Remove the min rectangle (min = max)": "Quitar el rectángulo mín. (mín. = máx.)",
+  "Vertical": "Vertical"
 }

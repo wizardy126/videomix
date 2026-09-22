@@ -31,6 +31,7 @@ import { UserSettingsContext, SegColorsContext, AppContext } from './contexts';
 
 import NoFileLoaded from './NoFileLoaded';
 import MediaSourcePlayer from './MediaSourcePlayer';
+import RectOverlayDemo from './videomix/components/RectOverlayDemo';
 import TopMenu from './TopMenu';
 import LastCommands from './LastCommands';
 import StreamsSelector from './StreamsSelector';
@@ -2589,6 +2590,9 @@ function App() {
                       </video>
 
                       {filePath != null && compatPlayerEnabled && <MediaSourcePlayer rotate={effectiveRotation} filePath={filePath} videoStream={activeVideoStream} audioStreams={activeAudioStreams} masterVideoRef={videoRef} mediaSourceQuality={mediaSourceQuality} ffmpegHwaccel={ffmpegHwaccel} />}
+
+                      {/* VideoMix T06: rect overlay harness (opt-in via localStorage), T07 wires the clip data */}
+                      {filePath != null && <RectOverlayDemo videoRef={videoRef} compatPlayerEnabled={compatPlayerEnabled} cssRotation={compatPlayerEnabled ? effectiveRotation : undefined} videoStream={activeVideoStream} manualRotation={isRotationSet} />}
                     </div>
 
                     {bigWaveformEnabled && <BigWaveform waveforms={waveforms} relevantTime={relevantTime} playing={playing} fileDurationNonZero={fileDurationNonZero} zoom={zoomUnrounded} seekRel={seekRel} darkMode={darkMode} />}

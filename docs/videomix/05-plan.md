@@ -30,7 +30,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T03 | Tipos, esquema `.vmx` y geometría | M1 | Opus | T01 | hecha |
 | T04 | Store del proyecto y persistencia | M1 | Opus | T03 | hecha |
 | T05 | Integración multi-fuente en la app | M2 | Opus | T04 | pendiente |
-| T06 | Overlay de rectángulos máx./mín. | M2 | Opus | T03 | pendiente |
+| T06 | Overlay de rectángulos máx./mín. | M2 | Opus | T03 | hecha |
 | T07 | Clips: creación, sincronización y lista | M2 | Opus | T05, T06 | pendiente |
 | T09 | Spike: estrategia de render ffmpeg (ADR-001) | M3 | Opus | T02 | pendiente |
 | T10 | Planificador de montaje | M3 | Opus | T03 | pendiente |
