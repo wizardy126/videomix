@@ -115,7 +115,16 @@ El planificador intenta evitar estos casos, pero el generador debe soportarlos.
 - **Reparto**: se parte de `aPref_i` y se reparte la diferencia `T − Σ aPref_i` (*water-filling*) proporcionalmente al margen disponible de cada clip hacia `aMax` o hacia `aMin`, saturando los que llegan al límite.
 - **Si `Σ aMax_i < T`**: cada clip toma `aMax_i` y el sobrante queda como relleno, repartido de forma centrada entre las columnas o en los extremos. Lo concreta el planificador.
 - **Si `Σ aMin_i > T`**: la combinación no es válida. El planificador no debe generarla; como último recurso aplica letterbox.
-- Los anchos finales se redondean a pares y se ajusta el último para que la suma cuadre exactamente.
+- Los anchos finales se redondean a pares y se ajusta el último para que la suma cuadre exactamente. *(Sustituido en T03 por el reparto de §2.4.)*
+
+### 2.4 Redondeo a pares (concretado en T03)
+
+- **Rectángulos normalizados**: todo el cálculo usa el máx. encogido a bordes pares y el mín. agrandado a bordes pares e intersecado con ese máx. (`normalizeClipRects`). Si los rectángulos ya son pares, no cambian; si no, el mín. puede perder 1 px donde toca un borde impar del máx. El intervalo `[aMin, aMax]` se calcula sobre estos rectángulos.
+- **Recorte**: `x`, `y`, ancho y alto siempre pares; el lado no limitado se redondea al par más cercano (error ≤ 1 px) y la posición se redondea dentro del intervalo par que garantiza `m ⊆ C ⊆ M`.
+- **Tolerancia**: si la proporción pedida se sale del intervalo menos de un 1 % (`ASPECT_TOLERANCE`), el resultado sigue siendo `fill` con el recorte del límite, estirado de forma imperceptible, en lugar de dejar una franja de relleno de 1–2 px.
+- **Reparto de anchos** en píxeles de salida: cada clip tiene límites pares `[ceilPar(aMin·H), floorPar(aMax·H)]` (`getWidthRange`); si el intervalo es tan estrecho que no contiene ningún par (p. ej. 9:16 rígido a 1080p = 607,5 px), se usa el par más cercano a `aPref·H`. El reparto proporcional al margen satura todos los clips a la vez, así que no hace falta iterar. Después se redondea en unidades de 2 px por **mayor resto**, respetando los límites, en vez de ajustar solo el último (que podría salirse de su intervalo).
+- **Escalado**: `factor = min(anchoCelda / C.w, H / C.h)` cubre los tres casos (`getScaleFactor`).
+- **Separación impar**: con un número impar de huecos entre columnas, el ancho útil es impar y queda 1 px de relleno; `validateMixProject` avisa (`odd-gap`).
 
 ## 3. Planificador de montaje (puro)
 

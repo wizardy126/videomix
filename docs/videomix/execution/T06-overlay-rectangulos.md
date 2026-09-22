@@ -24,7 +24,8 @@ Componente que dibuja y permite editar los rectángulos **máx.** y **mín.** de
    - máx. con borde sólido del color del clip y el exterior oscurecido (máscara);
    - mín. con borde discontinuo;
    - 8 tiradores por rectángulo y arrastre interior para mover;
-   - puntero y teclado: las flechas mueven 1 px y con Shift 10 px;
+   - puntero y teclado: las flechas mueven 2 px y con Shift 10 px;
+   - los rectángulos se ajustan siempre a valores pares (ver 04-diseno §2.4);
    - etiqueta con `w×h`, proporción y orientación;
    - props controladas `{ maxRect, minRect, onChange(transient), onCommit, aspectLock, videoSize, … }`;
    - no interfiere con el clic del vídeo fuera de los rectángulos, ni con la rueda (seek/zoom).

@@ -20,7 +20,7 @@ Diálogo para editar todos los `MixSettings` del proyecto.
    | Sección | Ajustes |
    |---|---|
    | Salida | resolución (720p / 1080p / 4K), fps, CRF (0–51, con explicación breve), preset |
-   | Composición | máximo de columnas (1–6), separación (px + color), relleno (desenfoque o color + color) |
+   | Composición | máximo de columnas (1–6), separación (px pares, paso 2, + color), relleno (desenfoque o color + color) |
    | Orden | lista o aleatorio, semilla con botón "Barajar de nuevo", ventana de reorden (0–10) |
    | Transición | tipo (lista de `TransitionType` con nombres legibles) y duración (0,1–2 s), fade in/out global |
    | Música | seleccionar o quitar fichero (diálogo con filtro de audio), volumen en dB (−30…+6) y "Repetir" |
