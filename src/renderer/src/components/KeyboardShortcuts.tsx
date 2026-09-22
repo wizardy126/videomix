@@ -179,6 +179,7 @@ const KeyboardShortcuts = memo(({
     const batchFilesCategory = t('Batch file list');
     const otherCategory = t('Other operations');
     const streamsCategory = t('Tracks');
+    const mixProjectCategory = t('Project');
 
     // eslint-disable-next-line no-shadow
     const actionsMap: ActionsMap = {
@@ -752,6 +753,28 @@ const KeyboardShortcuts = memo(({
       quit: {
         name: t('Quit LosslessCut'),
         category: otherCategory,
+      },
+
+      // VideoMix
+      newProject: {
+        name: t('New project'),
+        category: mixProjectCategory,
+      },
+      openProject: {
+        name: t('Open project'),
+        category: mixProjectCategory,
+      },
+      saveProject: {
+        name: t('Save project'),
+        category: mixProjectCategory,
+      },
+      saveProjectAs: {
+        name: t('Save project as'),
+        category: mixProjectCategory,
+      },
+      addSourcesDialog: {
+        name: t('Add videos'),
+        category: mixProjectCategory,
       },
     };
 

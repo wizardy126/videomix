@@ -109,6 +109,21 @@ export default function useMixProject() {
     setSavedProject(update(savedProjectRef.current));
   }, [setHistory, setSavedProject]);
 
+  /**
+   * Refresh the informative cache of a source (size, duration), e.g. from the probe done when it's activated (T05).
+   * Like the loudness cache: not an undo step and doesn't make the project dirty. Undefined values don't erase the cache.
+   */
+  const setSourceMeta = useCallback((sourceId: string, meta: Pick<MixSourceRelink, 'width' | 'height' | 'duration'>) => {
+    const definedMeta = Object.fromEntries(Object.entries(meta).filter(([, value]) => value != null)) as typeof meta;
+    const update = history.memoizeByRef((p: MixProject) => {
+      const source = p.sources.find((s) => s.id === sourceId);
+      if (source == null) return p;
+      return mixProjectReducer(p, { type: 'relinkSource', sourceId, source: { path: source.path, absolutePath: source.absolutePath, ...definedMeta } });
+    });
+    setHistory((h) => history.applyToAll(h, update));
+    setSavedProject(update(savedProjectRef.current));
+  }, [setHistory, setSavedProject]);
+
   // Recovery autosave: one file per session, written while dirty, removed when clean.
   // Operations are chained so a slow write can't land after a later delete.
   const recoveryDir = useMemo(() => getRecoveryDir(nodeDeps, remote.app.getPath('userData')), []);
@@ -250,6 +265,7 @@ export default function useMixProject() {
     reorderClips,
     updateSettings,
     setLoudnessCache,
+    setSourceMeta,
     userNewProject,
     userOpenProject,
     userSaveProject,

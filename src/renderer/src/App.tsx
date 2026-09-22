@@ -32,6 +32,10 @@ import { UserSettingsContext, SegColorsContext, AppContext } from './contexts';
 import NoFileLoaded from './NoFileLoaded';
 import MediaSourcePlayer from './MediaSourcePlayer';
 import RectOverlayDemo from './videomix/components/RectOverlayDemo';
+import SourceList from './videomix/components/SourceList';
+import useMixProject from './videomix/hooks/useMixProject';
+import useMixWorkspace from './videomix/hooks/useMixWorkspace';
+import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
 import TopMenu from './TopMenu';
 import LastCommands from './LastCommands';
 import StreamsSelector from './StreamsSelector';
@@ -198,6 +202,10 @@ function App() {
 
   const { withErrorHandling, handleError, genericError, setGenericError } = useErrorHandling();
 
+  // VideoMix project (sources, clips, settings). Its state lives in its own hook, so resetState() (which runs on
+  // every source switch) never touches it.
+  const mixProject = useMixProject();
+
   const { showGenericDialog, genericDialog, closeGenericDialog, confirmDialog, openExportFinishedDialog, openCutFinishedDialog, openConcatFinishedDialog, openCleanupFilesDialog, openShiftSegmentsDialog, openDecimateDialog } = useDialog();
 
   // Note that each action may be multiple key bindings and this will only be the first binding for each action
@@ -213,7 +221,8 @@ function App() {
   const zoomedDuration = isDurationValid(fileDuration) ? fileDuration / zoom : undefined;
   const zoomWindowEndTime = useMemo(() => (zoomedDuration != null ? zoomWindowStartTime + zoomedDuration : undefined), [zoomedDuration, zoomWindowStartTime]);
 
-  useEffect(() => setDocumentTitle({ filePath, working: working?.text, progress }), [progress, filePath, working?.text]);
+  const mixProjectTitle = videoMixMode ? getMixProjectTitle({ projectPath: mixProject.projectPath, dirty: mixProject.dirty, untitledName: t('Untitled project') }) : undefined;
+  useEffect(() => setDocumentTitle({ filePath, working: working?.text, progress, projectTitle: mixProjectTitle }), [progress, filePath, working?.text, mixProjectTitle]);
 
   useEffect(() => {
     mainApi.setProgressBar(progress ?? -1);
@@ -356,7 +365,7 @@ function App() {
     cutSegments, cutSegmentsHistory, createSegmentsFromKeyframes, shuffleSegments, detectBlackScenes, detectSilentScenes, detectSceneChanges, removeSegment, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, modifySelectedSegmentTimes, alignSegmentTimesToKeyframes, updateSegOrder, updateSegOrders, reorderSegsByStartTime, addSegment, setCutStart, setCutEnd, labelSegment, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, createNumSegments, createFixedDurationSegments, createFixedByteSizedSegments, createRandomSegments, getSegEstimatedSize, haveInvalidSegs, currentSegIndexSafe, currentCutSeg, inverseCutSegments, clearSegments, clearSegColorCounter, loadCutSegments, setCutTime, setCurrentSegIndex, labelSelectedSegments, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, selectSegmentsByLabel, selectSegmentsByExpr, selectAllMarkers, mutateSegmentsByExpr, toggleSegmentSelected, selectOnlySegment, selectedSegments, segmentsOrInverse, segmentsToExport, duplicateCurrentSegment, duplicateSegment, updateSegAtIndex, findSegmentsAtCursor, maybeCreateFullLengthSegment, currentCutSegOrWholeTimeline, segColorCounter,
   } = useSegments({ filePath, workingRef, setWorking, setProgress, videoStream: activeVideoStream, fileDuration, getRelevantTime, maxLabelLength, checkFileOpened, invertCutSegments, segmentsToChaptersOnly, timecodePlaceholder, parseTimecode, appendFfmpegCommandLog, fileDurationNonZero, mainFileMeta: mainFileMeta?.ffprobeMeta, seekAbs, activeVideoStreamIndex, activeAudioStreamIndexes, handleError, showGenericDialog, simpleMode, ffmpegHwaccel });
 
-  const { getEdlFilePath, projectFileSavePath, getProjectFileSavePath } = useSegmentsAutoSave({ autoSaveProjectFile, storeProjectInWorkingDir, filePath, customOutDir, cutSegments });
+  const { getEdlFilePath, projectFileSavePath, getProjectFileSavePath } = useSegmentsAutoSave({ autoSaveProjectFile: autoSaveProjectFile && !videoMixMode /* VideoMix: no *-proj.llc files, the project is the .vmx */, storeProjectInWorkingDir, filePath, customOutDir, cutSegments });
 
   const { nonCopiedExtraStreams, exportExtraStreams, mainCopiedThumbnailStreams, numStreamsToCopy, toggleStripVideo, toggleStripAudio, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, copyStreamIdsByFile, setCopyStreamIdsByFile, copyFileStreams, mainCopiedStreams, setCopyStreamIdsForPath, toggleCopyStreamId, isCopyingStreamId, toggleCopyStreamIds, changeEnabledStreamsFilter, applyEnabledStreamsFilter, enabledStreamsFilter, toggleCopyAllStreamsForPath } = useStreamsMeta({ mainStreams, externalFilesMeta, filePath, autoExportExtraStreams, showGenericDialog });
 
@@ -1512,11 +1521,14 @@ function App() {
         await html5ifyAndLoadWithPreferences(cod, fp, 'fastest', firstVideoStream != null, firstAudioStream != null);
       }
 
-      // eslint-disable-next-line unicorn/prefer-ternary
-      if (projectPath) {
-        await loadEdlFile({ path: projectPath, type: 'llc' });
-      } else {
-        await tryFindAndLoadProjectFile({ chapters: ffprobeMeta.chapters, cod });
+      // VideoMix: the clips of a source come from the .vmx project, so don't load a LosslessCut .llc project or import chapters as segments
+      if (!videoMixMode) {
+        // eslint-disable-next-line unicorn/prefer-ternary
+        if (projectPath) {
+          await loadEdlFile({ path: projectPath, type: 'llc' });
+        } else {
+          await tryFindAndLoadProjectFile({ chapters: ffprobeMeta.chapters, cod });
+        }
       }
 
       // throw new Error('test');
@@ -1562,6 +1574,14 @@ function App() {
       throw err;
     }
   }, [storeProjectInWorkingDir, setWorking, loadEdlFile, getEdlFilePath, enableImportChapters, ensureAccessToSourceDir, loadCutSegments, autoLoadTimecode, enableNativeHevc, ensureWritableOutDir, customOutDir, resetState, clearSegColorCounter, setCopyStreamIdsForPath, setDetectedFileFormat, outFormatLocked, setUsingDummyVideo, setPreviewFilePath, html5ifyAndLoadWithPreferences, setFileFormat, showNotification, showPreviewFileLoadedMessage, showNotNativelySupportedMessage]);
+
+  const closeMedia = useCallback(() => {
+    resetState();
+    clearSegments();
+  }, [clearSegments, resetState]);
+
+  // VideoMix: active source, project menu flows and startup recovery (loads sources with loadMedia, keeps the project)
+  const mixWorkspace = useMixWorkspace({ mixProject, filePath, ffprobeMeta: mainFileMeta?.ffprobeMeta, loadMedia, closeMedia, workingRef, setWorking, withErrorHandling, confirmDialog });
 
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);
@@ -1859,6 +1879,13 @@ function App() {
         }
       }
 
+      // VideoMix: videos are added as sources of the project (without asking for an open action), a .vmx opens the project
+      // and an audio file is offered as the project music
+      if (videoMixMode) {
+        await mixWorkspace.openFiles(newFilePaths);
+        return;
+      }
+
       if (newFilePaths.length > 1 && alwaysConcatMultipleFiles) {
         batchLoadPaths(newFilePaths);
         setConcatDialogOpen(true);
@@ -1946,7 +1973,7 @@ function App() {
         setWorking(undefined);
       }
     }, i18n.t('Failed to open file'));
-  }, [withErrorHandling, alwaysConcatMultipleFiles, workingRef, batchLoadPaths, setWorking, isFileOpened, batchFiles.length, enableAskForFileOpenAction, checkFileOpened, loadEdlFile, userOpenSingleFile, addStreamSourceFile, filePath]);
+  }, [withErrorHandling, alwaysConcatMultipleFiles, workingRef, batchLoadPaths, setWorking, isFileOpened, batchFiles.length, enableAskForFileOpenAction, checkFileOpened, loadEdlFile, userOpenSingleFile, addStreamSourceFile, filePath, mixWorkspace]);
 
   const openFilesDialog = useCallback(async () => {
     // On Windows and Linux an open dialog can not be both a file selector and a directory selector, so if you set `properties` to `['openFile', 'openDirectory']` on these platforms, a directory selector will be shown. #1995
@@ -2198,10 +2225,17 @@ function App() {
       // also called from menu (note: no longer a toggle. Esc must be used to close it because it's a dialog now):
       toggleKeyboardShortcuts,
       generateOverviewWaveform,
+
+      // VideoMix project (menu "Project" and keyboard):
+      newProject: () => { mixWorkspace.userNewProject(); },
+      openProject: () => { mixWorkspace.userOpenProject(); },
+      saveProject: () => { mixWorkspace.userSaveProject(); },
+      saveProjectAs: () => { mixWorkspace.userSaveProject({ saveAs: true }); },
+      addSourcesDialog: () => { mixWorkspace.userAddSourcesDialog(); },
     };
 
     return ret;
-  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState]);
+  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState]);
 
   const getKeyboardAction = useCallback((action: MainKeyboardAction) => mainActions[action], [mainActions]);
 
@@ -2231,8 +2265,9 @@ function App() {
   }, []);
 
   useEffect(() => {
-    ipcRenderer.send('setAskBeforeClose', askBeforeClose && isFileOpened);
-  }, [askBeforeClose, isFileOpened]);
+    // VideoMix: also confirm quitting with unsaved project changes (they would only survive in the recovery file)
+    ipcRenderer.send('setAskBeforeClose', (askBeforeClose && isFileOpened) || mixProject.dirty);
+  }, [askBeforeClose, isFileOpened, mixProject.dirty]);
 
   const extractSingleStream = useCallback(async (index: number) => {
     if (!filePath) return;
@@ -2502,6 +2537,13 @@ function App() {
     updateKeyboardLayout,
   }), [confirmDialog, handleError, keyboardLayoutMap, setWorking, showGenericDialog, updateKeyboardLayout, working]);
 
+  const handleSourcesDrop = useCallback<DragEventHandler<HTMLDivElement>>(async (ev) => {
+    ev.preventDefault();
+    const filePaths = [...ev.dataTransfer.files].map((f) => webUtils.getPathForFile(f));
+    await mainApi.focusWindow();
+    await userOpenFiles(filePaths);
+  }, [userOpenFiles]);
+
 
   const showLeftBar = batchFiles.length > 0;
 
@@ -2545,8 +2587,23 @@ function App() {
                 />
 
                 <div style={{ flexGrow: 1, display: 'flex', overflowY: 'hidden' }}>
+                  {/* VideoMix: the project's sources replace the batch list */}
+                  {videoMixMode && (
+                    <SourceList
+                      width={leftBarWidth}
+                      sources={mixProject.project.sources}
+                      currentSourceId={mixWorkspace.currentSourceId}
+                      missingSourceIds={mixWorkspace.missingSourceIds}
+                      clipCountBySource={mixWorkspace.clipCountBySource}
+                      onActivate={mixWorkspace.userActivateSource}
+                      onRemove={mixWorkspace.userRemoveSource}
+                      onLocate={mixWorkspace.userLocateSource}
+                      onAdd={mixWorkspace.userAddSourcesDialog}
+                      onDrop={handleSourcesDrop}
+                    />
+                  )}
                   <AnimatePresence>
-                    {showLeftBar && (
+                    {!videoMixMode && showLeftBar && (
                       <BatchFilesList
                         selectedBatchFiles={selectedBatchFiles}
                         filePath={filePath}

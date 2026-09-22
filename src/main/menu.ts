@@ -235,6 +235,45 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
       ],
     },
 
+    // VideoMix project. No accelerators: Ctrl/Cmd+S and Ctrl/Cmd+Shift+S are (rebindable) key bindings handled in the renderer,
+    // an accelerator here could trigger the action a second time.
+    {
+      label: esc(t('Project')),
+      submenu: [
+        {
+          label: esc(t('New project')),
+          click() {
+            mainWindow.webContents.send('newProject');
+          },
+        },
+        {
+          label: esc(t('Open project...')),
+          click() {
+            mainWindow.webContents.send('openProject');
+          },
+        },
+        {
+          label: esc(t('Save project')),
+          click() {
+            mainWindow.webContents.send('saveProject');
+          },
+        },
+        {
+          label: esc(t('Save project as...')),
+          click() {
+            mainWindow.webContents.send('saveProjectAs');
+          },
+        },
+        { type: 'separator' },
+        {
+          label: esc(t('Add videos...')),
+          click() {
+            mainWindow.webContents.send('addSourcesDialog');
+          },
+        },
+      ],
+    },
+
     {
       label: esc(t('Edit')),
       submenu: [

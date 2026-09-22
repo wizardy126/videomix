@@ -350,15 +350,21 @@ export function checkFileSizes(inputSize: number, outputSize: number) {
   return undefined;
 }
 
-export function setDocumentTitle({ filePath, working, progress }: {
+export function setDocumentTitle({ filePath, working, progress, projectTitle }: {
   filePath?: string | undefined,
   working?: string | undefined,
-  progress?: number | undefined }) {
+  progress?: number | undefined,
+  /** VideoMix: project name (with `*` if unsaved), shown before the active source */
+  projectTitle?: string | undefined }) {
   const parts: string[] = [];
 
   if (working) {
     if (progress != null) parts.push(`${(progress * 100).toFixed(1)}%`);
     parts.push(working);
+  }
+
+  if (projectTitle) {
+    parts.push(projectTitle);
   }
 
   if (filePath) {

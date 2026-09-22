@@ -19,3 +19,29 @@ export async function askForUnsavedChanges(): Promise<UnsavedChangesResponse> {
   if (isDenied) return 'discard';
   return 'cancel';
 }
+
+export type RecoverProjectResponse = 'restore' | 'discard' | 'later';
+
+/** Offered at startup for each recovery file left by a previous session (e.g. after a crash). */
+export async function askForRecoverProject({ projectName, savedAt, numSources, numClips }: {
+  projectName: string,
+  savedAt: number,
+  numSources: number,
+  numClips: number,
+}): Promise<RecoverProjectResponse> {
+  const { isConfirmed, isDenied } = await getSwal().Swal.fire({
+    icon: 'question',
+    title: i18n.t('Restore unsaved project?'),
+    text: i18n.t('A previous session left unsaved changes in project "{{projectName}}" ({{numSources}} sources, {{numClips}} clips, {{date}}). Do you want to restore them?', {
+      projectName, numSources, numClips, date: new Date(savedAt).toLocaleString(),
+    }),
+    showDenyButton: true,
+    showCancelButton: true,
+    confirmButtonText: i18n.t('Restore'),
+    denyButtonText: i18n.t('Discard'),
+    cancelButtonText: i18n.t('Later'),
+  });
+  if (isConfirmed) return 'restore';
+  if (isDenied) return 'discard';
+  return 'later';
+}

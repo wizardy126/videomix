@@ -93,6 +93,13 @@ const defaultKeyBindings: KeyBinding[] = [
   { keys: 'AltLeft+ArrowUp', action: 'increaseVolume' },
   { keys: 'AltLeft+ArrowDown', action: 'decreaseVolume' },
   { keys: 'KeyM', action: 'toggleMuted' },
+
+  // VideoMix project. No other binding or menu accelerator uses KeyS, so Ctrl/Cmd+S and Ctrl/Cmd+Shift+S are free.
+  // Bound here (not as menu accelerators) like undo/redo, so they can be rebound and don't fire twice.
+  { keys: 'ControlLeft+KeyS', action: 'saveProject' },
+  { keys: 'MetaLeft+KeyS', action: 'saveProject' },
+  { keys: 'ControlLeft+ShiftLeft+KeyS', action: 'saveProjectAs' },
+  { keys: 'MetaLeft+ShiftLeft+KeyS', action: 'saveProjectAs' },
 ];
 
 const defaults: Config = {
