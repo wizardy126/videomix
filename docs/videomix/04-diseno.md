@@ -292,7 +292,7 @@ La vista **Timeline del montaje** (plan) es una pestaña o panel alternativo al 
   Hay que aislarlo con un flag o parámetro mínimo en los puntos de `App.tsx` afectados.
 - **Añadir ficheros** (arrastrar o diálogo) los añade como fuentes; no los abre como fichero único.
 - **Guardar / Abrir** `.vmx` con los diálogos de remote (patrón de `edlStore.ts`).
-- **Recuperación**: autoguardado con debounce en `userData/videomix-recovery/<id>.vmx`. Al arrancar, si existe uno más reciente que el guardado, se ofrece recuperarlo.
+- **Recuperación**: autoguardado con debounce en `userData/videomix-recovery/<sessionId>.vmx-recovery` (ver T04). Al arrancar, si existe uno más reciente que el guardado, se ofrece recuperarlo.
 - **Fuentes que faltan**: se prueba la ruta relativa, luego la absoluta y, si ninguna existe, se pide al usuario que la localice.
 
 ### 6.3 Clips ↔ segmentos (recomendación; lo concreta T07)
