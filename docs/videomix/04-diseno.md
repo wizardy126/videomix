@@ -242,7 +242,7 @@ El **spike T09** decidirá la estrategia concreta y la documentará en `decision
 1. **Por clip**:
    - `atrim` o `-ss/-t`;
    - `aresample=48000`, `aformat=channel_layouts=stereo`, reutilizando `getFixChannelLayoutFilter` para layouts raros;
-   - `volume=<gananciaNormalización + gainDb>dB`, con `gananciaNormalización = objetivo − input_i`: la segunda pasada es una ganancia lineal y estática, y evita el bombeo;
+   - `volume=<gananciaNormalización + gainDb>dB`, con `gananciaNormalización = objetivo − input_i` (objetivo **−16 LUFS**): la segunda pasada es una ganancia lineal y estática, y evita el bombeo;
    - `afade=t=in:d=D` y `afade=t=out:st=dur−D:d=D`;
    - `adelay` hasta su `startTime`.
 2. **Suma**: `amix=inputs=N:normalize=0:duration=longest`.

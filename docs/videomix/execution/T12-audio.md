@@ -29,7 +29,7 @@
    - compensación de simultaneidad (documenta la elección);
    - música: loop opcional, volumen, recorte y fade-out final;
    - `alimiter` y fade in/out global si `fadeInOut`;
-   - **objetivo de sonoridad** como constante documentada (p. ej. −16 LUFS para contenido web o −23 LUFS para broadcast). **Pregunta abierta**: registrarla en las notas; se usa −16 por defecto salvo indicación del usuario.
+   - **objetivo de sonoridad: −16 LUFS** (decidido por el usuario), como constante documentada.
 4. **Tests**:
    - snapshots del grafo de audio (con y sin música, clips sin audio, clips muteados);
    - test de integración opcional con ffmpeg real: mezclar dos medios de T02 con volúmenes distintos y comprobar que la sonoridad integrada de cada tramo queda dentro de ±2 LU del objetivo.
