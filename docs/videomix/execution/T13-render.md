@@ -30,7 +30,8 @@ Conectar proyecto → plan → análisis de audio → render en la app, con prog
    - `userPreviewMix()`: igual pero a 640×360, preset `ultrafast`, CRF alto y en un directorio temporal. Muestra el resultado en un diálogo con un `<video>` y botón de cerrar.
    - Los avisos del plan (upscale > ×2, relleno) se muestran antes de renderizar, con opción de continuar.
 2. Si la ejecución por bloques necesita funciones nuevas en main (p. ej. un directorio temporal o concat con lista), añádelas en `src/main/videomix/`.
-3. **Menú Project**: Preview y Render, y botones en la UI (BottomBar o TopMenu, sustituyendo al botón Export de LosslessCut en el layout VideoMix).
+3. **Montar `MixSettingsDialog`** (T14, ver sus notas): menú Project → "Mix settings…" y botón en la UI.
+4. **Menú Project**: Preview y Render, y botones en la UI (BottomBar o TopMenu, sustituyendo al botón Export de LosslessCut en el layout VideoMix).
 
 ## Fuera de alcance
 
