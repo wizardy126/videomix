@@ -1,9 +1,9 @@
 {
-  "name": "lossless-cut",
-  "productName": "LosslessCut",
-  "description": "The swiss army knife of lossless video/audio editing",
+  "name": "videomix",
+  "productName": "VideoMix",
+  "description": "Compose videos from clips of multiple videos",
   "copyright": "Copyright © 2026 ${author}",
-  "version": "3.69.0",
+  "version": "0.1.0",
   "main": "./out/main/index.js",
   "homepage": "./",
   "type": "module",
@@ -41,7 +41,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/mifi/lossless-cut.git"
+    "url": "https://github.com/wizardy126/videomix"
   },
   "license": "GPL-2.0-only",
   "devDependencies": {
@@ -181,7 +181,7 @@
       "enableEmbeddedAsarIntegrityValidation": true,
       "onlyLoadAppFromAsar": true
     },
-    "appId": "no.mifi.losslesscut",
+    "appId": "net.wizardy.videomix",
     "artifactName": "${productName}-${os}-${arch}.${ext}",
     "extraResources": [
       {
@@ -192,7 +192,7 @@
     "mac": {
       "hardenedRuntime": true,
       "notarize": true,
-      "appId": "no.mifi.losslesscut-mac",
+      "appId": "net.wizardy.videomix-mac",
       "category": "public.app-category.productivity",
       "target": [
         {
@@ -451,13 +451,13 @@
     },
     "appx": {
       "artifactName": "${productName}-${os}-${arch}-DONT-USE-THIS-FILE.${ext}",
-      "applicationId": "LosslessCut",
-      "identityName": "57275mifi.no.LosslessCut",
-      "publisher": "CN=2C479316-22A8-4D63-BC38-F0FB9AB0B974",
-      "publisherDisplayName": "mifi.no"
+      "applicationId": "VideoMix",
+      "identityName": "wizardy126.videomix",
+      "publisher": "CN=wizardy126.videomix",
+      "publisherDisplayName": "wizardy126"
     },
     "linux": {
-      "executableName": "losslesscut",
+      "executableName": "videomix",
       "extraResources": [
         {
           "from": "ffmpeg/linux-${arch}/lib",

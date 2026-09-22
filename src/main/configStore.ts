@@ -155,7 +155,9 @@ const defaults: Config = {
   captureFrameQuality: 0.95,
   captureFrameFileNameFormat: 'timestamp',
   enableNativeHevc: true,
-  enableUpdateCheck: true,
+  // Disabled by default: the upstream update checker queries mifi's LosslessCut releases, which is not
+  // meaningful for VideoMix. See docs/videomix/execution/T01-rebranding.md.
+  enableUpdateCheck: false,
   cleanupChoices: {
     trashTmpFiles: true, askForCleanup: true, closeFile: true, cleanupAfterExport: false,
   },

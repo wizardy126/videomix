@@ -501,7 +501,7 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
         },
         ...(process.platform !== 'darwin' ? [{
           role: 'about' as const,
-          label: esc(t('About LosslessCut')),
+          label: esc(t('About VideoMix')),
         }] : []),
       ],
     },

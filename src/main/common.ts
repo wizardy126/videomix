@@ -1,2 +1,2 @@
-export const appName = 'LosslessCut';
+export const appName = 'VideoMix';
 export const copyrightYear = 2026;

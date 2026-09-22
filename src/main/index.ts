@@ -253,7 +253,7 @@ function openFilesEventually(paths: string[]) {
 // https://github.com/mifi/lossless-cut/issues/591
 function parseCliArgs(rawArgv = process.argv) {
   const ignoreFirstArgs = process.defaultApp ? 2 : 1;
-  // production: First arg is the LosslessCut executable
+  // production: First arg is the VideoMix executable
   // dev: First 2 args are electron and the index.js
   const argsWithoutAppName = rawArgv.length > ignoreFirstArgs ? rawArgv.slice(ignoreFirstArgs) : [];
 
@@ -290,7 +290,7 @@ const readyPromise = app.whenReady();
 
 async function init() {
   try {
-    logger.info('LosslessCut version', app.getVersion(), { isDev });
+    logger.info('VideoMix version', app.getVersion(), { isDev });
     await configStore.init({ customConfigDir: argv['configDir'] });
     logger.info('Initialized config store');
 
@@ -342,7 +342,7 @@ async function init() {
       if (filesToOpen.length > 0) openFiles(filesToOpen);
     });
 
-    // Mac OS open with LosslessCut
+    // Mac OS open with VideoMix
     // Emitted when the user wants to open a file with the application. The open-file event is usually emitted when the application is already open and the OS wants to reuse the application to open the file.
     app.on('open-file', (event, path) => {
       openFilesEventually([path]);

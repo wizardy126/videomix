@@ -26,7 +26,7 @@ const safeLicenses: Record<string, true | string[]> = {
 
   // Copyleft licenses: These require that derivative works be distributed under the same license terms. They ensure that modifications remain open source.
   // which is OK because LosslessCut is also GPL-2.0-only
-  'GPL-2.0-only': ['lossless-cut'],
+  'GPL-2.0-only': ['videomix'],
   // Weak copyleft licenses: These allow linking with proprietary software under certain conditions, making them more flexible than strong copyleft licenses.
   'LGPL-3.0-only': true,
   'LGPL-3.0-or-later': true,

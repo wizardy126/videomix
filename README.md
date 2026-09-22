@@ -1,3 +1,9 @@
+# VideoMix
+
+VideoMix is a fork of [LosslessCut](https://github.com/mifi/lossless-cut) that composes a final video from clips of multiple source videos. See [docs/videomix/README.md](docs/videomix/README.md) for the VideoMix documentation.
+
+## Original LosslessCut README
+
 <div align="center">
 	<br>
   <p><a href="https://losslesscut.app/"><img src="src/renderer/src/icon.svg" width="120" alt="LosslessCut" /></a></p>
