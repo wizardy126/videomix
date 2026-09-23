@@ -4,6 +4,7 @@ import {
   applyOverlayBoxDrag,
   getAnchorOfKind,
   getImageBox,
+  refitImageOverlayBox,
   getOverlayFrameBoxes,
   getOverlayLane,
   getOverlayMovePatch,
@@ -153,6 +154,21 @@ describe('mini frame', () => {
     expect(tall.height).toBe(1);
     expect(tall.y).toBe(0);
     expect(tall.width * 1920).toBeCloseTo(108);
+  });
+
+  test('refitImageOverlayBox keeps the image proportion and the box center after an aspect change', () => {
+    const box = { x: 0.2, y: 0.4, width: 0.4, height: 0.1 };
+    const refitted = refitImageOverlayBox(box, { width: 400, height: 200 }, { width: 1080, height: 1920 });
+    expect(refitted.width).toBeCloseTo(0.4);
+    expect(refitted.height).toBeCloseTo((0.4 * 1080 * 200) / (400 * 1920));
+    expect(refitted.x + refitted.width / 2).toBeCloseTo(box.x + box.width / 2);
+    expect(refitted.y + refitted.height / 2).toBeCloseTo(box.y + box.height / 2);
+    // too tall for the new frame: scaled down, still centered
+    const tall = refitImageOverlayBox({ x: 0.1, y: 0.1, width: 0.5, height: 0.05 }, { width: 100, height: 1000 }, { width: 1920, height: 1080 });
+    expect(tall.height).toBeCloseTo(1);
+    expect(tall.y + tall.height / 2).toBeCloseTo(0.125);
+    // invalid input: box unchanged
+    expect(refitImageOverlayBox(box, { width: 0, height: 200 }, { width: 1080, height: 1920 })).toBe(box);
   });
 });
 

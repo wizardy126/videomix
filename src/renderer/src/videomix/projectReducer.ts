@@ -1,9 +1,12 @@
 import isEqual from 'lodash/isEqual';
 
 import type { LoudnessMeasurement, MixClip, MixMusicPlaylist, MixMusicTrack, MixOverlay, MixProject, MixSettings, MixSource } from './types';
+import { getOutputSize } from './types';
 import { detachOverlayReferences } from './overlays/anchors';
 import type { OverlayTimeRange } from './overlays/anchors';
 import { isVisualOverlay } from './overlays/factories';
+import { refitImageOverlayBox } from './overlayTimeline';
+import type { Size } from './overlayMath';
 
 /** Fields of a clip that can be edited after creation. */
 export type MixClipPatch = Partial<Omit<MixClip, 'id' | 'sourceId'>>;
@@ -55,7 +58,13 @@ export type MixProjectAction =
   | { type: 'groupClips', clipIds: string[], groupId: string }
   /** The clips leave their groups; a group left with a single clip is dissolved. */
   | { type: 'ungroupClips', clipIds: string[] }
-  | { type: 'updateSettings', patch: Partial<MixSettings> }
+  /**
+   * `imageSizes` (T34, pending from T29): pixel size of each image overlay whose file could be read, keyed by overlay id.
+   * When `patch.output` changes the aspect, the boxes of the image overlays present in this map are refit to keep the
+   * image's proportion on the new frame, centered on their previous box (see `refitImageOverlayBox`); overlays missing
+   * from the map (their file couldn't be read) keep their box unchanged.
+   */
+  | { type: 'updateSettings', patch: Partial<MixSettings>, imageSizes?: ReadonlyMap<string, Size> }
   /** Music playlist (C2). Inserted at `index`, or appended. */
   | { type: 'addMusicTracks', tracks: MixMusicTrack[], index?: number | undefined }
   | { type: 'updateMusicTrack', trackId: string, patch: MixMusicTrackPatch }
@@ -208,7 +217,18 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
 
     case 'updateSettings': {
       if (!hasChanges(project.settings, action.patch)) return project;
-      return { ...project, settings: { ...project.settings, ...action.patch } };
+      const settings = { ...project.settings, ...action.patch };
+      // Pending from T29: refit image overlays to the new frame's proportion when the output aspect changes
+      const aspectChanged = action.patch.output != null && action.patch.output.aspect !== project.settings.output.aspect;
+      if (!aspectChanged || action.imageSizes == null || action.imageSizes.size === 0) return { ...project, settings };
+      const frame = getOutputSize(settings.output);
+      const overlays = project.overlays.map((overlay) => {
+        if (overlay.type !== 'image') return overlay;
+        const imageSize = action.imageSizes?.get(overlay.id);
+        if (imageSize == null) return overlay;
+        return { ...overlay, box: refitImageOverlayBox(overlay.box, imageSize, frame) };
+      });
+      return { ...project, settings, overlays };
     }
 
     case 'addMusicTracks': {

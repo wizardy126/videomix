@@ -1,10 +1,10 @@
 # Manual de usuario de VideoMix
 
-VideoMix crea un vídeo final 16:9 combinando fragmentos ("clips") de varios vídeos, mostrados uno junto a otro en columnas. Este manual cubre el flujo completo: crear un proyecto, añadir fuentes, definir clips, ajustar el montaje, añadir elementos superpuestos (imágenes, cuentas atrás, barras y sonidos), previsualizar, renderizar y la música de fondo.
+VideoMix crea un vídeo final combinando fragmentos ("clips") de varios vídeos, mostrados uno junto a otro en columnas (o en filas, en salida vertical). Este manual cubre el flujo completo: crear un proyecto, añadir fuentes, definir clips, ajustar el montaje (incluida la salida vertical o cuadrada y los codificadores por hardware), añadir elementos superpuestos (imágenes, textos, cuentas atrás, barras y sonidos) con miniaturas y estilos guardados, la música de fondo con lista de reproducción y *ducking*, fijar y agrupar clips, previsualizar en vivo, previsualizar por render y renderizar.
 
 ## 1. Crear un proyecto
 
-Al abrir VideoMix se crea automáticamente un proyecto sin título ("Proyecto sin título"). Un proyecto se guarda en un fichero `.vmx` (JSON) que contiene las fuentes, los clips y los ajustes de montaje.
+Al abrir VideoMix se crea automáticamente un proyecto sin título ("Proyecto sin título"). Un proyecto se guarda en un fichero `.vmx` (JSON5, es decir JSON algo más permisivo: admite claves sin comillas) que contiene las fuentes, los clips y los ajustes de montaje.
 
 Menú **Proyecto**:
 
@@ -77,17 +77,26 @@ El montaje elige, para cada clip y cada columna, un recorte que respeta el míni
 
 ### La lista de clips
 
-El panel derecho lista **todos** los clips del proyecto, de cualquier fuente, en el orden en que se montarán (reordenable arrastrando el asa `⋮⋮`). Por cada clip se puede:
+El panel derecho lista **todos** los clips del proyecto, de cualquier fuente, en el orden en que se montarán (reordenable arrastrando el asa `⋮⋮`), con una **miniatura** del fotograma de inicio ya recortado a su rectángulo máximo. Por cada clip se puede:
 
 - cambiar su **nombre** (clic sobre el nombre, escribe y pulsa Intro);
 - cambiar su **color** (clic en el número de la fila);
 - **silenciar** su audio o ajustar su **ganancia** (−20…+20 dB);
 - ver su **duración** y avisos (clip muy corto, sin mínimo definido, etc.);
-- con el menú contextual (clic derecho): duplicar, eliminar o ir a su fuente.
+- con el menú contextual (clic derecho): duplicar, eliminar, ir a su fuente, **fijar** o **agrupar** (ver más abajo).
 
 Al hacer clic en un clip de otra fuente, esa fuente se activa automáticamente y el reproductor salta a su inicio.
 
 Deshacer/rehacer (`Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z`) cubre todas las ediciones del proyecto: fuentes, clips, rectángulos y ajustes.
+
+### Fijar y agrupar clips
+
+Con el menú contextual de un clip (clic derecho, en la lista o en la pestaña **Montaje**):
+
+- **Fijar aquí (m:ss)**: el clip empieza obligatoriamente en el instante del cursor de la vista Montaje en el vídeo final; el planificador puede desplazarlo un poco si no hay sitio (se avisa antes de renderizar) pero nunca lo adelanta. **Quitar fijación** lo libera.
+- Con **varios clips seleccionados** (Ctrl/Cmd-clic para añadir uno a la selección, Mayús-clic para seleccionar un rango): **Agrupar seleccionados** los une para que empiecen siempre juntos (con el menor instante fijado de sus miembros, si alguno está fijado); **Desagrupar** deshace el grupo. Un grupo se pinta con una franja de color propia en la lista y en la vista Montaje.
+
+Un clip fijado o agrupado se distingue por el icono de chincheta (con el instante en el *tooltip*) y, si está agrupado, por el borde/franja del color del grupo. Arrastrar un bloque en la vista **Montaje** (§6) lo fija en su nuevo instante al soltarlo.
 
 ## 4. Orden de los clips
 
@@ -99,23 +108,45 @@ Se abren con **Proyecto → Ajustes de montaje...** (`Ctrl/Cmd+Shift+M`) o el bo
 
 | Sección | Ajustes |
 |---|---|
-| **Salida** | resolución (720p / 1080p / 4K), fotogramas por segundo, calidad (CRF) y preset de velocidad de codificación |
-| **Composición** | máximo de columnas visibles (1–6), separación entre columnas en px (y su color), relleno del hueco (desenfoque o color sólido) |
+| **Salida** | **proporción** (16:9 horizontal con clips lado a lado, 9:16 vertical con clips apilados, 1:1 cuadrado — el montaje elige lado a lado o apilados, lo que mejor encaje), resolución (lado corto: 720p / 1080p / 4K), fotogramas por segundo, calidad (CRF), preset de velocidad, **códec de vídeo** (H.264 / H.265-HEVC) y **codificador** (Automático, Solo software, o uno de hardware — NVIDIA NVENC, Intel Quick Sync, Apple VideoToolbox, VAAPI — marcado como detectado o no según el equipo) |
+| **Composición** | máximo de columnas o filas visibles (1–6, según la proporción), separación entre columnas o filas en px (y su color), relleno del hueco (desenfoque o color sólido) |
 | **Orden** | orden de la lista o aleatorio (con semilla y "barajar de nuevo"), ventana de reordenación |
 | **Transición** | tipo (fundido, disolución, barridos, deslizamientos...) y duración; fundido de entrada/salida al principio y final del vídeo |
-| **Música** | elegir o quitar el fichero, volumen en dB y repetir en bucle si es más corta que el vídeo |
+| **Música** | **lista de reproducción** de varias pistas (añadir, reordenar, quitar, volumen por pista), fundido cruzado entre pistas, repetir la lista si es más corta que el vídeo y **ducking** (bajar automáticamente la música mientras se oye algún clip) — ver §5.1 |
 
-Cada cambio se guarda en el historial (se puede deshacer) y marca el proyecto como modificado.
+Cada cambio se guarda en el historial (se puede deshacer) y marca el proyecto como modificado. Cambiar la **proporción** de salida reajusta además, para conservar su forma sin deformarla, la caja de cualquier imagen superpuesta cuyo fichero se pueda volver a leer en ese momento (véase §7).
+
+En 1:1 el montaje decide, proyecto a proyecto, si sale mejor en columnas o en filas (según el tipo de clips); no hay un selector manual de eje.
+
+### 5.1 Música: lista de reproducción y *ducking*
+
+Al soltar o añadir un fichero de audio se pregunta si se usa como música del proyecto (o se añade al final de la lista si ya había alguna). En la sección **Música** de los ajustes:
+
+- **Lista de pistas**: arrastra el asa para reordenarlas, edita el volumen de cada una (−30…+6 dB) y quítalas con su botón; **Añadir ficheros de música…** admite selección múltiple.
+- **Fundido cruzado entre pistas**: 0–10 s; cada pista empieza ese tiempo antes de que termine la anterior.
+- **Repetir la lista si es más corta que el vídeo**: si no, la música termina y el resto del vídeo queda sin música.
+- ***Ducking***: interruptor y cantidad (−30…−3 dB); mientras se oye algún clip, la música baja ese número de decibelios (con una subida y bajada progresivas, no un corte brusco) y vuelve a su volumen normal en los huecos sin clips.
+
+Si el fichero de una pista ya no se encuentra (proyecto movido o pista borrada), la fila lo indica con "Fichero no encontrado" y un enlace **Localizar...**.
 
 ## 6. Previsualizar el plan del montaje
 
-La pestaña **Montaje** (junto a **Fuente**, sobre la línea de tiempo) muestra una vista del plan de montaje calculado a partir de los clips y los ajustes actuales: un carril por columna con los bloques de cada clip (con su color y nombre), las transiciones, las zonas de relleno y una miniatura del fotograma en el instante bajo el cursor. Sirve para entender qué se va a ver antes de renderizar, sin necesidad de esperar al render. Al hacer clic en un bloque se selecciona su clip (igual que en la lista).
+La pestaña **Montaje** (junto a **Fuente**, sobre la línea de tiempo) muestra una vista del plan de montaje calculado a partir de los clips y los ajustes actuales: un carril por columna (o por fila, en salida vertical) con los bloques de cada clip (con su color, nombre y miniatura de fondo si el bloque es lo bastante ancho), las transiciones y las zonas de relleno. Sirve para entender qué se va a ver antes de renderizar, sin necesidad de esperar al render. Al hacer clic en un bloque se selecciona su clip (igual que en la lista); arrastrar un bloque lo mueve y lo **fija** en su nuevo instante al soltarlo (§3).
+
+Sobre el plan, donde antes solo había una miniatura del fotograma bajo el cursor, ahora hay una **previsualización en vivo** que se reproduce de verdad (ver §6.1).
+
+### 6.1 Previsualización en vivo
+
+El área donde normalmente se ve el vídeo de la fuente activa se sustituye, en la pestaña **Montaje**, por una previsualización en vivo: reproduce el montaje completo (columnas, transiciones, overlays, música y efectos, con su volumen aproximado) directamente en la ventana, sin generar ningún fichero. Tiene sus propios controles (reproducir/pausar, tiempo, barra de búsqueda) y muestra los fotogramas por segundo que consigue dibujar en este equipo.
+
+Es una **aproximación**: algunas transiciones con geometría (barridos, deslizamientos, círculo...) se ven como un fundido simple, y los volúmenes no están normalizados hasta que una previsualización o un render calculan la sonoridad real de los clips y la música (se avisa mientras tanto). El aviso "Previsualización en vivo aproximada: el render es la referencia" recuerda que el resultado final puede variar ligeramente. Para un resultado exacto (incluidas las transiciones con geometría), usa **Previsualizar el montaje** (§8), que genera un render rápido de verdad.
 
 ## 7. Elementos superpuestos: imágenes, cuentas atrás, barras y sonidos
 
-Los **elementos superpuestos** ("overlays") se dibujan o suenan por encima del vídeo final, después del montaje de columnas. Hay cuatro tipos:
+Los **elementos superpuestos** ("overlays") se dibujan o suenan por encima del vídeo final, después del montaje de columnas. Hay cinco tipos:
 
-- **Imagen**: un PNG (con transparencia), con posición y tamaño libres y fundidos de entrada/salida.
+- **Imagen**: un PNG (con transparencia), con posición y tamaño libres y fundidos de entrada/salida. Al añadirla conserva la proporción real del fichero; si luego cambias la proporción de salida del proyecto (§5), su caja se reajusta para seguir sin deformarse, centrada donde estaba.
+- **Texto**: una o varias líneas, con tamaño, interlineado, color, fuente, borde, sombra, alineación, fundidos de entrada/salida y una **animación de entrada** opcional (deslizar desde un lado o efecto máquina de escribir, con su duración).
 - **Cuenta atrás**: un número que cuenta hacia 0 y desaparece al llegar; tamaño, color, fuente, borde y sombra configurables.
 - **Barra de progreso**: un rectángulo que se rellena o se vacía en una de las cuatro direcciones; puede ir sola o **vinculada** a una cuenta atrás (toma su mismo inicio y duración).
 - **Sonido**: un efecto de audio (wav, mp3, m4a, ogg o flac), normalizado igual que los clips.
@@ -124,9 +155,9 @@ Se crean, se colocan y se editan desde la pestaña **Montaje**.
 
 ### Carriles y añadir un elemento
 
-Debajo de los carriles de columnas de la pestaña **Montaje** hay tres carriles más: **Imágenes**, **Cuentas atrás y barras** y **Sonidos**, con un bloque por elemento en su tiempo. Un clic en cualquier punto de los carriles mueve el **cursor** de la vista (línea roja); los elementos nuevos se añaden ahí.
+Debajo de los carriles de columnas de la pestaña **Montaje** hay tres carriles más: **Imágenes**, **Textos, cuentas atrás y barras** y **Sonidos**, con un bloque por elemento en su tiempo. Un clic en cualquier punto de los carriles mueve el **cursor** de la vista (línea roja); los elementos nuevos se añaden ahí.
 
-Los botones **Añadir imagen…**, **Añadir cuenta atrás**, **Añadir barra de progreso** y **Añadir sonido…** crean un elemento con valores por defecto en el cursor. Al añadir una imagen o un sonido se abre un diálogo de fichero filtrado por tipo (PNG para las imágenes; wav/mp3/m4a/ogg/flac para los sonidos).
+Los botones **Añadir imagen…**, **Añadir texto**, **Añadir cuenta atrás**, **Añadir barra de progreso** y **Añadir sonido…** crean un elemento con valores por defecto en el cursor. Al añadir una imagen o un sonido se abre un diálogo de fichero filtrado por tipo (PNG para las imágenes; wav/mp3/m4a/ogg/flac para los sonidos).
 
 Al crear un elemento se selecciona automáticamente y se abre su **panel de propiedades** en la barra derecha (en el sitio de la lista de clips; se cierra con la ✕ del panel, haciendo clic en un carril vacío o volviendo a la pestaña **Fuente**).
 
@@ -145,8 +176,9 @@ Con un elemento seleccionado, el panel de la derecha muestra:
   - **En un instante**: tiempo absoluto del vídeo final.
   - **Anclado a un clip**: elige el clip, el **borde** (inicio o fin) y un **desplazamiento** en segundos (puede ser negativo). El elemento se mueve solo si el montaje recoloca ese clip.
   - **Anclado a un elemento**: igual, pero referido a otro elemento (por ejemplo, un sonido que empieza al **fin** de una cuenta atrás con desplazamiento 0). No se ofrecen anclajes que formarían un ciclo.
-- **Posición y tamaño** (imágenes, cuentas atrás y barras): coordenadas y tamaño en % del fotograma, con **presets** de posición (esquinas, centro, pantalla completa).
-- Según el tipo: fundidos de entrada/salida (imágenes), decimales, ceros a la izquierda, alineación, color, fuente (con botón para elegir un TTF/OTF; una ✕ vuelve a la fuente por defecto), borde y sombra (cuentas atrás), color de relleno y de fondo (con opacidad), borde y dirección/modo (barras; **Vincular a cuenta atrás** sustituye el inicio y la duración propios por los de la cuenta atrás elegida), volumen en dB (sonidos).
+- **Posición y tamaño** (imágenes, textos, cuentas atrás y barras): coordenadas y tamaño en % del fotograma, con **presets** de posición (esquinas, centro, pantalla completa); en los textos no se ve "Alto" (sale de las líneas) y "pantalla completa" solo pone el ancho a todo el fotograma, centrado.
+- Según el tipo: fundidos de entrada/salida (imágenes y textos); texto multilínea, tamaño, interlineado, alineación, color, fuente, borde, sombra y animación de entrada (ninguna, deslizar + lado, o máquina de escribir, con su duración) para los textos; decimales, ceros a la izquierda, alineación, color, fuente (con botón para elegir un TTF/OTF; una ✕ vuelve a la fuente por defecto), borde y sombra (cuentas atrás); color de relleno y de fondo (con opacidad), borde y dirección/modo (barras; **Vincular a cuenta atrás** sustituye el inicio y la duración propios por los de la cuenta atrás elegida); volumen en dB (sonidos).
+- **Estilo** (textos, cuentas atrás y barras): **Aplicar estilo…** aplica un estilo guardado (tamaño, color, fuente, borde, sombra... según el tipo) al elemento; **Guardar estilo…** guarda el estilo actual con un nombre para reutilizarlo en otros elementos o proyectos; **Gestionar estilos…** abre un diálogo para renombrar, borrar, exportar e importar estilos (agrupados por tipo). Los estilos se guardan en los ajustes de la aplicación, no en el proyecto: aplicar uno es un paso de deshacer del proyecto, pero los estilos en sí no se deshacen.
 - **Capas**: subir, bajar, traer al frente y enviar al fondo (el último elemento de la lista se ve encima; los sonidos no tienen capa visual, se ordenan aparte).
 - **Duplicar** y **eliminar**.
 
@@ -183,6 +215,12 @@ Antes de generar el vídeo (previsualización o render final) se muestran los av
 
 Al terminar el render aparece un diálogo con la ruta del fichero y un botón para abrir la carpeta.
 
+### 8.1 Caché de render
+
+VideoMix guarda en una carpeta oculta junto al proyecto (`.<nombre>.vmx.cache/`, o en una carpeta temporal de la aplicación mientras el proyecto no se ha guardado) los fragmentos de vídeo y audio ya codificados de renders y previsualizaciones anteriores. Si vuelves a renderizar sin haber cambiado nada relevante (mismo recorte, mismos ajustes, mismos ficheros), esos fragmentos se reutilizan tal cual en vez de volver a codificarlos, lo que acelera mucho los renders repetidos (por ejemplo, tras cambiar solo un elemento superpuesto al final del vídeo). Un cambio que sí afecta a un fragmento (otro recorte, otra transición, otro clip, otro codificador...) simplemente hace que ese fragmento se recodifique; el resto sigue viniendo de la caché.
+
+**Proyecto → Vaciar caché de render** borra toda la caché de render de este proyecto (y la de los proyectos sin guardar que ya no se usan); el próximo render vuelve a codificar todo desde cero. No hace falta usarlo en el uso normal: la caché se recorta ella sola por tamaño (un límite por proyecto; los fragmentos menos usados recientemente se borran primero) y las cachés de proyectos sin guardar y abandonados se limpian solas al cabo de unos días.
+
 ## 9. Atajos de teclado
 
 Puedes ver y personalizar todos los atajos en **Ayuda → Atajos de teclado y ratón** (`Mayús+/`). Los más importantes:
@@ -212,6 +250,10 @@ Puedes ver y personalizar todos los atajos en **Ayuda → Atajos de teclado y ra
 
 Si tenías una configuración de teclado de una versión anterior, los atajos nuevos pueden no aparecer hasta que restablezcas los atajos (botón "Restablecer" en el diálogo de atajos).
 
+Las acciones más nuevas (añadir texto, fijar/agrupar clips, aplicar/guardar estilo, vaciar la caché de render) no tienen atajo de teclado por defecto: se usan desde su botón, su menú contextual o el menú **Proyecto**; sí se pueden personalizar en el diálogo de atajos si se quiere.
+
 ## 10. Otros ajustes
 
 En **Ajustes** (`Ctrl/Cmd+,`) se mantienen las opciones generales de reproducción, captura de fotogramas, atajos de teclado y ratón, interfaz y notificaciones. Las opciones específicas de exportación de LosslessCut (formatos, pistas, corte sin pérdidas...) no aplican a VideoMix y no aparecen.
+
+El tamaño máximo de la caché de render (§8.1, 5 GB por defecto; `0` la desactiva) no tiene control en la interfaz: se cambia editando `renderCacheMaxBytes` en el fichero de configuración (**Ayuda → Fichero de configuración**).

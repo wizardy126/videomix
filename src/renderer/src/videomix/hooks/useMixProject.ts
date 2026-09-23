@@ -4,8 +4,10 @@ import { nanoid } from 'nanoid';
 import i18n from 'i18next';
 
 import { showOpenDialog } from '../../dialogs';
+import { readFileFfprobeMeta } from '../../ffmpeg';
 import { createEmptyMixProject } from '../types';
-import type { LoudnessMeasurement, MixClip, MixOverlay, MixProject, MixSettings } from '../types';
+import type { ImageOverlay, LoudnessMeasurement, MixClip, MixOverlay, MixProject, MixSettings } from '../types';
+import type { Size } from '../overlayMath';
 import { createMixSource, mixProjectReducer } from '../projectReducer';
 import type { MixClipPatch, MixMusicPlaylistPatch, MixMusicTrackPatch, MixOverlayPatch, MixProjectAction, MixSourceRelink, OverlayLayerMove, ResolvedOverlayTimesForRemoval } from '../projectReducer';
 import { createMusicTrack } from '../workspace';
@@ -111,7 +113,31 @@ export default function useMixProject() {
     return newId;
   }, [dispatch]);
   const reorderClips = useCallback((ids: string[]) => dispatch({ type: 'reorderClips', ids }), [dispatch]);
-  const updateSettings = useCallback((patch: Partial<MixSettings>, options?: EditOptions) => dispatch({ type: 'updateSettings', patch }, options), [dispatch]);
+  /**
+   * When `patch.output` changes the aspect, image overlays don't keep their pixel size (only read once, at creation,
+   * T22): reread it here for each image overlay so the reducer can refit their box to the new frame (T34, pending
+   * from T29). Best-effort: an overlay whose file can't be read (e.g. missing) just keeps its box.
+   */
+  const updateSettings = useCallback(async (patch: Partial<MixSettings>, options?: EditOptions) => {
+    const current = historyRef.current.present;
+    const aspectChanged = patch.output != null && patch.output.aspect !== current.settings.output.aspect;
+    let imageSizes: Map<string, Size> | undefined;
+    if (aspectChanged) {
+      const imageOverlays = current.overlays.filter((o): o is ImageOverlay => o.type === 'image');
+      const sizes = await Promise.all(imageOverlays.map(async (overlay) => {
+        try {
+          const { streams } = await readFileFfprobeMeta(overlay.absolutePath);
+          const stream = streams.find((s) => s.width != null && s.height != null);
+          if (stream?.width != null && stream.height != null) return [overlay.id, { width: stream.width, height: stream.height }] as const;
+        } catch (err) {
+          console.warn('Could not read the image size', err);
+        }
+        return undefined;
+      }));
+      imageSizes = new Map(sizes.filter((s): s is readonly [string, Size] => s != null));
+    }
+    dispatch({ type: 'updateSettings', patch, ...(imageSizes != null && { imageSizes }) }, options);
+  }, [dispatch]);
 
   // Pinned and grouped clips (A4, T30)
   /** `undefined` unpins it. */

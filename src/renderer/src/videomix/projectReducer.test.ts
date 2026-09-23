@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 
 import { createMixSource, dissolveSingleClipGroups, mixProjectReducer } from './projectReducer';
 import { createEmptyMixProject } from './types';
-import type { MixClip, MixMusicTrack, MixOverlay, MixProject } from './types';
+import type { ImageOverlay, MixClip, MixMusicTrack, MixOverlay, MixProject } from './types';
 import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay, createTextOverlay } from './overlays/factories';
 import { resolveOverlayTimes } from './overlays/resolveOverlayTimes';
 
@@ -120,6 +120,37 @@ describe('mixProjectReducer', () => {
     expect(next.settings).toEqual({ ...project.settings, maxColumns: 2, output });
     expect(mixProjectReducer(project, { type: 'updateSettings', patch: { maxColumns: 3 } })).toBe(project);
     expect(mixProjectReducer(project, { type: 'updateSettings', patch: { encoder: { codec: 'h264', hardware: 'auto' } } })).toBe(project);
+  });
+
+  test('updateSettings refits image overlay boxes when the output aspect changes (T34, pending from T29)', () => {
+    const image: ImageOverlay = createImageOverlay({ id: 'i1', name: 'img', filePath: '/i.png' });
+    // A wide box, centered a bit off-center
+    image.box = { x: 0.2, y: 0.4, width: 0.4, height: 0.1 };
+    const other: MixOverlay = createImageOverlay({ id: 'i2', name: 'img2', filePath: '/i2.png' });
+    const project: MixProject = { ...makeProject(), overlays: [image, other] };
+    const output = { aspect: '9:16' as const, resolution: '1080' as const };
+    const imageSizes = new Map([['i1', { width: 400, height: 200 }]]);
+
+    const asImage = (p: MixProject, id: string) => p.overlays.find((o): o is ImageOverlay => o.type === 'image' && o.id === id)!;
+
+    const next = mixProjectReducer(project, { type: 'updateSettings', patch: { output }, imageSizes });
+    expect(next.settings.output).toEqual(output);
+    // i1: width kept, height recomputed for the 1080x1920 frame, centered on the previous box's center (0.4, 0.45)
+    const refitted = asImage(next, 'i1').box;
+    expect(refitted.width).toBeCloseTo(0.4);
+    expect(refitted.height).toBeCloseTo((0.4 * 1080 * 200) / (400 * 1920));
+    expect(refitted.x + refitted.width / 2).toBeCloseTo(0.4);
+    expect(refitted.y + refitted.height / 2).toBeCloseTo(0.45);
+    // i2: no known pixel size (missing from imageSizes) -> unchanged
+    expect(asImage(next, 'i2').box).toEqual(other.box);
+
+    // No aspect change (only resolution) -> boxes unchanged even with imageSizes
+    const sameAspect = mixProjectReducer(project, { type: 'updateSettings', patch: { output: { ...project.settings.output, resolution: '720' } }, imageSizes });
+    expect(asImage(sameAspect, 'i1').box).toEqual(image.box);
+
+    // No imageSizes at all -> boxes unchanged
+    const noSizes = mixProjectReducer(project, { type: 'updateSettings', patch: { output } });
+    expect(asImage(noSizes, 'i1').box).toEqual(image.box);
   });
 
   describe('pinned and grouped clips (v3)', () => {

@@ -185,20 +185,19 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
           onBlur={handleNameBlur}
           onKeyDown={handleNameKeyDown}
           onClick={stopPropagation}
-          style={{ ...plainInputStyle, flexGrow: 1 }}
+          style={{ ...plainInputStyle, flexGrow: 1, minWidth: '3em' }}
         />
-
-        <MuteIcon role="button" title={clip.muted ? t('Unmute clip') : t('Mute clip')} onClick={handleMuteClick} style={{ ...iconStyle, cursor: 'pointer', opacity: clip.muted ? 1 : 0.6, color: clip.muted ? warningColor : undefined }} />
-
-        <select value={clip.gainDb} title={t('Clip gain (dB)')} onChange={handleGainChange} onClick={stopPropagation} style={{ ...plainInputStyle, border: '1px solid var(--gray-7)', fontSize: '.85em', flexShrink: 0 }}>
-          {clipGainValues.map((v) => <option key={v} value={v}>{v > 0 ? `+${v}` : v} dB</option>)}
-        </select>
       </div>
 
+      {/* T34: moved down from the first row (with the drag handle, thumbnail, color badge and name) so the name field has the whole row's width */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '.5em', fontSize: '.8em', opacity: 0.8, marginTop: '.15em', paddingLeft: '1.1em' }}>
         <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1, minWidth: 0 }} title={source?.path}>{source?.name ?? '?'}</span>
         <span style={{ whiteSpace: 'nowrap' }}>{formatTime(clip.start)} – {formatTime(clip.end)}</span>
         <span style={{ whiteSpace: 'nowrap', fontWeight: 'bold' }}>{formatDuration({ seconds: duration, shorten: true })}</span>
+        <MuteIcon role="button" title={clip.muted ? t('Unmute clip') : t('Mute clip')} onClick={handleMuteClick} style={{ ...iconStyle, cursor: 'pointer', opacity: clip.muted ? 1 : 0.6, color: clip.muted ? warningColor : undefined }} />
+        <select value={clip.gainDb} title={t('Clip gain (dB)')} onChange={handleGainChange} onClick={stopPropagation} style={{ ...plainInputStyle, border: '1px solid var(--gray-7)', fontSize: '.85em', flexShrink: 0 }}>
+          {clipGainValues.map((v) => <option key={v} value={v}>{v > 0 ? `+${v}` : v} dB</option>)}
+        </select>
         <div style={{ flexGrow: 1 }} />
         {pinTime != null && <FaThumbtack style={{ ...iconStyle, color: 'var(--cyan-11)' }} title={t('Pinned at {{time}} of the video', { time: formatTime(pinTime) })} />}
         <OrientationIcon style={iconStyle} title={`${orientation === 'horizontal' ? t('Horizontal') : t('Vertical')} ${clip.maxRect.width}×${clip.maxRect.height}`} />

@@ -200,6 +200,25 @@ export function getImageBox(imageSize: Size, frame: Size, width = 0.3): OverlayB
   return { x: (1 - w) / 2, y: (1 - h) / 2, width: w, height: h };
 }
 
+/**
+ * Refits an image overlay's `box` (T34, pending from T29) after the output frame's aspect changes, so the image stays
+ * undistorted on the new `frame`: same width (fraction) as before, height recomputed from `imageSize`'s proportion,
+ * centered on the box's previous center (not the frame's). Scaled down if it would be taller than the frame, same as
+ * {@link getImageBox}.
+ */
+export function refitImageOverlayBox(box: OverlayBox, imageSize: Size, frame: Size): OverlayBox {
+  if (imageSize.width <= 0 || imageSize.height <= 0 || frame.width <= 0 || frame.height <= 0) return box;
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
+  let w = box.width;
+  let h = (w * frame.width * imageSize.height) / (imageSize.width * frame.height);
+  if (h > 1) {
+    w /= h;
+    h = 1;
+  }
+  return { x: cx - w / 2, y: cy - h / 2, width: w, height: h };
+}
+
 /** `#rrggbb` + alpha (0..1) → `#rrggbb` or `#rrggbbaa` (opaque colors stay short). */
 export function joinOverlayColor(rgb: string, alpha: number) {
   const a = Math.round(Math.min(1, Math.max(0, alpha)) * 255);
