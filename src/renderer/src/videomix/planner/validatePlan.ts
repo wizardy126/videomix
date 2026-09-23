@@ -1,4 +1,5 @@
 import { getBaseOrder } from './random';
+import { getDefaultAxis, getPlanAxis, getPlanAxisLengths } from './types';
 import type { ColumnPlacement, MixPlan, PlanMixInput } from './types';
 
 const TOL = 1e-6;
@@ -10,6 +11,7 @@ type Layout = MixPlan['layouts'][number];
  * just left of its right neighbour when it is missing from `layout` (x of the first column after it in `other` that
  * is also in `layout`, minus the gap; W + gap if there is none). Without a neighbour it sits past the right edge with
  * its gap, so its gap enters/leaves the frame with it instead of popping up next to a right fill (T16).
+ * Everything along the main axis: `width` is the frame's main length (its height for rows, see `getPlanAxisLengths`).
  */
 export function getAnimatedColumn(layout: Layout, other: Layout, column: number, width: number, gap: number) {
   const own = layout.columns.find((c) => c.column === column);
@@ -29,8 +31,15 @@ export function getAnimatedColumn(layout: Layout, other: Layout, column: number,
 export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): string[] {
   const issues: string[] = [];
   const fail = (message: string) => issues.push(message);
-  const { width: W, maxColumns, gap, reorderWindow: N, transitionDuration: D } = settings;
+  const { maxColumns, gap, reorderWindow: N, transitionDuration: D } = settings;
   const { placements, layouts } = plan;
+  // layouts are along the main axis (T29): W is the frame's width for columns, its height for rows
+  const { main: W } = getPlanAxisLengths(plan);
+
+  // B5: the output shape decides the axis (portrait: never side by side); a square output may take either
+  if (plan.width !== settings.width || plan.height !== settings.height) fail(`Plan size ${plan.width}x${plan.height} != output ${settings.width}x${settings.height}`);
+  const expectedAxis = settings.axis ?? getDefaultAxis(settings);
+  if (expectedAxis != null && getPlanAxis(plan) !== expectedAxis) fail(`Plan axis ${getPlanAxis(plan)}, expected ${expectedAxis}`);
   const durations = new Map(clips.map((clip) => [clip.id, clip.duration]));
 
   // 1. every clip exactly once, whole

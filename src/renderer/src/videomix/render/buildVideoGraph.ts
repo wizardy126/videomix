@@ -1,6 +1,7 @@
 import invariant from 'tiny-invariant';
 
 import { getCropForAspect } from '../geometry';
+import { getPlanAxis, getPlanAxisLengths } from '../planner/types';
 import type { MixClip, MixSettings, Rect } from '../types';
 import type { RenderChunk } from './renderChunks';
 import { getColumnsAtFrame, getFillSpansAtFrame, getPlacementsInRange } from './renderTimeline';
@@ -13,6 +14,8 @@ import type { VideoGraphOverlays } from './overlayFilters';
 // on a canvas of the gap colour; a column whose width changes inside the chunk uses the "column layer" technique
 // (fixed crop of the union of the per-frame crops → scale eval=frame → overlay at per-frame offsets on a fixed-size
 // base), anchored left: its visible window is [0, w(t)) and the next element to its right hides the rest.
+// Along the plan's main axis (T29): for rows the same holds with y/height, i.e. layers span the whole output width, are
+// anchored at the top and composed top to bottom, and the gap bars are horizontal.
 
 export { formatNumber, toFfmpegColor } from './ffmpegArgs';
 
@@ -67,7 +70,7 @@ export function blurCover(w: number, h: number) {
 
 const cropFilter = (r: Rect) => `crop=${r.width}:${r.height}:${r.x}:${r.y}`;
 
-/** A column or a fill area, composed left to right. Per chunk frame: x and visible width. */
+/** A column or a fill area, composed left to right. Per chunk frame: offset and visible length along the main axis. */
 interface Element {
   kind: 'column' | 'fill',
   /** Stacking order among elements with the same x: left fill below, right fill on top. */
@@ -100,6 +103,11 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
   const { fps } = settings;
   const W = plan.width;
   const H = plan.height;
+  const rows = getPlanAxis(plan) === 'rows';
+  // main length (what the layouts span) and cross length (what every column/row spans)
+  const { main: M, cross: C } = getPlanAxisLengths(plan);
+  /** Output size of a layer `length` px long along the main axis. */
+  const layerSize = (length: number) => (rows ? { w: C, h: length } : { w: length, h: C });
   const { f0, f1 } = chunk;
   const N = f1 - f0;
   invariant(N > 0, 'Empty chunk');
@@ -108,7 +116,12 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
   const transitionType = settings.transition.type;
   const sec = (frames: number) => formatNumber(frames / fps);
   // sources with a duration of one frame more than needed, cut exactly with trim
-  const colorSource = (color: string, w: number, frames: number) => `color=c=${color}:s=${w}x${H}:r=${fps}:d=${sec(frames + 1)},trim=end_frame=${frames}`;
+  const colorSource = (color: string, w: number, h: number, frames: number) => `color=c=${color}:s=${w}x${h}:r=${fps}:d=${sec(frames + 1)},trim=end_frame=${frames}`;
+  /** Plain colour layer `length` px long along the main axis. */
+  const colorLayer = (color: string, length: number, frames: number) => {
+    const { w, h } = layerSize(length);
+    return colorSource(color, w, h, frames);
+  };
 
   const clipById = new Map(clips.map((c) => [c.id, c]));
   const inputs: string[][] = [];
@@ -159,7 +172,7 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
     placementsByColumn.set(p.placement.column, [...(placementsByColumn.get(p.placement.column) ?? []), p].sort((a, b) => a.f0 - b.f0));
     if (!columnGeom.has(p.placement.column)) {
       // not in the layout (shouldn't happen with a valid plan): render it with width 0 so nothing is lost silently
-      columnGeom.set(p.placement.column, frameGeoms.map(() => ({ x: W, width: 0 })));
+      columnGeom.set(p.placement.column, frameGeoms.map(() => ({ x: M, width: 0 })));
     }
   }
 
@@ -208,18 +221,20 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
     return label;
   };
 
-  /** Fill layer of `width`×H for local frames [start, end): blurred cover of `source`, or plain colour. */
-  const buildFillLayer = (width: number, start: number, end: number, source: Element | undefined) => {
+  /** Fill layer `length` px long for local frames [start, end): blurred cover of `source`, or plain colour. */
+  const buildFillLayer = (length: number, start: number, end: number, source: Element | undefined) => {
     const out = newLabel('fill');
     if (source == null) {
-      filters.push(`${colorSource(fillColor, width, end - start)}[${out}]`);
+      filters.push(`${colorLayer(fillColor, length, end - start)}[${out}]`);
       return out;
     }
     const src = requestSource(source);
     const trim = start > 0 || end < N ? `trim=start_frame=${start}:end_frame=${end},setpts=PTS-STARTPTS,` : '';
     // a varying-width source column carries hidden excess to the right of its window: keep only the always-visible part
-    const crop = source.varying ? `crop=${floorEven(Math.min(...source.ws))}:${H}:0:0,` : '';
-    filters.push(`[${src}]${trim}${crop}${blurCover(width, H)}[${out}]`);
+    const visible = floorEven(Math.min(...source.ws));
+    const crop = source.varying ? `crop=${rows ? `${C}:${visible}` : `${visible}:${C}`}:0:0,` : '';
+    const { w, h } = layerSize(length);
+    filters.push(`[${src}]${trim}${crop}${blurCover(w, h)}[${out}]`);
     return out;
   };
 
@@ -243,23 +258,24 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
     const out = newLabel('clip');
 
     if (!element.varying) {
-      const w = element.layerWidth;
-      const { crop, fit } = getCropForAspect(clip.maxRect, clip.minRect, w / H);
+      // the cell in output px (a column: layerWidth × H; a row: W × layerWidth)
+      const { w, h } = layerSize(element.layerWidth);
+      const { crop, fit } = getCropForAspect(clip.maxRect, clip.minRect, w / h);
       if (fit === 'fill') {
-        filters.push(`${head},${cropFilter(crop)},scale=${w}:${H}:flags=bicubic,setsar=1[${out}]`);
+        filters.push(`${head},${cropFilter(crop)},scale=${w}:${h}:flags=bicubic,setsar=1[${out}]`);
         return { label: out, start: pf0 - f0, end: pf1 - f0 };
       }
       // pillarbox: full height, centred; letterbox: full width, centred. Background: the clip's own blurred cover.
-      const fw = fit === 'pillarbox' ? Math.min(w, roundEven((crop.width * H) / crop.height)) : w;
-      const fh = fit === 'pillarbox' ? H : Math.min(H, roundEven((crop.height * w) / crop.width));
+      const fw = fit === 'pillarbox' ? Math.min(w, roundEven((crop.width * h) / crop.height)) : w;
+      const fh = fit === 'pillarbox' ? h : Math.min(h, roundEven((crop.height * w) / crop.width));
       const [fg, bg] = [newLabel('fg'), newLabel('bg')];
       if (settings.fill.mode === 'blur') {
         const [a, b] = [newLabel('s'), newLabel('s')];
-        filters.push(`${head},${cropFilter(crop)},split[${a}][${b}]`, `[${a}]scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `[${b}]${blurCover(w, H)}[${bg}]`);
+        filters.push(`${head},${cropFilter(crop)},split[${a}][${b}]`, `[${a}]scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `[${b}]${blurCover(w, h)}[${bg}]`);
       } else {
-        filters.push(`${head},${cropFilter(crop)},scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `${colorSource(fillColor, w, nf)}[${bg}]`);
+        filters.push(`${head},${cropFilter(crop)},scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `${colorSource(fillColor, w, h, nf)}[${bg}]`);
       }
-      filters.push(`[${bg}][${fg}]overlay=x=${(w - fw) / 2}:y=${(H - fh) / 2}:shortest=1[${out}]`);
+      filters.push(`[${bg}][${fg}]overlay=x=${(w - fw) / 2}:y=${(h - fh) / 2}:shortest=1[${out}]`);
       return { label: out, start: pf0 - f0, end: pf1 - f0 };
     }
 
@@ -268,17 +284,20 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
     // on the window [0, w(t)).
     const ws = element.ws.slice(pf0 - f0, pf1 - f0);
     // a column appearing/disappearing (width → 0) keeps its full height, cropped by the window, instead of letterboxing
+    // (a row, its full width)
     const collapsing = collapsingColumns.has(p.placement.column);
     const per = ws.map((w0) => {
-      const w = Math.max(2, w0);
-      const { crop, fit } = getCropForAspect(clip.maxRect, clip.minRect, w / H);
-      if (fit === 'fill') return { crop, sx: w / crop.width, sy: H / crop.height, ox: 0, oy: 0, covers: true };
-      if (fit === 'pillarbox' || collapsing) {
-        const s = H / crop.height;
-        return { crop, sx: s, sy: s, ox: (w - crop.width * s) / 2, oy: 0, covers: fit === 'letterbox' };
-      }
-      const s = w / crop.width;
-      return { crop, sx: s, sy: s, ox: 0, oy: (H - crop.height * s) / 2, covers: false };
+      const { w, h } = layerSize(Math.max(2, w0));
+      const { crop, fit } = getCropForAspect(clip.maxRect, clip.minRect, w / h);
+      if (fit === 'fill') return { crop, sx: w / crop.width, sy: h / crop.height, ox: 0, oy: 0, covers: true };
+      // the window is longer along the main axis than the clip allows (columns: pillarbox; rows: letterbox)
+      const mainTooLong = fit === (rows ? 'letterbox' : 'pillarbox');
+      // fill the cross axis, centred along the main axis (a collapsing one overflows its window, which crops it), or
+      // else fill the main axis, centred across
+      const fillCross = mainTooLong || collapsing;
+      // the cross axis is the width for rows, the main axis is the width for columns
+      const s = fillCross === rows ? w / crop.width : h / crop.height;
+      return { crop, sx: s, sy: s, ox: (w - crop.width * s) / 2, oy: (h - crop.height * s) / 2, covers: !mainTooLong && collapsing };
     });
     const ux0 = Math.min(...per.map((q) => q.crop.x));
     const uy0 = Math.min(...per.map((q) => q.crop.y));
@@ -297,9 +316,10 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
     const scale = `scale=w=${stepExpr(sw, fps)}:h=${stepExpr(sh, fps)}:eval=frame:flags=bicubic,setsar=1`;
     if (needsBg && settings.fill.mode === 'blur') {
       const [a, b] = [newLabel('s'), newLabel('s')];
-      filters.push(`${head},${cropFilter(U)},split[${a}][${b}]`, `[${b}]${blurCover(element.layerWidth, H)}[${base}]`, `[${a}]${scale}[${sc}]`);
+      const layer = layerSize(element.layerWidth);
+      filters.push(`${head},${cropFilter(U)},split[${a}][${b}]`, `[${b}]${blurCover(layer.w, layer.h)}[${base}]`, `[${a}]${scale}[${sc}]`);
     } else {
-      filters.push(`${head},${cropFilter(U)},${scale}[${sc}]`, `${colorSource(needsBg ? fillColor : 'black', element.layerWidth, nf)}[${base}]`);
+      filters.push(`${head},${cropFilter(U)},${scale}[${sc}]`, `${colorLayer(needsBg ? fillColor : 'black', element.layerWidth, nf)}[${base}]`);
     }
     filters.push(`[${base}][${sc}]overlay=x=${stepExpr(ox, fps)}:y=${stepExpr(oy, fps)}:eval=frame:shortest=1[${out}]`);
     return { label: out, start: pf0 - f0, end: pf1 - f0 };
@@ -357,11 +377,13 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
 
   // canvas in the gap colour; elements left to right (each one hides the excess of the previous layer)
   let cv = newLabel('cv');
-  filters.push(`${colorSource(gapColor, W, N)},format=yuv420p[${cv}]`);
+  filters.push(`${colorSource(gapColor, W, H, N)},format=yuv420p[${cv}]`);
+  /** Overlay at per-frame offsets along the main axis. */
   const overlayAt = (label: string, xs: number[], extra: string) => {
     const out = newLabel('cv');
-    const x = stepExpr(xs, fps);
-    filters.push(`[${cv}][${label}]overlay=x=${x}:y=0${x.startsWith("'") ? ':eval=frame' : ''}${extra}[${out}]`);
+    const offset = stepExpr(xs, fps);
+    const position = rows ? `x=0:y=${offset}` : `x=${offset}:y=0`;
+    filters.push(`[${cv}][${label}]overlay=${position}${offset.startsWith("'") ? ':eval=frame' : ''}${extra}[${out}]`);
     cv = out;
   };
   const anyVarying = elements.some((e) => e.varying);
@@ -380,7 +402,7 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
       const next = layoutColumns[i + 1];
       invariant(next != null);
       const bar = newLabel('gap');
-      filters.push(`${colorSource(gapColor, settings.gap.width, N)}[${bar}]`);
+      filters.push(`${colorLayer(gapColor, settings.gap.width, N)}[${bar}]`);
       overlayAt(bar, e.xs.map((x, n) => roundEven(Math.max(x + e.ws[n]!, next.xs[n]! - settings.gap.width))), '');
     }
   }

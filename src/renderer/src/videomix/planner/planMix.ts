@@ -1,14 +1,18 @@
 import invariant from 'tiny-invariant';
 
-import { distributeWidths, getWidthRange, normalizeClipRects } from '../geometry';
-import type { AspectRange } from '../geometry';
+import { distributeWidths, getAxisLengths, getMainAspectRange, getWidthRange, normalizeClipRects, transposeRect } from '../geometry';
+import type { AspectRange, LayoutAxis } from '../geometry';
 import { getBaseOrder } from './random';
 import { getColumnFit, getPlanWarnings } from './planWarnings';
 import { validatePlan } from './validatePlan';
+import { getDefaultAxis } from './types';
 import type { ColumnPlacement, LayoutKeyframe, MixPlan, PlanMixInput, PlannerClip } from './types';
 
 // Montage planner (04-diseno §3): an event simulation over "a column's clip ends" events. Each event is resolved by
 // scoring the options (direct substitution, in-place with fill, or a re-layout of the row) and taking the cheapest.
+// Everything works along the main axis (T29): for rows the clips are transposed (aspect a → 1/a, rects x↔y) and the
+// frame's main length is its height, so "columns", "widths" and "left/right" below read "rows", "heights" and
+// "top/bottom". The algorithm itself doesn't know the difference.
 
 // Score weights: an option's cost is the sum of these terms, lower is better. Rough scale: 1 point ≈ moving a clip
 // one position away from its list index.
@@ -141,33 +145,53 @@ function* subsets(n: number, k: number): Generator<number[]> {
   }
 }
 
-function toClip(clip: PlannerClip, base: number, height: number): Clip {
+/** The clip in main-axis units: `height` is the cross length of the frame; rows transpose the clip. */
+function toClip(clip: PlannerClip, base: number, height: number, axis: LayoutAxis): Clip {
   invariant(clip.duration > 0 && Number.isFinite(clip.duration), `Invalid duration for clip ${clip.id}`);
+  const range = getMainAspectRange(clip.aspectRange, axis);
   let size: Clip['size'];
   if (clip.rects != null) {
     const { max, min } = normalizeClipRects(clip.rects.maxRect, clip.rects.minRect);
-    size = { maxWidth: max.width, maxHeight: max.height, minHeight: min.height };
+    const [tMax, tMin] = axis === 'columns' ? [max, min] : [transposeRect(max), transposeRect(min)];
+    size = { maxWidth: tMax.width, maxHeight: tMax.height, minHeight: tMin.height };
   }
-  return { id: clip.id, duration: clip.duration, range: clip.aspectRange, widths: getWidthRange(clip.aspectRange, height), base, size };
+  return { id: clip.id, duration: clip.duration, range, widths: getWidthRange(range, height), base, size };
 }
 
 /**
- * Plan the montage: which clip plays in which column and when, and how the row is laid out over time.
- * Pure and deterministic. See 04-diseno §3 for the rules and invariants (checked by {@link validatePlan}).
+ * Whole-plan score (lower is better), with the same weights as the per-event decisions, so plans along different axes
+ * can be compared (T29, square output). All terms are dimensionless (fractions of the frame, crop losses, scale
+ * factors), so a rows plan and a columns plan of the same clips are measured alike:
+ * - `fill`: structural row fill, fraction of the frame × seconds;
+ * - `clips`: per clip, the time-weighted crop loss, upscale and column count terms of the columns it sits in, plus its
+ *   pillarbox/letterbox area × seconds (and {@link LETTERBOX_WEIGHT} once if it is letterboxed);
+ * - `relayouts`: per layout change;
+ * - `order`: positions away from the base list.
  */
-// eslint-disable-next-line import/prefer-default-export
-export function planMix({ clips: inputClips, settings }: PlanMixInput): MixPlan {
-  const { width: W, height: H, maxColumns, gap, reorderWindow: N, transitionDuration: D } = settings;
+export interface PlanScore {
+  total: number,
+  fill: number,
+  clips: number,
+  relayouts: number,
+  order: number,
+}
+
+/** {@link planMix} along a given main axis, with the plan's score. */
+export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis: LayoutAxis): { plan: MixPlan, score: PlanScore } {
+  const { maxColumns, gap, reorderWindow: N, transitionDuration: D } = settings;
+  const { main: W, cross: H } = getAxisLengths(axis, settings);
   invariant(maxColumns >= 1 && Number.isInteger(maxColumns), 'maxColumns must be a positive integer');
   invariant(N >= 0 && D >= 0 && W > 0 && H > 0 && gap >= 0, 'Invalid planner settings');
+  const output = { width: settings.width, height: settings.height, axis };
 
-  const remaining = getBaseOrder(inputClips, settings.order).map((clip, i) => toClip(clip, i, H));
+  const remaining = getBaseOrder(inputClips, settings.order).map((clip, i) => toClip(clip, i, H, axis));
+  const allClips = new Map(remaining.map((clip) => [clip.id, clip]));
   const placements: ColumnPlacement[] = [];
   const layouts: LayoutKeyframe[] = [];
 
   if (remaining.length === 0) {
     layouts.push({ time: 0, transitionDuration: 0, columns: [], fills: [{ x: 0, width: W }] });
-    return { width: W, height: H, duration: 0, placements, layouts, warnings: [] };
+    return { plan: { ...output, duration: 0, placements, layouts, warnings: [] }, score: { total: 0, fill: 0, clips: 0, relayouts: 0, order: 0 } };
   }
 
   const columns = new Map<number, Column>();
@@ -191,33 +215,45 @@ export function planMix({ clips: inputClips, settings }: PlanMixInput): MixPlan 
 
   const fillCost = (fill: number, seconds: number) => FILL_WEIGHT * (fill / W) * Math.max(0, seconds);
 
-  /** Cost of the fill a clip leaves in a column of `width` px (pillarbox/letterbox) during `seconds`. */
-  function misfitCost(clip: Clip, width: number, seconds: number) {
+  /** Fill a clip leaves in a column of `width` px (pillarbox/letterbox) during `seconds`, without the letterbox extra. */
+  function misfitFillCost(clip: Clip, width: number, seconds: number) {
     const fit = getColumnFit(clip.range, width, H);
     if (fit === 'pillarbox') return fillCost(width - clip.widths.max, seconds);
     // area-equivalent width of the top/bottom bars
-    if (fit === 'letterbox') return fillCost(width * (1 - width / clip.widths.min), seconds) + LETTERBOX_WEIGHT;
+    if (fit === 'letterbox') return fillCost(width * (1 - width / clip.widths.min), seconds);
     return 0;
   }
+
+  /** Cost of the fill a clip leaves in a column of `width` px (pillarbox/letterbox) during `seconds`. */
+  const misfitCost = (clip: Clip, width: number, seconds: number) => (
+    misfitFillCost(clip, width, seconds) + (getColumnFit(clip.range, width, H) === 'letterbox' ? LETTERBOX_WEIGHT : 0)
+  );
+
+  /** Cropping and upscale cost of a clip in a column of `width` px (per column, not per second). */
+  function columnCost(clip: Clip, width: number) {
+    const { range } = clip;
+    const aspect = Math.min(range.max, Math.max(range.min, width / H));
+    const loss = 1 - Math.min(aspect / range.preferred, range.preferred / aspect);
+    let cost = PREF_WEIGHT * Math.min(loss, MAX_CROP_LOSS) + EXCESS_CROP_WEIGHT * Math.max(0, loss - MAX_CROP_LOSS);
+    if (clip.size != null) {
+      // crop height as in getCropForAspect (fill/pillarbox); overestimates letterbox, which is penalized anyway
+      const { maxWidth, maxHeight, minHeight } = clip.size;
+      const cropHeight = Math.max(minHeight, Math.min(maxHeight, maxWidth / aspect));
+      cost += UPSCALE_WEIGHT * Math.max(0, H / cropHeight - 2);
+    }
+    return cost;
+  }
+
+  const columnCountCost = (n: number) => COLUMN_COUNT_WEIGHT * (n < 2 ? 2 - n : Math.max(0, n - 3));
 
   /**
    * Cost of a row of clips at the given widths, each shown for about `seconds`: misfits, cropping, upscale and
    * column count. The row fill is added apart.
    */
   function rowCost(items: { clip: Clip, width: number, seconds: number }[]) {
-    let cost = COLUMN_COUNT_WEIGHT * (items.length < 2 ? 2 - items.length : Math.max(0, items.length - 3));
+    let cost = columnCountCost(items.length);
     items.forEach(({ clip, width, seconds }) => {
-      const { range } = clip;
-      cost += misfitCost(clip, width, seconds);
-      const aspect = Math.min(range.max, Math.max(range.min, width / H));
-      const loss = 1 - Math.min(aspect / range.preferred, range.preferred / aspect);
-      cost += PREF_WEIGHT * Math.min(loss, MAX_CROP_LOSS) + EXCESS_CROP_WEIGHT * Math.max(0, loss - MAX_CROP_LOSS);
-      if (clip.size != null) {
-        // crop height as in getCropForAspect (fill/pillarbox); overestimates letterbox, which is penalized anyway
-        const { maxWidth, maxHeight, minHeight } = clip.size;
-        const cropHeight = Math.max(minHeight, Math.min(maxHeight, maxWidth / aspect));
-        cost += UPSCALE_WEIGHT * Math.max(0, H / cropHeight - 2);
-      }
+      cost += misfitCost(clip, width, seconds) + columnCost(clip, width);
     });
     return cost;
   }
@@ -551,11 +587,59 @@ export function planMix({ clips: inputClips, settings }: PlanMixInput): MixPlan 
     const transitionOut = Math.min(D, (endTime - startTime) / 2);
     if (transitionOut > 0) placements[i] = { ...placement, transitionOut };
   });
-  const planWithoutWarnings: MixPlan = { width: W, height: H, duration, placements, layouts, warnings: [] };
+  const planWithoutWarnings: MixPlan = { ...output, duration, placements, layouts, warnings: [] };
   const plan: MixPlan = { ...planWithoutWarnings, warnings: getPlanWarnings(planWithoutWarnings, inputClips, D) };
 
+  // --- whole-plan score (see PlanScore) ---
+
+  const score: PlanScore = { total: 0, fill: 0, clips: 0, relayouts: RELAYOUT_WEIGHT * (layouts.length - 1), order: 0 };
+  const segmentEnd = (i: number) => Math.min(layouts[i + 1]?.time ?? duration, duration);
+  layouts.forEach((layout, i) => {
+    const fill = layout.fills.reduce((acc, f) => acc + f.width, 0);
+    if (layout.columns.length > 0) score.fill += fillCost(fill, segmentEnd(i) - layout.time);
+  });
+  placements.forEach((placement, pickIndex) => {
+    const clip = allClips.get(placement.clipId)!;
+    score.order += ORDER_WEIGHT * Math.abs(pickIndex - clip.base);
+    const seconds = placement.endTime - placement.startTime;
+    let letterboxed = false;
+    layouts.forEach((layout, i) => {
+      // a layout counts from its start (the target widths, also during its animation)
+      const shown = Math.min(segmentEnd(i), placement.endTime) - Math.max(layout.time, placement.startTime);
+      const col = layout.columns.find((c) => c.column === placement.column);
+      if (shown <= EPS || col == null) return;
+      score.clips += (shown / seconds) * (columnCost(clip, col.width) + columnCountCost(layout.columns.length))
+        + misfitFillCost(clip, col.width, shown);
+      letterboxed ||= getColumnFit(clip.range, col.width, H) === 'letterbox';
+    });
+    if (letterboxed) score.clips += LETTERBOX_WEIGHT;
+  });
+  score.total = score.fill + score.clips + score.relayouts + score.order;
+
+  return { plan, score };
+}
+
+/**
+ * Plan the montage: which clip plays in which column (or row) and when, and how they are laid out over time.
+ * Pure and deterministic. See 04-diseno §3 for the rules and invariants (checked by {@link validatePlan}).
+ *
+ * The main axis is `settings.axis`, or else follows the output (B5, {@link getDefaultAxis}): columns in landscape,
+ * rows in portrait. A square output is planned both ways and the plan with the lower {@link PlanScore} total wins
+ * (ties: columns), once for the whole project.
+ */
+export function planMix(input: PlanMixInput): MixPlan {
+  const axis = input.settings.axis ?? getDefaultAxis(input.settings);
+  let plan: MixPlan;
+  if (axis != null) {
+    ({ plan } = planMixAxis(input, axis));
+  } else {
+    const columns = planMixAxis(input, 'columns');
+    const rows = planMixAxis(input, 'rows');
+    ({ plan } = rows.score.total < columns.score.total - EPS ? rows : columns);
+  }
+
   if (import.meta.env.DEV) {
-    const issues = validatePlan(plan, { clips: inputClips, settings });
+    const issues = validatePlan(plan, input);
     if (issues.length > 0) console.error('Invalid montage plan', issues);
   }
   return plan;

@@ -1,0 +1,36 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`rows (T29) > animated chunk: row layers of the full width, per-frame y, horizontal gap bars 1`] = `
+"[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1080:1400:0:260,split[s3][s4];
+[s4]scale=136:98:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=136:98,boxblur=luma_radius=6:luma_power=2,scale=1080:776:flags=bilinear,setsar=1[base2];
+[s3]scale=w='488+2*gte(t,0.016667)+4*gte(t,0.05)+6*gte(t,0.083333)+8*gte(t,0.116667)+10*gte(t,0.15)+10*gte(t,0.183333)+10*gte(t,0.216667)+12*gte(t,0.25)+10*gte(t,0.283333)+10*gte(t,0.316667)+10*gte(t,0.35)+8*gte(t,0.383333)+6*gte(t,0.416667)+4*gte(t,0.45)':h='632+2*gte(t,0.016667)+6*gte(t,0.05)+8*gte(t,0.083333)+10*gte(t,0.116667)+12*gte(t,0.15)+14*gte(t,0.183333)+14*gte(t,0.216667)+14*gte(t,0.25)+14*gte(t,0.283333)+14*gte(t,0.316667)+12*gte(t,0.35)+10*gte(t,0.383333)+8*gte(t,0.416667)+6*gte(t,0.45)':eval=frame:flags=bicubic,setsar=1[sc1];
+[base2][sc1]overlay=x='296-2*gte(t,0.05)-4*gte(t,0.083333)-4*gte(t,0.116667)-4*gte(t,0.15)-6*gte(t,0.183333)-4*gte(t,0.216667)-6*gte(t,0.25)-6*gte(t,0.283333)-4*gte(t,0.316667)-6*gte(t,0.35)-4*gte(t,0.383333)-2*gte(t,0.416667)-2*gte(t,0.45)':y=0:eval=frame:shortest=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1026:1080:448:0,scale=w='1216-6*gte(t,0.05)-8*gte(t,0.083333)-10*gte(t,0.116667)-10*gte(t,0.15)-12*gte(t,0.183333)-14*gte(t,0.216667)-16*gte(t,0.25)-10*gte(t,0.283333)-14*gte(t,0.316667)-12*gte(t,0.35)-10*gte(t,0.383333)-6*gte(t,0.416667)-8*gte(t,0.45)':h='1280-6*gte(t,0.05)-8*gte(t,0.083333)-10*gte(t,0.116667)-12*gte(t,0.15)-14*gte(t,0.183333)-14*gte(t,0.216667)-14*gte(t,0.25)-14*gte(t,0.283333)-14*gte(t,0.316667)-12*gte(t,0.35)-10*gte(t,0.383333)-8*gte(t,0.416667)-6*gte(t,0.45)':eval=frame:flags=bicubic,setsar=1[sc6];
+color=c=black:s=1080x1280:r=30:d=0.533333,trim=end_frame=15[base7];
+[base7][sc6]overlay=x='-66+2*gte(t,0.05)+4*gte(t,0.083333)+4*gte(t,0.116667)+6*gte(t,0.15)+6*gte(t,0.183333)+8*gte(t,0.216667)+8*gte(t,0.25)+4*gte(t,0.283333)+6*gte(t,0.316667)+8*gte(t,0.35)+4*gte(t,0.383333)+4*gte(t,0.416667)+2*gte(t,0.45)':y=0:eval=frame:shortest=1[clip5];
+[2:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=684:720:298:0,scale=w='1216-4*gte(t,0.05)-8*gte(t,0.083333)-12*gte(t,0.116667)-10*gte(t,0.15)-12*gte(t,0.183333)-14*gte(t,0.216667)-16*gte(t,0.25)-12*gte(t,0.283333)-12*gte(t,0.316667)-12*gte(t,0.35)-10*gte(t,0.383333)-6*gte(t,0.416667)-8*gte(t,0.45)':h='1280-6*gte(t,0.05)-8*gte(t,0.083333)-10*gte(t,0.116667)-12*gte(t,0.15)-14*gte(t,0.183333)-14*gte(t,0.216667)-14*gte(t,0.25)-14*gte(t,0.283333)-14*gte(t,0.316667)-12*gte(t,0.35)-10*gte(t,0.383333)-8*gte(t,0.416667)-6*gte(t,0.45)':eval=frame:flags=bicubic,setsar=1[sc9];
+color=c=black:s=1080x1280:r=30:d=0.533333,trim=end_frame=15[base10];
+[base10][sc9]overlay=x='-68+4*gte(t,0.083333)+8*gte(t,0.116667)+4*gte(t,0.15)+8*gte(t,0.183333)+6*gte(t,0.216667)+8*gte(t,0.25)+6*gte(t,0.283333)+4*gte(t,0.316667)+8*gte(t,0.35)+6*gte(t,0.383333)+2*gte(t,0.416667)+4*gte(t,0.45)':y=0:eval=frame:shortest=1[clip8];
+[clip5][clip8]xfade=transition=fade:duration=0.5:offset=0[x11];
+color=c=0x303030:s=1080x1920:r=30:d=0.533333,trim=end_frame=15,format=yuv420p[cv12];
+[cv12][clip0]overlay=x=0:y=0:eof_action=pass[cv13];
+[cv13][x11]overlay=x=0:y='640+2*gte(t,0.016667)+4*gte(t,0.05)+8*gte(t,0.083333)+12*gte(t,0.116667)+12*gte(t,0.15)+12*gte(t,0.183333)+14*gte(t,0.216667)+16*gte(t,0.25)+14*gte(t,0.283333)+12*gte(t,0.316667)+12*gte(t,0.35)+12*gte(t,0.383333)+8*gte(t,0.416667)+4*gte(t,0.45)':eval=frame:eof_action=pass[cv14];
+color=c=0x303030:s=1080x8:r=30:d=0.533333,trim=end_frame=15[gap15];
+[cv14][gap15]overlay=x=0:y='632+2*gte(t,0.016667)+4*gte(t,0.05)+8*gte(t,0.083333)+12*gte(t,0.116667)+12*gte(t,0.15)+12*gte(t,0.183333)+14*gte(t,0.216667)+16*gte(t,0.25)+14*gte(t,0.283333)+12*gte(t,0.316667)+12*gte(t,0.35)+12*gte(t,0.383333)+8*gte(t,0.416667)+4*gte(t,0.45)':eval=frame[cv16];
+[cv16]format=yuv420p[vout]"
+`;
+
+exports[`rows (T29) > static chunk with a pillarboxed rigid square in a wide row 1`] = `
+"[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1080:1080:0:0,split[s3][s4];
+[s3]scale=360:360:flags=bicubic,setsar=1[fg1];
+[s4]scale=46:56:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=46:56,boxblur=luma_radius=6:luma_power=2,scale=360:440:flags=bilinear,setsar=1[bg2];
+[bg2][fg1]overlay=x=0:y=40:shortest=1[clip0];
+[fsrc6]scale=46:12:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=46:12,boxblur=luma_radius=3:luma_power=2,scale=360:100:flags=bilinear,setsar=1[fill5];
+[fsrc8]scale=46:12:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=46:12,boxblur=luma_radius=3:luma_power=2,scale=360:100:flags=bilinear,setsar=1[fill7];
+[clip0]split=3[m9][fsrc6][fsrc8];
+color=c=0x303030:s=360x640:r=30:d=2.033333,trim=end_frame=60,format=yuv420p[cv10];
+[cv10][fill5]overlay=x=0:y=0[cv11];
+[cv11][m9]overlay=x=0:y=100:eof_action=pass[cv12];
+[cv12][fill7]overlay=x=0:y=540[cv13];
+[cv13]format=yuv420p[vout]"
+`;

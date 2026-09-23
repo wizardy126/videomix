@@ -7,7 +7,8 @@
 1. `scan-i18n` y revisión del español.
 2. Manual de usuario: todas las mejoras v2.
 3. Proyecto de ejemplo en 9:16 con textos, lista de música y ducking, renderizado y revisado.
-4. Revisión de atajos y menús nuevos.
+4. **Pendiente de T29**: al cambiar `settings.output.aspect`, reajustar las cajas de los overlays de imagen para conservar la proporción de la imagen, sin estirarla (centradas en su caja actual). Con test.
+5. Revisión de atajos y menús nuevos.
 
 ## Criterios de aceptación
 

@@ -1,3 +1,4 @@
+import { getPlanAxis } from './types';
 import type { MixPlan, PlanWarning } from './types';
 
 const s = (t: number) => t.toFixed(2);
@@ -15,12 +16,14 @@ function formatWarning(w: PlanWarning) {
 
 /**
  * Compact text view of a plan, for tests and debugging:
- * one line per layout (`time+animation: fill=px | cN=px | …`), one per column (clips with start-end, `>` marks a
+ * a header (size, `rows` for a vertical plan, duration), one line per layout (`time+animation: fill=px | cN=px | …`,
+ * along the main axis), one per column (clips with start-end, `>` marks a
  * crossfaded substitution, `~fade` the end-of-video fade out to fill) and one per warning.
  */
 // eslint-disable-next-line import/prefer-default-export
 export function formatPlan(plan: MixPlan) {
-  const lines = [`plan ${plan.width}x${plan.height}, ${s(plan.duration)}s`];
+  // rows (T29): the layout lengths are heights, top to bottom
+  const lines = [`plan ${plan.width}x${plan.height}${getPlanAxis(plan) === 'rows' ? ' rows' : ''}, ${s(plan.duration)}s`];
   plan.layouts.forEach((layout) => {
     const items = [
       ...layout.columns.map((c) => ({ x: c.x, text: `c${c.column}=${c.width}` })),

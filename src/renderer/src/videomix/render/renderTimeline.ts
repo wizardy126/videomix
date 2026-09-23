@@ -1,10 +1,13 @@
 import invariant from 'tiny-invariant';
 
+import { getPlanAxisLengths } from '../planner/types';
 import type { ColumnPlacement, LayoutKeyframe, MixPlan } from '../planner/types';
 import { getAnimatedColumn } from '../planner/validatePlan';
 
 // Frame-based view of a MixPlan (ADR-001 "todo en fotogramas"): every time is converted once with f = round(t·fps),
 // so chunk cuts, xfades and the per-frame geometry agree on the same frame numbers.
+// Geometry is along the plan's main axis (T29): `x`/`width` are an output x/width for columns and an output y/height
+// for rows (`getCellRect` gives the output rect); "left"/"right" read "top"/"bottom" for rows.
 
 export const smoothstep = (p: number) => p * p * (3 - 2 * p);
 
@@ -52,6 +55,7 @@ export interface RenderTimeline {
   keyframes: KeyframeFrames[],
 }
 
+/** Offset and length of a column (row) along the main axis, output px. */
 export interface ColumnGeometry { x: number, width: number }
 
 /** Index of the keyframe whose change has started at frame `f` (the last one with `f0 ≤ f`). */
@@ -120,6 +124,7 @@ export function getRenderTimeline(plan: MixPlan, settings: TimelineSettings): Re
  */
 export function getColumnsAtFrame(tl: RenderTimeline, f: number): Map<number, ColumnGeometry> {
   const { gap } = tl.settings;
+  const { main } = getPlanAxisLengths(tl.plan);
   const k = getKeyframeIndexAtFrame(tl, f);
   const { keyframe, f0, f1 } = tl.keyframes[k]!;
   const res = new Map<number, ColumnGeometry>();
@@ -129,8 +134,8 @@ export function getColumnsAtFrame(tl: RenderTimeline, f: number): Map<number, Co
     const ids = new Set([...prev.columns, ...keyframe.columns].map((c) => c.column));
     for (const id of ids) {
       // a column missing from one end is there at width 0 next to its right neighbour (same rule as the planner)
-      const a = getAnimatedColumn(prev, keyframe, id, tl.plan.width, gap);
-      const b = getAnimatedColumn(keyframe, prev, id, tl.plan.width, gap);
+      const a = getAnimatedColumn(prev, keyframe, id, main, gap);
+      const b = getAnimatedColumn(keyframe, prev, id, main, gap);
       res.set(id, { x: lerp(a.x, b.x, p), width: lerp(a.width, b.width, p) });
     }
     return res;
@@ -147,7 +152,7 @@ export function getColumnsAtFrame(tl: RenderTimeline, f: number): Map<number, Co
  * columns the gap stays next to the right one, so when that one is past W the fill is exactly the right edge fill.
  */
 export function getFillSpansAtFrame(tl: RenderTimeline, columns: Map<number, ColumnGeometry>) {
-  const W = tl.plan.width;
+  const { main: W } = getPlanAxisLengths(tl.plan);
   const { gap } = tl.settings;
   const res = new Map<string, ColumnGeometry>();
   const sorted = [...columns.entries()].sort(([, a], [, b]) => a.x - b.x);

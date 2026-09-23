@@ -171,7 +171,7 @@ async function fromProject() {
   if (missingSourceIds.length > 0) throw new Error(`Missing sources: ${missingSourceIds.join(', ')} (run yarn generate-test-media?)`);
   const input = getPlannerInput(project);
   // The plan is computed for the output size (preview path of ADR-001); the gap scales with it.
-  const gap = 2 * Math.round((input.settings.gap * height) / 1080 / 2);
+  const gap = 2 * Math.round((input.settings.gap * Math.min(width, height)) / 1080 / 2); // by the short side (T29)
   input.settings = { ...input.settings, width, height, gap };
   const plan = planMix(input);
   return {

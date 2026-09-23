@@ -7,7 +7,7 @@ import type { PlannerClip } from '../planner/types';
 import { blurCover, buildVideoGraph, formatNumber, stepExpr, toFfmpegColor } from './buildVideoGraph';
 import type { RenderClip } from './buildVideoGraph';
 import { getBusyIntervals, getRenderChunks } from './renderChunks';
-import { testClips, testPlans, testSettings, testSourcePaths, testSources } from './renderTestFixtures';
+import { testClips, testPlans, testSettings, testSourcePaths, testSources, toRowsPlan } from './renderTestFixtures';
 import type { TestSourceId } from './renderTestFixtures';
 import { getColumnsAtFrame, getFillSpansAtFrame, getRenderTimeline } from './renderTimeline';
 import { parseFilterGraph, verifyFilterGraph } from './verifyFilterGraph';
@@ -118,10 +118,66 @@ describe('buildVideoGraph', () => {
   });
 });
 
+describe('rows (T29)', () => {
+  const settings = { fps: 30, gap: 8, transitionDuration: 0.5 };
+
+  test('timeline geometry is along the vertical axis: a removed row collapses past the bottom edge with its gap', () => {
+    const tl = getRenderTimeline(toRowsPlan(testPlans.fills), settings);
+    // the new row grows from height 0 past H (640) + gap, like a column past W
+    expect(getColumnsAtFrame(tl, 60).get(1)).toEqual({ x: 648, width: 0 });
+    expect([...getFillSpansAtFrame(tl, getColumnsAtFrame(tl, 0))]).toEqual([['L', { x: 0, width: 100 }], ['R', { x: 540, width: 100 }]]);
+  });
+
+  test.each(Object.keys(testPlans) as (keyof typeof testPlans)[])('%s as rows: every chunk graph is valid', (name) => {
+    const plan = toRowsPlan(testPlans[name]);
+    const tl = getRenderTimeline(plan, settings);
+    for (const chunk of getRenderChunks(tl)) {
+      for (const fill of ['blur', 'color'] as const) {
+        const graph = buildVideoGraph({ timeline: tl, clips: testClips, sourcePaths: testSourcePaths('/m'), settings: testSettings({ fill: { mode: fill, color: '#000000' } }), chunk });
+        const sizes = graph.inputs.map((args) => Object.values(testSources).find((s) => args.at(-1) === `/m/${s.file}`));
+        expect(verifyFilterGraph(graph, { sourceSizes: sizes }), `chunk ${chunk.index}`).toEqual([]);
+        // rows are composed top to bottom: every element goes on the canvas at x=0
+        expect(graph.filterComplex).not.toMatch(/\[cv\d+\]\[\w+\]overlay=x=[^0]/);
+        expect(graph.filterComplex).toContain(`s=${plan.width}x${plan.height}:`);
+      }
+    }
+  });
+
+  test('animated chunk: row layers of the full width, per-frame y, horizontal gap bars', () => {
+    const plan = toRowsPlan(testPlans.relayout);
+    const tl = getRenderTimeline(plan, settings);
+    const graph = buildVideoGraph({ timeline: tl, clips: testClips, sourcePaths: testSourcePaths('/m'), settings: testSettings({ fadeInOut: false }), chunk: { f0: 60, f1: 75 } });
+    // row 1 moves down while row 0 grows 632 → 776: y per frame
+    expect(graph.filterComplex).toMatch(/overlay=x=0:y='640\+\d+\*gte\(t,[^']+':eval=frame:eof_action=pass/);
+    // gap bar: the full width, gap px high
+    expect(graph.filterComplex).toMatch(/color=c=0x303030:s=1080x8:r=30:d=0.533333,trim=end_frame=15\[gap\d+\]/);
+    // row layers are 1080 px wide and as high as the row's longest extent in the chunk (row 0 over its blurred cover)
+    expect(graph.filterComplex).toContain('scale=1080:776:flags=bilinear');
+    expect(graph.filterComplex).toContain('color=c=black:s=1080x1280:');
+    expect(graph.filterComplex).toMatchSnapshot();
+  });
+
+  test('static chunk with a pillarboxed rigid square in a wide row', () => {
+    const plan = toRowsPlan(testPlans.fills);
+    const tl = getRenderTimeline(plan, settings);
+    const graph = buildVideoGraph({ timeline: tl, clips: testClips, sourcePaths: testSourcePaths('/m'), settings: testSettings({ fadeInOut: false }), chunk: { f0: 0, f1: 60 } });
+    // the square is 440 px high in a 360 px wide row: letterbox in output terms (fill above and below)
+    expect(graph.filterComplex).toContain('scale=360:360:flags=bicubic');
+    expect(graph.filterComplex).toContain('overlay=x=0:y=40:shortest=1');
+    expect(graph.filterComplex).toMatchSnapshot();
+  });
+});
+
 describe('random plans from the planner', () => {
   const sourceIds = Object.keys(testSources) as TestSourceId[];
 
-  test.each(Array.from({ length: 25 }, (_v, i) => i + 1))('seed %i: every chunk graph is valid', (seed) => {
+  // 16:9 (the original 25), then 9:16 (rows) and 1:1 (either axis) (T29)
+  const cases = [
+    ...Array.from({ length: 25 }, (_v, i) => [i + 1, 640, 360] as const),
+    ...Array.from({ length: 15 }, (_v, i) => [i + 101, 360, 640] as const),
+    ...Array.from({ length: 15 }, (_v, i) => [i + 201, 360, 360] as const),
+  ];
+  test.each(cases)('seed %i at %ix%i: every chunk graph is valid', (seed, outWidth, outHeight) => {
     const random = createRandom(seed);
     const clips: RenderClip[] = [];
     const plannerClips: PlannerClip[] = [];
@@ -142,7 +198,7 @@ describe('random plans from the planner', () => {
     const gap = [0, 4, 8][seed % 3]!;
     const transition = seed % 5 === 0 ? 0 : 0.5;
     const settings = testSettings({ fps, gap: { width: gap, color: '#101010' }, transition: { type: 'wipeleft', duration: transition }, fill: { mode: seed % 2 === 0 ? 'blur' : 'color', color: '#000000' } });
-    const plan = planMix({ clips: plannerClips, settings: { width: 640, height: 360, maxColumns: 3, gap, reorderWindow: 3, order: { mode: 'random', seed }, transitionDuration: transition } });
+    const plan = planMix({ clips: plannerClips, settings: { width: outWidth, height: outHeight, maxColumns: 3, gap, reorderWindow: 3, order: { mode: 'random', seed }, transitionDuration: transition } });
     const tl = getRenderTimeline(plan, { fps, gap, transitionDuration: transition });
     const chunks = getRenderChunks(tl, { maxChunkSeconds: 3 });
     expect(chunks.reduce((acc, c) => acc + c.f1 - c.f0, 0)).toBe(tl.totalFrames);

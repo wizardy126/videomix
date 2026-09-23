@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { describe, test, expect } from 'vitest';
 
-import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, ORPHAN_TEMP_MAX_AGE_MS, getPreviewFps, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, scaleGap, withOutputExtension } from './renderOutput';
+import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, ORPHAN_TEMP_MAX_AGE_MS, getPreviewFps, getPreviewOutputPath, getPreviewSize, getRenderWarnings, getRenderWorkDir, planRender, scaleGap, withOutputExtension } from './renderOutput';
 import { createEmptyMixProject } from '../types';
 import type { MixClip, MixProject } from '../types';
 
@@ -118,6 +118,32 @@ describe('planRender', () => {
     expect(plan.duration).toBeCloseTo(final.duration);
   });
 
+  test('preview keeps the output aspect (T29)', () => {
+    expect(getPreviewSize({ aspect: '16:9', resolution: '2160' })).toEqual({ width: 640, height: 360 });
+    expect(getPreviewSize({ aspect: '9:16', resolution: '1080' })).toEqual({ width: 360, height: 640 });
+    expect(getPreviewSize({ aspect: '1:1', resolution: '720' })).toEqual({ width: 360, height: 360 });
+    const project = testProject();
+    const vertical = { ...project, settings: { ...project.settings, output: { aspect: '9:16', resolution: '1080' } as const } };
+    const { plan, settings } = planRender(vertical, { preview: true });
+    expect(plan).toMatchObject({ width: 360, height: 640, axis: 'rows' });
+    // scaled by the short side: 8 px at 1080 → 2 px at 360
+    expect(settings.gap.width).toBe(2);
+    expect(planRender(vertical).plan).toMatchObject({ width: 1080, height: 1920, axis: 'rows' });
+  });
+
+  test('1:1 preview: same axis as the final render', () => {
+    const project = testProject();
+    for (const clips of [project.clips, project.clips.map((c) => ({ ...c, maxRect: { x: 0, y: 0, width: 1920, height: 1080 }, minRect: { x: 0, y: 140, width: 1920, height: 800 } }))]) {
+      const square = { clips, settings: { ...project.settings, output: { aspect: '1:1', resolution: '1080' } as const } };
+      const final = planRender(square).plan;
+      expect(planRender(square, { preview: true }).plan).toMatchObject({ width: 360, height: 360, axis: final.axis });
+    }
+  });
+
+  test('a fill warning of a vertical plan is about the height', () => {
+    expect(getRenderWarnings({ axis: 'rows', warnings: [{ type: 'fill', time: 1, width: 40 }] }, [])).toEqual([{ type: 'fill', time: 1, width: 40, rows: true }]);
+  });
+
   test('warnings to confirm: upscale with the clip name, one fill', () => {
     const warnings = getRenderWarnings({
       warnings: [
@@ -129,7 +155,7 @@ describe('planRender', () => {
       ],
     }, testProject().clips);
     expect(warnings).toEqual([
-      { type: 'fill', time: 0, width: 100 },
+      { type: 'fill', time: 0, width: 100, rows: false },
       { type: 'upscale', clipName: 'Clip d', factor: 3.2 },
       { type: 'pillarbox', clipName: 'x', time: 2 },
     ]);

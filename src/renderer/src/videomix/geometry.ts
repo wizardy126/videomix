@@ -166,6 +166,39 @@ export function getScaleFactor(crop: Rect, cellWidth: number, cellHeight: number
 }
 
 /**
+ * Main axis of the montage (B5, 04-diseno §9): `columns` side by side (full height, landscape output) or `rows`
+ * stacked (full width, portrait output). The planner and the render work in "main axis" units: a column/row has an
+ * offset and a length along the main axis and always spans the whole cross axis. For rows everything is the transpose
+ * of the columns case: aspect ratios become 1 / a ({@link transposeAspectRange}) and rects swap x/y and width/height
+ * ({@link transposeRect}), so the column algorithms work unchanged on transposed input.
+ */
+export type LayoutAxis = 'columns' | 'rows';
+
+/** Swap x/y and width/height. */
+export const transposeRect = ({ x, y, width, height }: Rect): Rect => ({ x: y, y: x, width: height, height: width });
+
+/** Aspect range of the transposed clip: a → 1 / a (the interval flips). */
+export const transposeAspectRange = (range: AspectRange): AspectRange => ({ min: 1 / range.max, max: 1 / range.min, preferred: 1 / range.preferred });
+
+/** Aspect range in main-axis units (main length / cross length): as is for columns, transposed for rows. */
+export const getMainAspectRange = (range: AspectRange, axis: LayoutAxis) => (axis === 'columns' ? range : transposeAspectRange(range));
+
+/** Frame lengths along the main axis and across it. */
+export const getAxisLengths = (axis: LayoutAxis, { width, height }: { width: number, height: number }) => (
+  axis === 'columns' ? { main: width, cross: height } : { main: height, cross: width }
+);
+
+/**
+ * Output rect of a column (`columns`) or row (`rows`) given by its main-axis `offset` and `length`: it spans the whole
+ * cross axis.
+ */
+export const getCellRect = (axis: LayoutAxis, { offset, length }: { offset: number, length: number }, frame: { width: number, height: number }): Rect => (
+  axis === 'columns'
+    ? { x: offset, y: 0, width: length, height: frame.height }
+    : { x: 0, y: offset, width: frame.width, height: length }
+);
+
+/**
  * Column width bounds in output pixels for a clip at output height `height`: even integers with
  * `min/height ≥ range.min` and `max/height ≤ range.max`, and the preferred width (real, clamped into them).
  * If the range is too narrow to contain an even width, both bounds become the even width closest to preferred

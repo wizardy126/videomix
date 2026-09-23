@@ -9,6 +9,8 @@ import useUserSettings from '../../hooks/useUserSettings';
 import { controlsBackground, darkModeTransition, timelineBackground, warningColor } from '../../colors';
 import { formatDuration } from '../../util/duration';
 import type { MixClip, MixOverlay, MixSettings } from '../types';
+import { getCellRect } from '../geometry';
+import { getPlanAxis } from '../planner/types';
 import type { ColumnPlacement, MixPlan, PlanWarning } from '../planner/types';
 import { getColumnsAtFrame, getFillSpansAtFrame, getRenderTimeline } from '../render/renderTimeline';
 import { getColumnFillSpans, getLaneColumns, getPlacementAt, getPlacementWarnings, timeToPercent } from '../mixPlanLayout';
@@ -35,7 +37,9 @@ const { pathToFileURL } = window.require('@electron/remote').require('./index.js
 const LANE_HEIGHT = 22;
 const OVERLAY_ROW_HEIGHT = 16;
 const MAX_LANES_HEIGHT = 170;
-const FRAME_HEIGHT = 108;
+/** The mini frame fits in this box with the output's aspect: 192×108 in 16:9, 84×150 in 9:16, 150×150 in 1:1. */
+const FRAME_MAX_WIDTH = 192;
+const FRAME_MAX_HEIGHT = 150;
 /** A 0 s block (e.g. a sound whose duration isn't known yet) still gets this share of the axis, to be clickable. */
 const MIN_BLOCK_FRACTION = 0.01;
 
@@ -58,22 +62,24 @@ const overlayColors: Record<MixOverlay['type'], string> = {
 
 const toolbarButtonStyle: CSSProperties = { font: 'inherit', fontSize: '.75em', padding: '.1em .5em', border: '1px solid var(--gray-7)', borderRadius: '.3em', background: 'var(--gray-3)', color: 'var(--gray-12)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '.3em', whiteSpace: 'nowrap' };
 
-function warningTooltip(t: (key: string) => string, warnings: PlanWarning[]) {
+function warningTooltip(t: (key: string) => string, warnings: PlanWarning[], rows: boolean) {
   return warnings.map((w) => {
     if (w.type === 'upscale') return t('Enlarged more than the recommended limit');
-    if (w.type === 'pillarbox' || w.type === 'letterbox') return t('Gets fill around it in this column');
+    // a lane is a row in a vertical plan (T29)
+    if (w.type === 'pillarbox' || w.type === 'letterbox') return rows ? t('Gets fill around it in this row') : t('Gets fill around it in this column');
     return t('Its transition is shortened');
   }).join('; ');
 }
 
 // eslint-disable-next-line react/display-name
-const Block = memo(({ placement, laneWidthPercent, color, name, warnings, isSelected }: {
+const Block = memo(({ placement, laneWidthPercent, color, name, warnings, isSelected, rows }: {
   placement: ColumnPlacement,
   laneWidthPercent: { left: number, width: number },
   color: string,
   name: string,
   warnings: PlanWarning[],
   isSelected: boolean,
+  rows: boolean,
 }) => {
   const { t } = useTranslation();
   const duration = placement.endTime - placement.startTime;
@@ -96,7 +102,7 @@ const Block = memo(({ placement, laneWidthPercent, color, name, warnings, isSele
   }), [color, isSelected, laneWidthPercent.left, laneWidthPercent.width]);
 
   return (
-    <div style={style} title={`${name}${warnings.length > 0 ? ` — ${warningTooltip(t, warnings)}` : ''}`}>
+    <div style={style} title={`${name}${warnings.length > 0 ? ` — ${warningTooltip(t, warnings, rows)}` : ''}`}>
       {inFrac > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${inFrac * 100}%`, background: 'linear-gradient(90deg, rgba(255,255,255,.4), transparent)', pointerEvents: 'none' }} />}
       {outFrac > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: `${outFrac * 100}%`, background: 'linear-gradient(90deg, transparent, rgba(0,0,0,.4))', pointerEvents: 'none' }} />}
       <div className="no-user-select" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: '.2em', padding: '0 .3em', fontSize: '.75em', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', pointerEvents: 'none' }}>
@@ -254,10 +260,13 @@ function handlePosition(handle: DragHandle): CSSProperties {
   return { position: 'absolute', left: `${x}%`, top: `${y}%`, width: 7, height: 7, transform: 'translate(-50%, -50%)', background: 'white', border: '1px solid var(--gray-12)', boxSizing: 'border-box', cursor: `${handle}-resize`, touchAction: 'none' };
 }
 
-/** Mini view of the output frame at `time` (real column widths, no video): matches the render's per-frame geometry. */
+/**
+ * Mini view of the output frame at `time` (real column widths, no video): matches the render's per-frame geometry.
+ * Columns side by side, or rows stacked in a vertical plan (T29).
+ */
 // eslint-disable-next-line react/display-name
 const FramePreview = memo(({ plan, tl, time, clipsById, getColor, children }: {
-  plan: Pick<MixPlan, 'width' | 'height' | 'placements'>,
+  plan: Pick<MixPlan, 'width' | 'height' | 'axis' | 'placements'>,
   tl: ReturnType<typeof getRenderTimeline>,
   time: number,
   clipsById: Map<string, MixClip>,
@@ -268,13 +277,19 @@ const FramePreview = memo(({ plan, tl, time, clipsById, getColor, children }: {
   const columns = getColumnsAtFrame(tl, frame);
   const fills = getFillSpansAtFrame(tl, columns);
   const placementAt = (column: number) => plan.placements.find((p) => p.column === column && time >= p.startTime && time < p.endTime);
+  const axis = getPlanAxis(plan);
+  // main-axis span → percentages of the frame
+  const cellStyle = ({ x, width }: { x: number, width: number }): CSSProperties => {
+    const rect = getCellRect(axis, { offset: x, length: width }, plan);
+    return { position: 'absolute', left: `${(rect.x / plan.width) * 100}%`, top: `${(rect.y / plan.height) * 100}%`, width: `${(rect.width / plan.width) * 100}%`, height: `${(rect.height / plan.height) * 100}%` };
+  };
 
   return (
     // container-type: the countdown text is sized in `cqh` (a fraction of the frame height, like the render)
     <div style={{ position: 'relative', width: '100%', aspectRatio: `${plan.width} / ${plan.height}`, background: 'var(--gray-3)', overflow: 'hidden', borderRadius: 3, containerType: 'size' }}>
       {[...fills.values()].map((f) => (
         // eslint-disable-next-line react/no-array-index-key
-        <div key={`${f.x}-${f.width}`} style={{ ...fillStyle, left: `${(f.x / plan.width) * 100}%`, width: `${(f.width / plan.width) * 100}%` }} />
+        <div key={`${f.x}-${f.width}`} style={{ ...fillStyle, ...cellStyle(f) }} />
       ))}
       {[...columns.entries()].map(([column, geom]) => {
         const placement = placementAt(column);
@@ -282,7 +297,7 @@ const FramePreview = memo(({ plan, tl, time, clipsById, getColor, children }: {
         return (
           <div
             key={column}
-            style={{ position: 'absolute', top: 0, bottom: 0, left: `${(geom.x / plan.width) * 100}%`, width: `${(geom.width / plan.width) * 100}%`, background: clip != null ? getColor(clip) : 'var(--gray-6)' }}
+            style={{ ...cellStyle(geom), background: clip != null ? getColor(clip) : 'var(--gray-6)' }}
           />
         );
       })}
@@ -458,7 +473,7 @@ function MixPlanView({ clips, settings, selectedClipId, onSelect, mixOverlays, o
 
   return (
     <div style={{ flexGrow: 1, display: 'flex', overflow: 'hidden', background: controlsBackground, transition: darkModeTransition, padding: '.3em .5em', gap: '.5em', boxSizing: 'border-box' }}>
-      <div style={{ width: FRAME_HEIGHT * (plan.width / plan.height), flexShrink: 0 }}>
+      <div style={{ width: Math.min(FRAME_MAX_WIDTH, FRAME_MAX_HEIGHT * (plan.width / plan.height)), flexShrink: 0 }}>
         <div ref={frameRef}>
           <FramePreview plan={plan} tl={tl} time={frameTime} clipsById={clipsById} getColor={getColor}>
             {frameBoxes.map((frameBox) => (
@@ -555,6 +570,7 @@ function MixPlanView({ clips, settings, selectedClipId, onSelect, mixOverlays, o
                       name={clip?.name ?? placement.clipId}
                       warnings={getPlacementWarnings(plan, placement)}
                       isSelected={placement.clipId === selectedClipId}
+                      rows={getPlanAxis(plan) === 'rows'}
                     />
                   );
                 })}

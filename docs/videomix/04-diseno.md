@@ -157,7 +157,7 @@ interface ColumnPlacement {        // un clip reproduciéndose en una columna
 interface LayoutKeyframe {         // disposición de la fila a partir de un instante
   time: number,                    // inicio del cambio
   transitionDuration: number,      // 0 = cambio instantáneo; >0 = animación lineal desde el keyframe anterior
-  columns: { column: number, x: number, width: number }[],  // en píxeles de salida, izquierda→derecha
+  columns: { column: number, x: number, width: number }[],  // en píxeles de salida, izquierda→derecha  (T29: a lo largo del eje; en filas, y/alto)
   fills: { x: number, width: number }[],                    // relleno estructural (la fila no llega a W)
 }
 
@@ -312,7 +312,12 @@ Todos en `src/renderer/src/videomix/render/`, puros (sin React ni Electron). Det
   - **Hook de audio (T12/T13)**: `buildAudioGraph: (input: AudioGraphInput) => AudioGraph`, con `AudioGraphInput = { plan, clips, sourcePaths, settings, duration }` (`duration` = fotogramas/fps) y `AudioGraph = { inputs, filterComplex, outLabel }`. El job escribe el grafo en `audio.graph.txt` y codifica AAC 192 kbps, 48 kHz, estéreo en `audio.m4a`. Por defecto (`buildSilentAudioGraph`) genera silencio. T13: `buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness })`.
 - **`verifyFilterGraph.ts`**: comprobaciones estructurales para los tests (etiquetas producidas y consumidas una vez, entradas existentes y usadas, `crop` de las entradas dentro del fotograma y par, `split=n`, sin `if()`).
 - **Ejecución** (T13, `render/runRenderJob.ts`, con dependencias inyectadas): escribe `files`, ejecuta la pasada de audio y los bloques con `getChunkConcurrency` (`runFfmpegWithProgress`), luego el `concat` a un nombre parcial (`<nombre>.<id>.part.mp4`) que se renombra al final; borra el directorio temporal siempre y el parcial si falla o se cancela. Progreso = Σ fotogramas / `totalFrames` (la razón de tiempo de main se pasa a fotogramas), más un 1 % para audio y otro para el `concat` (`render/renderProgress.ts`). Orquestación y previsualización en `hooks/useMixRender.ts` (ver [T13](execution/T13-render.md)).
-- **Script de desarrollo**: `node script/videomix/renderPlan.ts [proyecto.vmx] [--size WxH] [--fixture <plan>] [--frames t1,t2]` (sin proyecto, escribe y renderiza un ejemplo con los medios de T02).
+- **Caché de render** (T28, `render/renderCache.ts`, puro): ver [T28](execution/T28-v2-render-incremental.md).
+  - Clave por paso (bloque o pasada de audio) = SHA-256 de sus argumentos sin rutas temporales (el fichero del grafo se sustituye por su contenido y la salida por un marcador) más la identidad (tamaño + mtime) de cada fichero del proyecto que lee (entradas `-i` y fuentes del grafo). Los argumentos del encoder resuelto forman parte de la clave.
+  - `applyRenderCache(job, …)`: cada paso escribe en `<clave>.<run>.part.mp4` dentro de la caché y el ejecutor lo renombra a `v-<clave>.mp4` / `a-<clave>.m4a` al terminar (escritura atómica); el `concat` lee de la caché con rutas absolutas entre comillas.
+  - `runRenderJob` comprueba antes de empezar qué pasos están en caché (`verifyCached`: no vacío y duración de ffprobe dentro de 1 fotograma, 0,1 s el audio) y los cuenta como hechos.
+  - Carpeta `.<nombre>.vmx.cache/` junto al proyecto (sin guardar: `userData/videomix-cache/<id de sesión>`), con `render/` y `preview-<W>x<H>/` separados. Tras un render correcto, `pruneRenderCache` borra lo que no usó ese render en su carpeta y aplica el máximo global `renderCacheMaxBytes` (configStore, 5 GB por defecto, 0 = sin caché) por LRU. Menú Project → "Clear render cache".
+- **Script de desarrollo**: `node script/videomix/renderPlan.ts [proyecto.vmx] [--size WxH] [--fixture <plan>] [--frames t1,t2] [--cache <dir>]` (sin proyecto, escribe y renderiza un ejemplo con los medios de T02).
 - **Tests**: snapshots de argumentos y grafos de 5 planes escritos a mano (`renderTestFixtures.ts`), verificador sobre 25 planes aleatorios del planificador y test con ffmpeg real (`buildRenderJob.ffmpeg.test.ts`, 320×180, se omite sin ffmpeg o sin los medios).
 
 ## 5. Audio
@@ -562,11 +567,14 @@ Requisitos: [01-requisitos §10](01-requisitos.md). Resumen técnico; cada task-
   - En los clips, `pinTime?: number` (fijar a un momento) y `groupId?: string` (agrupar; un grupo necesita ≥ 2 clips: el reducer disuelve los grupos que se quedan con uno).
 
   Los presets (B2) no van en el proyecto: se guardan en la configuración global (`configStore`, clave `overlayStylePresets`, T26). Su tipo, `OverlayStylePreset` (`src/common/videomix/overlayStyles.ts`), guarda solo propiedades de estilo; los esquemas de los overlays de texto, contador y barra se construyen a partir de los mismos esquemas de estilo.
-- **Salida vertical** (T29): el planificador trabaja en un **eje principal**.
-  - En 9:16 se trasponen las proporciones (`a → 1/a`) y los recortes; el resultado son filas.
-  - En 1:1 se prueban ambas disposiciones y se elige la de menor puntuación, o se fija por proyecto si hiciera falta.
-  - El render y la mini vista usan el mismo eje.
-- **Render incremental** (T28): clave de bloque = hash del grafo del bloque + ficheros de entrada (ruta, mtime, tamaño) + parámetros de codificación. Los bloques se guardan en `<proyecto>.vmx.cache/`; el concat final reutiliza los que existan. Hay limpieza de bloques huérfanos.
+- **Salida vertical** (T29, implementado): el planificador trabaja en un **eje principal** (`LayoutAxis = 'columns' | 'rows'`, `geometry.ts`).
+  - `MixPlan.axis` (ausente = `columns`, `getPlanAxis`). En `layouts`, `x`/`width` son desplazamiento y longitud **a lo largo del eje**: x/ancho de salida en columnas, y/alto en filas; una fila ocupa todo el ancho. `getCellRect` da el rectángulo de salida.
+  - En 9:16 se trasponen las proporciones (`a → 1/a`, `transposeAspectRange`) y los rectángulos (`transposeRect`) de los clips y el planificador de columnas trabaja sin cambios sobre el eje vertical: filas a ancho completo apiladas, nunca lado a lado. Un plan en filas es exactamente el plan en columnas de los clips traspuestos (test).
+  - En 1:1, `planMix` planifica en ambos ejes (`planMixAxis`) y gana el de menor `PlanScore` (relleno, recortes/upscale/letterbox por clip ponderados por tiempo, re-layouts y orden, con los pesos de §3.4); empate → columnas. Se decide una vez por proyecto. La previsualización usa el eje que elige el render final.
+  - Avisos (`pillarbox`, `letterbox`, `upscale`) siempre en términos de salida; el `fill` lleva la longitud en el eje (un alto en filas). `validatePlan` comprueba además el tamaño y el eje esperado.
+  - `renderTimeline` y `buildVideoGraph` usan la longitud del eje (`getPlanAxisLengths`): capas de fila a ancho completo ancladas arriba, `overlay=x=0:y=…`, barras de separación horizontales, rellenos y animaciones igual que en columnas. Los overlays (cajas 0..1) no cambian.
+  - UI: selector de proporción en Ajustes → Salida; la mini vista dibuja filas y los carriles del timeline son las filas de arriba abajo. Previsualización: lado corto de 360 px con la proporción de la salida (`getPreviewSize`).
+- **Render incremental** (T28, implementado): clave de bloque = hash del grafo del bloque + ficheros de entrada (ruta, mtime, tamaño) + parámetros de codificación. Los bloques y la pasada de audio se guardan en `.<proyecto>.vmx.cache/` (oculta en macOS/Linux); el concat final reutiliza los que existan. Hay limpieza de bloques huérfanos tras cada render y un tamaño máximo global. Detalle en §4.2.
 - **Encoders** (T25): se detectan en main con `ffmpeg -encoders` más una prueba de codificación corta. Los argumentos se mapean por encoder, con un control de calidad equivalente a CRF.
 - **Previsualización en vivo** (T32):
   - un `<video>` por clip visible, más uno en espera para el siguiente, colocados y recortados con CSS o canvas según `renderTimeline`;

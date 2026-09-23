@@ -9,8 +9,8 @@ import Select from '../../components/Select';
 import Switch from '../../components/Switch';
 import type { EditOptions } from '../hooks/useMixProject';
 import useEncoderAvailability from '../hooks/useEncoderAvailability';
-import { getOutputSize, mixEncoderCodecs, mixEncoderHardware, mixFpsValues, mixOutputResolutions, mixPresets, transitionTypes } from '../types';
-import type { MixEncoderCodec, MixEncoderHardware, MixMusicPlaylist, MixOutput, MixOutputResolution, MixSettings, TransitionType } from '../types';
+import { getOutputSize, mixEncoderCodecs, mixEncoderHardware, mixFpsValues, mixOutputAspects, mixOutputResolutions, mixPresets, transitionTypes } from '../types';
+import type { MixEncoderCodec, MixEncoderHardware, MixMusicPlaylist, MixOutput, MixOutputAspect, MixOutputResolution, MixSettings, TransitionType } from '../types';
 import MixMusicSection from './MixMusicSection';
 
 // e.g. "1080p (1920×1080)", "4K (3840×2160)"
@@ -18,6 +18,13 @@ function getResolutionLabel(output: MixOutput) {
   const { width, height } = getOutputSize(output);
   return `${output.resolution === '2160' ? '4K' : `${output.resolution}p`} (${width}×${height})`;
 }
+
+// B5: 9:16 stacks full-width rows, 1:1 picks columns or rows, whichever fits the clips better (T29)
+const aspectLabels: Record<MixOutputAspect, string> = {
+  '16:9': '16:9 (landscape, clips side by side)',
+  '9:16': '9:16 (vertical, clips stacked)',
+  '1:1': '1:1 (square, side by side or stacked)',
+};
 
 const codecLabels: Record<MixEncoderCodec, string> = {
   h264: 'H.264',
@@ -104,6 +111,10 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ encoder: { ...settings.encoder, hardware: e.target.value as MixEncoderHardware } });
   }, [onChange, settings.encoder]);
 
+  const handleAspectChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
+    onChange({ output: { ...settings.output, aspect: e.target.value as MixOutputAspect } });
+  }, [onChange, settings.output]);
+
   const handleResolutionChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
     onChange({ output: { ...settings.output, resolution: e.target.value as MixOutputResolution } });
   }, [onChange, settings.output]);
@@ -186,6 +197,15 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
           <Section title={t('Output')}>
             {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
             <label style={rowStyle}>
+              {t('Aspect ratio')}<br />
+              <Select value={settings.output.aspect} onChange={handleAspectChange}>
+                {mixOutputAspects.map((aspect) => <option key={aspect} value={aspect}>{t(aspectLabels[aspect])}</option>)}
+              </Select>
+              {settings.output.aspect === '1:1' && <div style={detailsStyle}>{t('A square video shows the clips side by side or stacked, whichever fits them better.')}</div>}
+            </label>
+
+            {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
+            <label style={rowStyle}>
               {t('Resolution')}<br />
               <Select value={settings.output.resolution} onChange={handleResolutionChange}>
                 {mixOutputResolutions.map((resolution) => (
@@ -248,7 +268,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
           <Section title={t('Composition')}>
             {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
             <label style={rowStyle}>
-              {t('Maximum visible columns')}<br />
+              {settings.output.aspect === '16:9' ? t('Maximum visible columns') : (settings.output.aspect === '9:16' ? t('Maximum visible rows') : t('Maximum visible columns or rows'))}<br />
               <Select value={settings.maxColumns} onChange={handleMaxColumnsChange}>
                 {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
               </Select>
@@ -257,7 +277,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
             <div style={inlineRowStyle}>
               {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
               <label>
-                {t('Gap between columns (px)')}<br />
+                {settings.output.aspect === '16:9' ? t('Gap between columns (px)') : (settings.output.aspect === '9:16' ? t('Gap between rows (px)') : t('Gap between columns or rows (px)'))}<br />
                 <input type="number" min={0} step={2} style={{ width: '6em' }} value={settings.gap.width} onChange={handleGapWidthChange} />
               </label>
               {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}

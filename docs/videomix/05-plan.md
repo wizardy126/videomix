@@ -56,8 +56,8 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T25 | v2: encoders por hardware y H.265 (D2) | M8 | Sonnet | T24 | hecha |
 | T26 | v2: textos libres y presets globales (B1, B2) | M8 | Opus | T24 | hecha |
 | T27 | v2: lista de música y ducking (C1, C2) | M8 | Opus | T24 | hecha |
-| T28 | v2: render incremental con caché (D1) | M8 | Opus | T25 | pendiente |
-| T29 | v2: salida vertical 9:16 y 1:1 (B5) | M8 | Opus | T24 | pendiente |
+| T28 | v2: render incremental con caché (D1) | M8 | Opus | T25 | hecha |
+| T29 | v2: salida vertical 9:16 y 1:1 (B5) | M8 | Opus | T24 | hecha |
 | T30 | v2: fijar clips a un momento y grupos (A4) | M8 | Opus | T29 | pendiente |
 | T31 | v2: miniaturas (A2) | M8 | Sonnet | T29 | pendiente |
 | T32 | v2: previsualización en vivo (A1) | M8 | Opus | T26, T27, T29 | pendiente |
@@ -114,4 +114,6 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 - H.265 y encoders por hardware.
 - Resolución libre.
 - Miniaturas en la lista de clips y en la vista del plan; zoom horizontal del plan.
+- Selector manual de filas o columnas en salida 1:1.
+- Tope de 500 repeticiones de una pista muy corta en bucle.
 - Borrar el código de LosslessCut que ahora está oculto (batch, export lossless, EDL, `reporting.tsx`…).

@@ -49,7 +49,12 @@ export function getRenderWarningText(warning: RenderWarning) {
     case 'upscale': { return i18n.t('Clip "{{clip}}" is enlarged ×{{factor}}: it may look blurry', { clip: warning.clipName, factor: warning.factor.toFixed(1) }); }
     case 'pillarbox': { return i18n.t('Clip "{{clip}}" gets fill on its sides from {{time}}', { clip: warning.clipName, time: formatDuration({ seconds: warning.time, shorten: true }) }); }
     case 'letterbox': { return i18n.t('Clip "{{clip}}" gets fill above and below from {{time}}', { clip: warning.clipName, time: formatDuration({ seconds: warning.time, shorten: true }) }); }
-    case 'fill': { return i18n.t('The clips can\'t fill the whole width from {{time}}: {{width}} px are filled', { time: formatDuration({ seconds: warning.time, shorten: true }), width: warning.width }); }
+    case 'fill': {
+      const time = formatDuration({ seconds: warning.time, shorten: true });
+      return warning.rows
+        ? i18n.t('The clips can\'t fill the whole height from {{time}}: {{height}} px are filled', { time, height: warning.width })
+        : i18n.t('The clips can\'t fill the whole width from {{time}}: {{width}} px are filled', { time, width: warning.width });
+    }
     default: { return ''; }
   }
 }

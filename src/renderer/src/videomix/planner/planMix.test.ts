@@ -1,10 +1,11 @@
 import { describe, test, expect } from 'vitest';
 
-import { getAspectRange } from '../geometry';
+import { getAspectRange, transposeAspectRange, transposeRect } from '../geometry';
 import type { AspectRange } from '../geometry';
 import type { Rect } from '../types';
 import { formatPlan } from './formatPlan';
-import { planMix } from './planMix';
+import { planMix, planMixAxis } from './planMix';
+import { getPlanWarnings } from './planWarnings';
 import { createRandom } from './random';
 import type { MixPlan, PlanMixInput, PlannerClip, PlannerSettings } from './types';
 import { getAnimatedColumn, validatePlan } from './validatePlan';
@@ -288,6 +289,117 @@ describe('snapshots', () => {
   });
 });
 
+describe('vertical and square output (T29)', () => {
+  const portrait = (overrides: Partial<PlannerSettings> = {}) => settings({ width: 1080, height: 1920, ...overrides });
+  const square = (overrides: Partial<PlannerSettings> = {}) => settings({ width: 1080, height: 1080, ...overrides });
+  const transposed = (clips: PlannerClip[]) => clips.map((c): PlannerClip => ({
+    ...c,
+    aspectRange: transposeAspectRange(c.aspectRange),
+    ...(c.rects != null && { rects: { maxRect: transposeRect(c.rects.maxRect), minRect: c.rects.minRect && transposeRect(c.rects.minRect) } }),
+  }));
+
+  test('9:16: a rows plan is the columns plan of the transposed clips', () => {
+    const clips = [
+      clip('h1', 12, H169), clip('h2', 9, H169_NARROW), clip('v1', 14, V916),
+      clip('h3', 10, H169), clip('s1', 8, rigid(1)), clip('h4', 11, range(1.2, 2.4, 16 / 9)),
+      clip('w1', 7, rigid(4 / 3)), clip('h5', 10, H169_NARROW),
+    ];
+    for (const overrides of [{}, { gap: 8 }, { maxColumns: 2, reorderWindow: 1 }, { transitionDuration: 0 }]) {
+      const rows = plan({ clips, settings: portrait(overrides) });
+      const columns = plan({ clips: transposed(clips), settings: settings(overrides) });
+      expect(rows).toMatchObject({ width: 1080, height: 1920, axis: 'rows' });
+      expect(columns.axis).toBe('columns');
+      expect(rows.placements).toEqual(columns.placements);
+      expect(rows.layouts).toEqual(columns.layouts);
+      // warnings are in output terms: a transposed pillarbox is a letterbox
+      const swap = { pillarbox: 'letterbox', letterbox: 'pillarbox' } as const;
+      expect(rows.warnings).toEqual(columns.warnings.map((w) => (w.type === 'pillarbox' || w.type === 'letterbox' ? { ...w, type: swap[w.type] } : w)));
+    }
+  });
+
+  test('9:16: horizontals are stacked as full-width rows, never side by side', () => {
+    const clips = [10, 11, 12, 9, 8].map((d, i) => clip(`h${i}`, d, H169));
+    const p = plan({ clips, settings: portrait() });
+    expect(p.axis).toBe('rows');
+    // 1920 / 607.5: three rows of 608 px and 96 px of fill (48 above, 48 below)
+    expect(p.layouts[0]).toEqual({ time: 0, transitionDuration: 0, columns: [{ column: 0, x: 48, width: 608 }, { column: 1, x: 656, width: 608 }, { column: 2, x: 1264, width: 608 }], fills: [{ x: 0, width: 48 }, { x: 1872, width: 48 }] });
+    expect(formatPlan(p).split('\n')[0]).toBe('plan 1080x1920 rows, 18.50s');
+  });
+
+  test('9:16: a vertical clip fills the frame alone; a square one leaves fill above and below', () => {
+    expect(plan({ clips: [clip('v', 10, V916)], settings: portrait() }).layouts[0]!.columns).toEqual([{ column: 0, x: 0, width: 1920 }]);
+    const sq = plan({ clips: [clip('s', 10, rigid(1))], settings: portrait() });
+    expect(sq.layouts[0]).toMatchObject({ columns: [{ column: 0, x: 420, width: 1080 }], fills: [{ x: 0, width: 420 }, { x: 1500, width: 420 }] });
+  });
+
+  test('9:16: animated re-layouts between rows', () => {
+    // a lone vertical row is replaced by three flexible horizontals that share the height (new rows grow from 0)
+    const clips = [clip('v0', 6, V916), clip('f1', 10, H169_NARROW), clip('f2', 10, H169_NARROW), clip('f3', 10, H169_NARROW)];
+    const p = plan({ clips, settings: portrait({ reorderWindow: 0 }) });
+    expect(relayouts(p).length).toBeGreaterThan(0);
+    expect(p.layouts.at(-1)!.columns.map((c) => c.width).reduce((a, b) => a + b, 0) + p.layouts.at(-1)!.fills.reduce((a, f) => a + f.width, 0)).toBe(1920);
+  });
+
+  test('warnings are in output terms: upscale by the row width, letterbox for a row too tall', () => {
+    // a 400x300 source stretched to the full 1080 px width
+    const maxRect: Rect = { x: 0, y: 0, width: 400, height: 300 };
+    const p = plan({ clips: [{ id: 's', duration: 5, aspectRange: getAspectRange(maxRect), rects: { maxRect } }], settings: portrait() });
+    expect(warningsOf(p, 'upscale')).toEqual([{ type: 'upscale', clipId: 's', factor: 2.7 }]);
+    // a rigid 16:9 clip in a full-height row: fill above and below
+    const handPlan: MixPlan = {
+      width: 1080,
+      height: 1920,
+      axis: 'rows',
+      duration: 5,
+      placements: [{ clipId: 'h', column: 0, startTime: 0, endTime: 5, transitionIn: 0 }],
+      layouts: [{ time: 0, transitionDuration: 0, columns: [{ column: 0, x: 0, width: 1920 }], fills: [] }],
+      warnings: [],
+    };
+    expect(getPlanWarnings(handPlan, [clip('h', 5, H169)], 0.5)).toEqual([{ type: 'letterbox', clipId: 'h', time: 0 }]);
+  });
+
+  test('1:1: rows for horizontals, columns for verticals, decided once for the whole project', () => {
+    // 16:9 clips whose min rect allows a wider (shorter) crop stack as two 1080x540 rows; side by side they would
+    // need 540 px wide columns (letterbox). The transposed case (verticals) goes side by side.
+    const horizontals = [10, 11, 12, 9].map((d, i) => clip(`h${i}`, d, range(16 / 9, 2.4, 16 / 9)));
+    const verticals = [10, 11, 12, 9].map((d, i) => clip(`v${i}`, d, range(1 / 2.4, 9 / 16, 9 / 16)));
+    const stacked = plan({ clips: horizontals, settings: square() });
+    expect(stacked.axis).toBe('rows');
+    expect(stacked.layouts[0]!.columns.map((c) => c.width)).toEqual([540, 540]);
+    const sideBySide = plan({ clips: verticals, settings: square() });
+    expect(sideBySide.axis).toBe('columns');
+    expect(sideBySide.layouts[0]!.columns.map((c) => c.width)).toEqual([540, 540]);
+    // the chosen plan is the one with the lower score
+    const input = { clips: [...horizontals.slice(0, 2), ...verticals.slice(0, 2)], settings: square() };
+    const byAxis = { columns: planMixAxis(input, 'columns'), rows: planMixAxis(input, 'rows') };
+    const best = byAxis.rows.score.total < byAxis.columns.score.total ? 'rows' : 'columns';
+    expect(plan(input).axis).toBe(best);
+    // ties (nothing to compare) keep columns
+    expect(plan({ clips: [], settings: square() }).axis).toBe('columns');
+  });
+
+  test('the score adds up its terms and counts fill, crops and re-layouts', () => {
+    const { score } = planMixAxis({ clips: [clip('v', 10, V916)], settings: settings() }, 'columns');
+    expect(score.total).toBeCloseTo(score.fill + score.clips + score.relayouts + score.order);
+    // 1312 of 1920 px of fill for 10 s, one column (+4)
+    expect(score.fill).toBeCloseTo(60 * (1312 / 1920) * 10);
+    expect(score.clips).toBeCloseTo(4);
+    expect(score.relayouts).toBe(0);
+    const stacked = planMixAxis({ clips: [clip('v', 10, V916)], settings: square() }, 'rows');
+    // a 9:16 clip in a 1080x1080 square: a row of 1080 px can only show it with fill on its sides
+    expect(stacked.plan.warnings.some((w) => w.type === 'pillarbox')).toBe(true);
+    expect(stacked.score.total).toBeGreaterThan(planMixAxis({ clips: [clip('v', 10, V916)], settings: square() }, 'columns').score.total);
+  });
+
+  test('a forced axis is honoured, and validatePlan checks the axis of the output', () => {
+    const clips = [clip('a', 5, H169), clip('b', 6, V916)];
+    expect(plan({ clips, settings: square({ axis: 'rows' }) }).axis).toBe('rows');
+    const input = { clips, settings: portrait() };
+    const sideBySide = planMixAxis(input, 'columns').plan;
+    expect(validatePlan(sideBySide, input)).toContain('Plan axis columns, expected rows');
+  });
+});
+
 describe('properties', () => {
   const presets = [H169, V916, V916_WIDE, H169_NARROW, rigid(4 / 3), rigid(1), rigid(4 / 5), range(0.3, 3, 1), rigid(2.39)];
 
@@ -326,6 +438,21 @@ describe('properties', () => {
       const issues = validatePlan(result, input);
       if (issues.length > 0) throw new Error(`seed ${seed}: ${issues.join('; ')}\n${formatPlan(result)}`);
       expect(planMix(input)).toEqual(result); // deterministic
+    }
+  });
+
+  test('random projects in each output shape and axis satisfy every invariant (T29)', () => {
+    const shapes: [number, number, PlannerSettings['axis']][] = [[1920, 1080, undefined], [1080, 1920, undefined], [1080, 1080, undefined], [1080, 1080, 'columns'], [1080, 1080, 'rows'], [360, 640, undefined]];
+    for (const [width, height, axis] of shapes) {
+      for (let seed = 1; seed <= 60; seed += 1) {
+        const base = randomInput(1000 + seed);
+        const input: PlanMixInput = { clips: base.clips, settings: { ...base.settings, width, height, axis } };
+        const result = planMix(input);
+        const issues = validatePlan(result, input);
+        if (issues.length > 0) throw new Error(`${width}x${height} ${axis ?? 'auto'} seed ${seed}: ${issues.join('; ')}\n${formatPlan(result)}`);
+        expect(result.axis).toBe(axis ?? (width > height ? 'columns' : (width < height ? 'rows' : result.axis)));
+        expect(planMix(input)).toEqual(result); // deterministic
+      }
     }
   });
 

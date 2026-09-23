@@ -1,8 +1,9 @@
 import { getPlannerInput } from '../planner/plannerInput';
 import { planMix } from '../planner/planMix';
+import { getDefaultAxis } from '../planner/types';
 import type { MixPlan } from '../planner/types';
 import { getOutputSize } from '../types';
-import type { MixClip, MixProject, MixSettings } from '../types';
+import type { MixClip, MixOutput, MixProject, MixSettings } from '../types';
 import type { EncodingOptions } from './buildRenderJob';
 
 // Pure helpers of the render/preview orchestration (T13, hooks/useMixRender.ts): output and temp paths, what to plan
@@ -17,8 +18,15 @@ export interface PathLike {
 
 export const OUTPUT_EXTENSION = 'mp4';
 
-/** Low-resolution preview (04-diseno §6.6): fast to encode, only for checking the layout, transitions and audio. */
-export const PREVIEW_SIZE = { width: 640, height: 360 } as const;
+/** Short side of the low-resolution preview (04-diseno §6.6): fast to encode, only for checking the layout, transitions and audio. */
+export const PREVIEW_SHORT_SIDE = 360;
+
+/** Preview size: {@link PREVIEW_SHORT_SIDE} with the output's aspect (T29): 640×360, 360×640 or 360×360. */
+export function getPreviewSize(output: MixOutput) {
+  const { width, height } = getOutputSize(output);
+  const scale = PREVIEW_SHORT_SIDE / Math.min(width, height);
+  return { width: 2 * Math.round((width * scale) / 2), height: 2 * Math.round((height * scale) / 2) };
+}
 export const PREVIEW_ENCODING: EncodingOptions = { preset: 'ultrafast', crf: 30 };
 
 /**
@@ -75,7 +83,7 @@ export function getOrphanTempEntries(entries: { name: string, mtimeMs: number }[
   return entries.filter(({ name, mtimeMs }) => tempEntryPattern.test(name) && now - mtimeMs > maxAgeMs).map(({ name }) => name);
 }
 
-/** A gap scaled to another output height, kept even (yuv420p) like the planner's widths. */
+/** A gap scaled to another output size (by a side, e.g. the height or the short side), kept even (yuv420p) like the planner's widths. */
 export const scaleGap = (gap: number, fromHeight: number, toHeight: number) => 2 * Math.round((gap * toHeight) / fromHeight / 2);
 
 /** Preview fps: 50/60 fps projects preview at half the rate (twice as fast to encode); the others as they are. */
@@ -90,17 +98,21 @@ export interface RenderPlan {
 }
 
 /**
- * The plan to render. The final render plans at the output resolution. The preview plans at 640×360 (ADR-001: the plan
- * is always computed for the size it's rendered at) with the gap scaled from the output resolution, so the layout
- * matches the final one as closely as the rounding allows.
+ * The plan to render. The final render plans at the output resolution. The preview plans at a 360 px short side with
+ * the output's aspect ({@link getPreviewSize}; ADR-001: the plan is always computed for the size it's rendered at)
+ * with the gap scaled from the output resolution, so the layout matches the final one as closely as the rounding
+ * allows. In 1:1 the axis (rows or columns) is the one the final render picks at the output resolution, so the preview
+ * never shows the other one on a near-tie (T29).
  */
 export function planRender({ clips, settings }: Pick<MixProject, 'clips' | 'settings'>, { preview = false }: { preview?: boolean } = {}): RenderPlan {
   const input = getPlannerInput({ clips, settings });
   if (!preview) return { plan: planMix(input), settings };
 
-  const { width, height } = PREVIEW_SIZE;
-  const gap = scaleGap(settings.gap.width, getOutputSize(settings.output).height, height);
-  const plan = planMix({ ...input, settings: { ...input.settings, width, height, gap } });
+  const { width, height } = getPreviewSize(settings.output);
+  const output = getOutputSize(settings.output);
+  const gap = scaleGap(settings.gap.width, Math.min(output.width, output.height), Math.min(width, height));
+  const axis = getDefaultAxis(output) ?? planMix(input).axis;
+  const plan = planMix({ ...input, settings: { ...input.settings, width, height, gap, axis } });
   return {
     plan,
     settings: { ...settings, fps: getPreviewFps(settings.fps), gap: { ...settings.gap, width: gap } },
@@ -111,14 +123,15 @@ export function planRender({ clips, settings }: Pick<MixProject, 'clips' | 'sett
 export type RenderWarning =
   | { type: 'upscale', clipName: string, factor: number }
   | { type: 'pillarbox' | 'letterbox', clipName: string, time: number }
-  | { type: 'fill', time: number, width: number };
+  /** `width` is along the main axis: a height when `rows`. */
+  | { type: 'fill', time: number, width: number, rows: boolean };
 
 /**
  * Plan warnings worth confirming before a render (01-requisitos §4.6): clips upscaled more than ×2, clips shown with
  * fill around them (pillarbox/letterbox) and rows that can't be filled with clips. Shortened transitions are left out:
  * validateMixProject already warns about short clips. One `fill` warning per keyframe would be noise, so only the first.
  */
-export function getRenderWarnings(plan: Pick<MixPlan, 'warnings'>, clips: Pick<MixClip, 'id' | 'name'>[]): RenderWarning[] {
+export function getRenderWarnings(plan: Pick<MixPlan, 'warnings' | 'axis'>, clips: Pick<MixClip, 'id' | 'name'>[]): RenderWarning[] {
   const nameById = new Map(clips.map((clip) => [clip.id, clip.name]));
   const getName = (clipId: string) => nameById.get(clipId) ?? clipId;
   const ret: RenderWarning[] = [];
@@ -128,7 +141,7 @@ export function getRenderWarnings(plan: Pick<MixPlan, 'warnings'>, clips: Pick<M
     else if (warning.type === 'pillarbox' || warning.type === 'letterbox') ret.push({ type: warning.type, clipName: getName(warning.clipId), time: warning.time });
     else if (warning.type === 'fill' && !hasFill) {
       hasFill = true;
-      ret.push({ type: 'fill', time: warning.time, width: warning.width });
+      ret.push({ type: 'fill', time: warning.time, width: warning.width, rows: plan.axis === 'rows' });
     }
   });
   return ret;

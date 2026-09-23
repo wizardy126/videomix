@@ -1,10 +1,15 @@
-import { ASPECT_TOLERANCE, getCropForAspect, getScaleFactor } from '../geometry';
+import { ASPECT_TOLERANCE, getCellRect, getCropForAspect, getScaleFactor } from '../geometry';
 import type { AspectRange } from '../geometry';
+import { getPlanAxis } from './types';
 import type { LayoutKeyframe, MixPlan, PlanWarning, PlannerClip } from './types';
 
 const EPS = 1e-9;
 
-/** How a clip sits in a column of `width` px: fill (within the aspect tolerance, as getCropForAspect), pillarbox or letterbox. */
+/**
+ * How a clip sits in a column of `width`×`height` px: fill (within the aspect tolerance, as getCropForAspect),
+ * pillarbox or letterbox. The planner calls it in main-axis units (transposed range, main length, cross length), where
+ * `pillarbox` means "longer than the clip allows" along the main axis; with real sizes it is the real fit.
+ */
 export function getColumnFit(range: AspectRange, width: number, height: number) {
   const aspect = width / height;
   if (aspect > range.max * (1 + ASPECT_TOLERANCE)) return 'pillarbox';
@@ -25,6 +30,9 @@ export function getStableLayouts(plan: Pick<MixPlan, 'layouts'>) {
 export function getPlanWarnings(plan: Omit<MixPlan, 'warnings'>, clips: PlannerClip[], transitionDuration: number): PlanWarning[] {
   const clipById = new Map(clips.map((clip) => [clip.id, clip]));
   const stable = getStableLayouts(plan);
+  const axis = getPlanAxis(plan);
+  // output size of a column/row: warnings are about what the viewer sees, whatever the axis
+  const cellSize = (length: number) => getCellRect(axis, { offset: 0, length }, plan);
   const warnings: PlanWarning[] = [];
 
   plan.layouts.forEach((layout) => {
@@ -50,14 +58,15 @@ export function getPlanWarnings(plan: Omit<MixPlan, 'warnings'>, clips: PlannerC
       if (Math.min(to, placement.endTime) - Math.max(from, placement.startTime) <= EPS) return;
       const col = layout.columns.find((c) => c.column === placement.column);
       if (col == null) return;
-      const fit = getColumnFit(clip.aspectRange, col.width, plan.height);
+      const { width, height } = cellSize(col.width);
+      const fit = getColumnFit(clip.aspectRange, width, height);
       if (fit !== 'fill' && !misfits.has(fit)) {
         misfits.add(fit);
         warnings.push({ type: fit, clipId: clip.id, time: Math.max(from, placement.startTime) });
       }
       if (clip.rects != null) {
-        const { crop } = getCropForAspect(clip.rects.maxRect, clip.rects.minRect, col.width / plan.height);
-        maxFactor = Math.max(maxFactor, getScaleFactor(crop, col.width, plan.height));
+        const { crop } = getCropForAspect(clip.rects.maxRect, clip.rects.minRect, width / height);
+        maxFactor = Math.max(maxFactor, getScaleFactor(crop, width, height));
       }
     });
     if (maxFactor > 2) warnings.push({ type: 'upscale', clipId: clip.id, factor: maxFactor });

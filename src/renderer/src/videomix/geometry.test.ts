@@ -1,8 +1,9 @@
 import { describe, test, expect } from 'vitest';
 
 import {
-  ASPECT_TOLERANCE, clampRect, distributeWidths, getAspectRange, getCropForAspect, getOrientation, getScaleFactor,
-  getWidthRange, normalizeClipRects, normalizeRectEven, rectAspect, rectContains,
+  ASPECT_TOLERANCE, clampRect, distributeWidths, getAspectRange, getAxisLengths, getCellRect, getCropForAspect, getMainAspectRange,
+  getOrientation, getScaleFactor, getWidthRange, normalizeClipRects, normalizeRectEven, rectAspect, rectContains,
+  transposeAspectRange, transposeRect,
 } from './geometry';
 import type { AspectRange } from './geometry';
 import type { Rect } from './types';
@@ -312,5 +313,69 @@ describe('distributeWidths', () => {
     const a = distributeWidths({ clips, width: 3840, height: 1080, gap: 2 });
     const b = distributeWidths({ clips, width: 3840, height: 1080, gap: 2 });
     expect(a).toEqual(b);
+  });
+});
+
+describe('main axis (T29)', () => {
+  test('transposing rects and aspect ranges', () => {
+    const rect = { x: 10, y: 20, width: 300, height: 400 };
+    expect(transposeRect(rect)).toEqual({ x: 20, y: 10, width: 400, height: 300 });
+    expect(transposeRect(transposeRect(rect))).toEqual(rect);
+    expect(transposeAspectRange({ min: 0.5, max: 2, preferred: 1.25 })).toEqual({ min: 0.5, max: 2, preferred: 0.8 });
+    expect(transposeAspectRange({ min: 0.75, max: 16 / 9, preferred: 16 / 9 })).toEqual({ min: 9 / 16, max: 4 / 3, preferred: 9 / 16 });
+    const range = { min: 0.75, max: 2, preferred: 1.5 };
+    expect(getMainAspectRange(range, 'columns')).toBe(range);
+    expect(getMainAspectRange(range, 'rows')).toEqual(transposeAspectRange(range));
+  });
+
+  test('the aspect range of a transposed clip is the transposed range', () => {
+    const rnd = seededRandom(7);
+    for (let i = 0; i < 300; i += 1) {
+      const source = randomSourceFrame(rnd, true);
+      const max = randomRectInside(rnd, source, 16, true);
+      const min = rnd() < 0.3 ? undefined : randomRectInside(rnd, max, 16, true);
+      const transposed = getAspectRange(transposeRect(max), min && transposeRect(min));
+      const expected = transposeAspectRange(getAspectRange(max, min));
+      expect(transposed.min).toBeCloseTo(expected.min, 12);
+      expect(transposed.max).toBeCloseTo(expected.max, 12);
+      expect(transposed.preferred).toBeCloseTo(expected.preferred, 12);
+    }
+  });
+
+  test('the crop of a row is the transpose of the crop of the transposed column (pillarbox ↔ letterbox)', () => {
+    const rnd = seededRandom(11);
+    const swapFit = { fill: 'fill', pillarbox: 'letterbox', letterbox: 'pillarbox' } as const;
+    for (let i = 0; i < 500; i += 1) {
+      const source = randomSourceFrame(rnd, true);
+      const max = randomRectInside(rnd, source, 16, true);
+      const min = rnd() < 0.3 ? undefined : randomRectInside(rnd, max, 16, true);
+      // a row of the output: full width W, some height h
+      const W = 2 * randInt(rnd, 100, 1000);
+      const h = 2 * randInt(rnd, 8, 1000);
+      const row = getCropForAspect(max, min, W / h);
+      const column = getCropForAspect(transposeRect(max), min && transposeRect(min), h / W);
+      // allow the ±2 px of a different even rounding on the unconstrained side
+      const t = transposeRect(column.crop);
+      expect(Math.abs(t.width - row.crop.width) + Math.abs(t.height - row.crop.height)).toBeLessThanOrEqual(2);
+      expect(swapFit[column.fit]).toBe(row.fit);
+    }
+  });
+
+  test('frame lengths and cell rects along each axis', () => {
+    expect(getAxisLengths('columns', { width: 1920, height: 1080 })).toEqual({ main: 1920, cross: 1080 });
+    expect(getAxisLengths('rows', { width: 1080, height: 1920 })).toEqual({ main: 1920, cross: 1080 });
+    expect(getCellRect('columns', { offset: 100, length: 600 }, { width: 1920, height: 1080 })).toEqual({ x: 100, y: 0, width: 600, height: 1080 });
+    expect(getCellRect('rows', { offset: 100, length: 600 }, { width: 1080, height: 1920 })).toEqual({ x: 0, y: 100, width: 1080, height: 600 });
+  });
+
+  test('row heights: the column widths of the transposed clips', () => {
+    // three 16:9 clips stacked in 1080x1920: 608 px each (607.5 rounded to even), 96 px of fill
+    const h169 = getAspectRange({ x: 0, y: 0, width: 1920, height: 1080 });
+    const result = distributeWidths({ clips: [h169, h169, h169].map((r) => getMainAspectRange(r, 'rows')), width: 1920, height: 1080, gap: 0 });
+    expect(result).toEqual({ widths: [608, 608, 608], fill: 96 });
+    // the upscale factor of such a row, in output terms: a 1280x720 source at 1080 px wide
+    const small = { x: 0, y: 0, width: 1280, height: 720 };
+    const { crop } = getCropForAspect(small, undefined, 1080 / 608);
+    expect(getScaleFactor(crop, 1080, 608)).toBeCloseTo(1080 / 1280, 2);
   });
 });

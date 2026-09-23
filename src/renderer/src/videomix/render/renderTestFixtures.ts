@@ -109,3 +109,9 @@ export const testPlans = {
     kf(2, 0.5, [col(0, 0, 276), col(2, 284, 356)]),
   ]),
 } satisfies Record<string, MixPlan>;
+
+/**
+ * The same plan as rows (T29): the output size is transposed (640x360 → 360x640) and every column becomes a full-width
+ * row with the same offsets and lengths along the vertical axis. The clips keep their rects, so their crops change.
+ */
+export const toRowsPlan = (p: MixPlan): MixPlan => ({ ...p, axis: 'rows', width: p.height, height: p.width });
