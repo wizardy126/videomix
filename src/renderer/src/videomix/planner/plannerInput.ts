@@ -10,6 +10,8 @@ export function toPlannerClip(clip: MixClip): PlannerClip {
     duration: getClipDuration(clip),
     aspectRange: getAspectRange(clip.maxRect, clip.minRect),
     rects: { maxRect: clip.maxRect, minRect: clip.minRect },
+    ...(clip.pinTime != null && { pinTime: clip.pinTime }),
+    ...(clip.groupId != null && { groupId: clip.groupId }),
   };
 }
 

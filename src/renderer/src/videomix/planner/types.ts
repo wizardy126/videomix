@@ -10,6 +10,16 @@ export interface PlannerClip {
   aspectRange: AspectRange,
   /** Source rects, only needed for upscale warnings/scoring. Without them upscaling is ignored. */
   rects?: { maxRect: Rect, minRect?: Rect | undefined } | undefined,
+  /**
+   * A4 (T30): the clip starts at this time of the final video (s). Pinned clips are outside the reorder window. When
+   * the row has no room then, it starts as soon as it can and the plan warns (`pin-shifted`).
+   */
+  pinTime?: number | undefined,
+  /**
+   * A4 (T30): the clips of a group (≥ 2 of them) start together and take the list position of their first clip. A group
+   * with a pinned clip is pinned as a whole, at the earliest pin of its clips.
+   */
+  groupId?: string | undefined,
 }
 
 export interface PlannerSettings {
@@ -98,7 +108,15 @@ export type PlanWarning =
    * The row has fill from `time` on while clips are still pending, because none fitted better. `width` is along the
    * main axis (a height for rows).
    */
-  | { type: 'fill', time: number, width: number };
+  | { type: 'fill', time: number, width: number }
+  /**
+   * A4 (T30): a pinned clip doesn't start at its pin time but at `time`: later when the row had no room (more pinned
+   * clips than columns at once, or no column could be freed without cutting a clip), earlier when the other clips run
+   * out before it (it can't leave a hole in the video).
+   */
+  | { type: 'pin-shifted', clipId: string, pinTime: number, time: number }
+  /** A4 (T30): the clips of a group don't all start together (more clips than columns, or no room for all of them). */
+  | { type: 'group-split', groupId: string, clipIds: string[] };
 
 export interface MixPlan {
   /** Output size (px), whatever the axis. */
@@ -111,7 +129,7 @@ export interface MixPlan {
   axis?: LayoutAxis | undefined,
   /** Seconds (end of the last clip). */
   duration: number,
-  /** In the order the planner picked the clips, which is also start-time order. */
+  /** In start-time order (without pinned clips it is also the order the planner picked them). */
   placements: ColumnPlacement[],
   /** Sorted by time; the first one at t = 0. */
   layouts: LayoutKeyframe[],

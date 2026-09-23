@@ -1,7 +1,7 @@
 import type { ChangeEventHandler, CSSProperties, FocusEventHandler, KeyboardEventHandler, MouseEventHandler } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FaClone, FaExclamationTriangle, FaGripVertical, FaInfoCircle, FaMinus, FaPlus, FaVolumeMute, FaVolumeUp } from 'react-icons/fa';
+import { FaClone, FaExclamationTriangle, FaGripVertical, FaInfoCircle, FaMinus, FaPlus, FaThumbtack, FaVolumeMute, FaVolumeUp } from 'react-icons/fa';
 import { MdCropLandscape, MdCropPortrait } from 'react-icons/md';
 import type { DragEndEvent, DragStartEvent, UniqueIdentifier } from '@dnd-kit/core';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
@@ -23,6 +23,8 @@ import type { MixClip, MixSettings, MixSource } from '../types';
 import { getClipDuration } from '../project';
 import { getOrientation } from '../geometry';
 import { clipGainValues, getClipWarnings } from '../clips';
+import { getClipSelectModifiers } from '../hooks/useMixClipPins';
+import type { ClipSelectModifiers, UseMixClipPins } from '../hooks/useMixClipPins';
 
 const buttonBaseStyle: CSSProperties = {
   margin: '0 3px', borderRadius: 3, color: 'white', cursor: 'pointer', userSelect: 'none',
@@ -38,16 +40,20 @@ const stopPropagation: MouseEventHandler = (e) => e.stopPropagation();
 const thumbnailStyle: CSSProperties = { width: 30, height: 30, flexShrink: 0, objectFit: 'cover', borderRadius: 3 };
 
 // eslint-disable-next-line react/display-name
-const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, dragging, settings, onSelect, onUpdate, onDuplicate, onRemove, onGoToSource }: {
+const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, groupColor, getClipMenu, dragging, settings, onSelect, onUpdate, onDuplicate, onRemove, onGoToSource }: {
   clip: MixClip,
   index: number,
   source: MixSource | undefined,
   /** Start frame cropped to the clip's max rect (A2, T31), from `useClipThumbnails`. Undefined while it's generating. */
   thumbnailUrl: string | undefined,
   isSelected: boolean,
+  /** A4 (T30): its pin time (its own or its group's) and its group's colour. */
+  pinTime: number | undefined,
+  groupColor: string | undefined,
+  getClipMenu: UseMixClipPins['getClipMenu'],
   dragging?: boolean | undefined,
   settings: Pick<MixSettings, 'transition'>,
-  onSelect: (id: string) => void,
+  onSelect: (id: string, modifiers?: ClipSelectModifiers) => void,
   onUpdate: (id: string, patch: MixClipPatch) => void,
   onDuplicate: (id: string) => void,
   onRemove: (id: string) => void,
@@ -66,7 +72,8 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, dragging,
     { label: t('Remove clip'), click: () => onRemove(clip.id) },
     { type: 'separator' },
     { label: t('Go to source'), click: () => onGoToSource(clip.id) },
-  ], [clip.id, onDuplicate, onGoToSource, onRemove, t]);
+    ...getClipMenu(clip),
+  ], [clip, getClipMenu, onDuplicate, onGoToSource, onRemove, t]);
 
   useContextMenu(ref, contextMenuTemplate);
 
@@ -92,16 +99,18 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, dragging,
     transition: sortable.transition,
     background: 'var(--gray-1)',
     border: `1px solid ${isSelected ? 'var(--gray-10)' : 'transparent'}`,
+    // group colour (A4)
+    ...(groupColor != null && { borderLeft: `3px solid ${groupColor}` }),
     borderRadius: 5,
     fontSize: 13,
     color: 'var(--gray-12)',
     cursor: 'pointer',
-  }), [isSelected, sortable.isDragging, sortable.transform, sortable.transition]);
+  }), [groupColor, isSelected, sortable.isDragging, sortable.transform, sortable.transition]);
 
   const handleClick = useCallback<MouseEventHandler<HTMLDivElement>>((e) => {
     // give the focus back to the body, so the keyboard shortcuts keep working
     e.currentTarget.blur();
-    onSelect(clip.id);
+    onSelect(clip.id, getClipSelectModifiers(e));
   }, [clip.id, onSelect]);
 
   const handleNameChange = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => setNameDraft(e.target.value), []);
@@ -190,6 +199,7 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, dragging,
         <span style={{ whiteSpace: 'nowrap' }}>{formatTime(clip.start)} – {formatTime(clip.end)}</span>
         <span style={{ whiteSpace: 'nowrap', fontWeight: 'bold' }}>{formatDuration({ seconds: duration, shorten: true })}</span>
         <div style={{ flexGrow: 1 }} />
+        {pinTime != null && <FaThumbtack style={{ ...iconStyle, color: 'var(--cyan-11)' }} title={t('Pinned at {{time}} of the video', { time: formatTime(pinTime) })} />}
         <OrientationIcon style={iconStyle} title={`${orientation === 'horizontal' ? t('Horizontal') : t('Vertical')} ${clip.maxRect.width}×${clip.maxRect.height}`} />
         {warnings.noMin && <FaInfoCircle style={{ ...iconStyle, opacity: 0.6 }} title={t('No min rectangle: the clip can only be shown with its max rectangle, it will not be cropped any further')} />}
         {warnings.tooShort && <FaExclamationTriangle style={{ ...iconStyle, color: warningColor }} title={t('The clip is not longer than two transitions ({{duration}} s), its transitions will be shortened', { duration: 2 * settings.transition.duration })} />}
@@ -214,7 +224,7 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, dragging,
 });
 
 /** Right panel: all the clips of the project, of any source, in list (= mix) order. Replaces SegmentList in VideoMix. */
-function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClipId, onSelect, onUpdate, onReorder, onAdd, onDuplicate, onRemove, onGoToSource }: {
+function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClipId, clipPins, onSelect, onUpdate, onReorder, onAdd, onDuplicate, onRemove, onGoToSource }: {
   width: number,
   clips: MixClip[],
   sources: MixSource[],
@@ -222,7 +232,10 @@ function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClip
   thumbnailUrls: ReadonlyMap<string, string>,
   settings: Pick<MixSettings, 'transition'>,
   selectedClipId: string | undefined,
-  onSelect: (id: string) => void,
+  /** Multi-selection, pins and groups (A4, T30). */
+  clipPins: Pick<UseMixClipPins, 'selectedClipIds' | 'pinTimes' | 'groupColors' | 'getClipMenu'>,
+  /** With modifiers: Ctrl/Cmd-click and Shift-click multi-selection. */
+  onSelect: (id: string, modifiers?: ClipSelectModifiers) => void,
   onUpdate: (id: string, patch: MixClipPatch) => void,
   onReorder: (ids: string[]) => void,
   onAdd: () => void,
@@ -276,7 +289,10 @@ function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClip
       index={index}
       source={sourcesById.get(clip.sourceId)}
       thumbnailUrl={thumbnailUrls.get(clip.id)}
-      isSelected={clip.id === selectedClipId}
+      isSelected={clipPins.selectedClipIds.has(clip.id)}
+      pinTime={clipPins.pinTimes.get(clip.id)}
+      groupColor={clip.groupId != null ? clipPins.groupColors.get(clip.groupId) : undefined}
+      getClipMenu={clipPins.getClipMenu}
       dragging={dragging}
       settings={settings}
       onSelect={onSelect}

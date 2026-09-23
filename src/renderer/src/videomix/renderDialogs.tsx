@@ -36,7 +36,7 @@ export function getIssueText(issue: MixProjectIssue, clipName: string | undefine
     case 'overlay-entry-too-long': { return i18n.t('Text "{{overlay}}": its entry animation is longer than its duration', { overlay }); }
     case 'overlay-invalid-font-size': { return i18n.t('Text "{{overlay}}": its text size is not valid', { overlay }); }
     case 'pin-time-out-of-range': { return i18n.t('Clip "{{clip}}": its fixed start time is not valid', { clip }); }
-    case 'pin-time-after-end': { return i18n.t('Clip "{{clip}}" is fixed after the end of the other clips: there will be a gap before it', { clip }); }
+    case 'pin-time-after-end': { return i18n.t('Clip "{{clip}}" is pinned after the end of the other clips: it will start earlier', { clip }); }
     case 'group-too-small': { return i18n.t('Clip "{{clip}}" is the only clip of its group: it is not grouped', { clip }); }
     case 'group-pin-conflict': { return i18n.t('A group has clips fixed at different times'); }
     case 'duplicate-music-track-id': { return i18n.t('The project has duplicate music track ids'); }
@@ -55,6 +55,13 @@ export function getRenderWarningText(warning: RenderWarning) {
         ? i18n.t('The clips can\'t fill the whole height from {{time}}: {{height}} px are filled', { time, height: warning.width })
         : i18n.t('The clips can\'t fill the whole width from {{time}}: {{width}} px are filled', { time, width: warning.width });
     }
+    case 'pin-shifted': {
+      const times = { pinTime: formatDuration({ seconds: warning.pinTime, shorten: true }), time: formatDuration({ seconds: warning.time, shorten: true }) };
+      return warning.time > warning.pinTime
+        ? i18n.t('Clip "{{clip}}" is pinned at {{pinTime}} but starts at {{time}}: there is no room for it then', { clip: warning.clipName, ...times })
+        : i18n.t('Clip "{{clip}}" is pinned at {{pinTime}} but starts at {{time}}: the other clips end before', { clip: warning.clipName, ...times });
+    }
+    case 'group-split': { return i18n.t('The clips {{clips}} are grouped but don\'t all start together', { clips: warning.clipNames.map((name) => `"${name}"`).join(', ') }); }
     default: { return ''; }
   }
 }

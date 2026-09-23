@@ -27,3 +27,11 @@ test('getPlannerInput', () => {
   expect(input.clips).toHaveLength(1);
   expect(input.clips[0]).toMatchObject({ id: 'a', duration: 10, aspectRange: { min: 1080 / 1920, max: 1, preferred: 1080 / 1920 } });
 });
+
+test('getPlannerInput passes pins and groups (A4)', () => {
+  const project = { ...createEmptyMixProject(), clips: [{ ...clip('a', 1, 11), pinTime: 4, groupId: 'g' }, clip('b', 0, 3)] };
+  const [a, b] = getPlannerInput(project).clips;
+  expect(a).toMatchObject({ pinTime: 4, groupId: 'g' });
+  expect(b).not.toHaveProperty('pinTime');
+  expect(b).not.toHaveProperty('groupId');
+});

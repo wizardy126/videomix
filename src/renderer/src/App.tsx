@@ -37,6 +37,7 @@ import SourceList from './videomix/components/SourceList';
 import useMixProject from './videomix/hooks/useMixProject';
 import useMixWorkspace from './videomix/hooks/useMixWorkspace';
 import useMixClips from './videomix/hooks/useMixClips';
+import useMixClipPins from './videomix/hooks/useMixClipPins';
 import useMixRender from './videomix/hooks/useMixRender';
 import MixSettingsDialog from './videomix/components/MixSettingsDialog';
 import MixRenderButtons from './videomix/components/MixRenderButtons';
@@ -1613,6 +1614,9 @@ function App() {
   // VideoMix: clip thumbnails (A2, T31), shared by ClipList and MixPlanView so each clip is only generated once
   const mixThumbnails = useClipThumbnails({ clips: mixProject.project.clips, sources: mixProject.project.sources, enabled: videoMixMode });
 
+  // VideoMix: pinned and grouped clips (A4, T30) and the clip multi-selection, in ClipList and MixPlanView
+  const mixClipPins = useMixClipPins({ clips: mixProject.project.clips, selectedClipId: mixClips.selectedClipId, cursorTime: mixOverlays.cursorTime, selectClip: mixClips.userSelectClip, dispatchStep: mixClips.dispatchStep });
+
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);
 
@@ -2783,7 +2787,8 @@ function App() {
                       thumbnailUrls={mixThumbnails.thumbnailUrls}
                       settings={mixProject.project.settings}
                       selectedClipId={mixClips.selectedClipId}
-                      onSelect={mixClips.userSelectClip}
+                      clipPins={mixClipPins}
+                      onSelect={mixClipPins.userSelectClip}
                       onUpdate={mixClips.userUpdateClip}
                       onReorder={mixClips.userReorderClips}
                       onAdd={mixClips.userAddClip}
@@ -2870,8 +2875,8 @@ function App() {
                     <MixPlanView
                       clips={mixProject.project.clips}
                       settings={mixProject.project.settings}
-                      selectedClipId={mixClips.selectedClipId}
-                      onSelect={mixClips.userSelectClip}
+                      clipPins={mixClipPins}
+                      onSelect={mixClipPins.userSelectClip}
                       thumbnailUrls={mixThumbnails.thumbnailUrls}
                       mixOverlays={mixOverlays}
                       overlays={mixProject.project.overlays}

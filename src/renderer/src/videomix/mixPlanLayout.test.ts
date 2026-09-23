@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { getColumnFillSpans, getLaneColumns, getPlacementAt, getPlacementWarnings, timeToPercent } from './mixPlanLayout';
-import type { MixPlan } from './planner/types';
+import type { MixPlan, PlanWarning } from './planner/types';
 
 /** Hand-built plan: 2 columns, a re-layout at t=5 that drops column 1 into fill for a while, then a new clip. */
 const plan: MixPlan = {
@@ -77,6 +77,13 @@ describe('getPlacementWarnings', () => {
   test('a time-anchored warning only applies within the placement range', () => {
     expect(getPlacementWarnings(plan, plan.placements[2]!)).toEqual([{ type: 'pillarbox', clipId: 'c', time: 9 }]);
     expect(getPlacementWarnings(plan, plan.placements[1]!)).toEqual([]);
+  });
+
+  test('a group-split warning applies to every clip of the group (A4)', () => {
+    const split: PlanWarning = { type: 'group-split', groupId: 'g', clipIds: ['a', 'c'] };
+    const withSplit = { ...plan, warnings: [split] };
+    expect(getPlacementWarnings(withSplit, plan.placements[2]!)).toEqual([split]);
+    expect(getPlacementWarnings(withSplit, plan.placements[1]!)).toEqual([]);
   });
 
   test('no warnings for a clip without any', () => {

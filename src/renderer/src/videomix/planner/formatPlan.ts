@@ -10,6 +10,8 @@ function formatWarning(w: PlanWarning) {
     case 'letterbox': { return `${w.type} ${w.clipId} @${s(w.time)}`; }
     case 'transition-shortened': { return `transition-shortened ${w.clipId} ${s(w.duration)}s`; }
     case 'fill': { return `fill ${w.width}px @${s(w.time)}`; }
+    case 'pin-shifted': { return `pin-shifted ${w.clipId} ${s(w.pinTime)} -> ${s(w.time)}`; }
+    case 'group-split': { return `group-split ${w.groupId} (${w.clipIds.join(', ')})`; }
     default: { return JSON.stringify(w); }
   }
 }

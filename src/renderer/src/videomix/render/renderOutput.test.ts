@@ -161,6 +161,19 @@ describe('planRender', () => {
     ]);
   });
 
+  test('pins and groups the plan couldn\'t honour, with the clip names (A4)', () => {
+    const warnings = getRenderWarnings({
+      warnings: [
+        { type: 'pin-shifted', clipId: 'd', pinTime: 3, time: 4.5 },
+        { type: 'group-split', groupId: 'g', clipIds: ['d', 'x'] },
+      ],
+    }, testProject().clips);
+    expect(warnings).toEqual([
+      { type: 'pin-shifted', clipName: 'Clip d', pinTime: 3, time: 4.5 },
+      { type: 'group-split', clipNames: ['Clip d', 'x'] },
+    ]);
+  });
+
   test('the small clip of the test project is reported as upscaled', () => {
     const project = testProject();
     const warnings = getRenderWarnings(planRender(project).plan, project.clips);

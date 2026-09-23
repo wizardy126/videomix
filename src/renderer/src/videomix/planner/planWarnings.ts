@@ -1,9 +1,12 @@
 import { ASPECT_TOLERANCE, getCellRect, getCropForAspect, getScaleFactor } from '../geometry';
 import type { AspectRange } from '../geometry';
 import { getPlanAxis } from './types';
+import { getEffectiveGroups, getEffectivePins } from './units';
 import type { LayoutKeyframe, MixPlan, PlanWarning, PlannerClip } from './types';
 
 const EPS = 1e-9;
+/** A pinned clip or a group member off its start by more than this (s) is warned about (and checked by validatePlan). */
+export const PIN_TOLERANCE = 1e-6;
 
 /**
  * How a clip sits in a column of `width`×`height` px: fill (within the aspect tolerance, as getCropForAspect),
@@ -70,6 +73,19 @@ export function getPlanWarnings(plan: Omit<MixPlan, 'warnings'>, clips: PlannerC
       }
     });
     if (maxFactor > 2) warnings.push({ type: 'upscale', clipId: clip.id, factor: maxFactor });
+  });
+
+  // A4 (T30): pins and groups the planner couldn't honour
+  const startOf = new Map(plan.placements.map((p) => [p.clipId, p.startTime]));
+  getEffectivePins(clips).forEach((pinTime, clipId) => {
+    const time = startOf.get(clipId);
+    if (time != null && Math.abs(time - pinTime) > PIN_TOLERANCE) warnings.push({ type: 'pin-shifted', clipId, pinTime, time });
+  });
+  getEffectiveGroups(clips).forEach((members, groupId) => {
+    const starts = members.map((clip) => startOf.get(clip.id)).filter((t) => t != null);
+    if (starts.length > 0 && Math.max(...starts) - Math.min(...starts) > PIN_TOLERANCE) {
+      warnings.push({ type: 'group-split', groupId, clipIds: members.map((clip) => clip.id) });
+    }
   });
 
   return warnings;

@@ -165,11 +165,13 @@ type PlanWarning =
   | { type: 'upscale', clipId, factor }                 // factor máximo > 2 (necesita rects)
   | { type: 'pillarbox' | 'letterbox', clipId, time }   // la columna no encaja con el clip
   | { type: 'transition-shortened', clipId, duration }  // xfade de entrada < D
-  | { type: 'fill', time, width };                      // keyframe con relleno estructural > 1 px
+  | { type: 'fill', time, width }                       // keyframe con relleno estructural > 1 px
+  | { type: 'pin-shifted', clipId, pinTime, time }      // (T30) un clip fijado no empieza en su momento sino en `time`
+  | { type: 'group-split', groupId, clipIds };          // (T30) los clips de un grupo no empiezan todos a la vez
 
 interface MixPlan {
   width: number, height: number, duration: number,
-  placements: ColumnPlacement[],   // en orden de elección, que coincide con el orden de inicio
+  placements: ColumnPlacement[],   // por orden de inicio (sin clips fijados, es también el orden de elección)
   layouts: LayoutKeyframe[],       // ordenados por tiempo; el primero en t=0; nunca se solapan
   warnings: PlanWarning[],
 }
@@ -201,6 +203,8 @@ interface MixPlan {
 9. **Orden estable durante una animación** (ADR-001, T10b): las columnas comunes a dos keyframes consecutivos están en el mismo orden.
 10. **Colapso junto a la vecina derecha** (ADR-001, T10b): aplicando la regla de colapso de §3.1, ningún par de columnas se solapa en los extremos de la animación (y, como las posiciones son mezclas de los extremos, tampoco en medio).
 11. **Fundido de salida** (T10b): `transitionOut` vale `min(D, duración/2)` exactamente en los clips descritos en §3.1 y 0 (o falta) en los demás.
+12. **Clips fijados** (T30): un clip fijado empieza exactamente en su `pinTime` efectivo (§3.6) o hay un aviso `pin-shifted` con su inicio real; no hay avisos de clips no fijados ni avisos que no correspondan.
+13. **Grupos** (T30): los clips de un grupo empiezan a la vez o hay un aviso `group-split` del grupo (y solo entonces). En la ventana de orden (regla 5) los clips fijados no cuentan, los clips sueltos se comparan entre sí y un grupo, que ocupa una sola posición entre las unidades ordenadas (la de su primer clip), no puede empezar más de N posiciones antes; sí puede empezar después (espera a tener sitio).
 
 Además: los keyframes no se solapan (`time ≥ anterior.time + anterior.transitionDuration`) y `transitionDuration ≤ D`.
 
@@ -245,6 +249,26 @@ Escala orientativa: 1 % de relleno durante 5 s ≈ un re-layout ≈ 3 posiciones
 ### 3.5 Aleatoriedad
 
 `random.ts`: PRNG mulberry32 con semilla y barajado Fisher-Yates determinista (`getBaseOrder`). No se usa `Math.random`.
+
+### 3.6 Clips fijados y grupos (A4, T30)
+
+Detalle, ejemplos y justificación en las notas de [T30](execution/T30-v2-plan-manual.md). Entrada: `PlannerClip.pinTime?` y `groupId?` (de `MixClip`).
+
+- **Unidades** (`units.ts`, compartido con `validatePlan`): los clips empiezan en unidades.
+  - Un clip suelto, un grupo (≥ 2 clips; un grupo de uno se ignora) o un clip o grupo fijado.
+  - Un grupo ocupa el lugar de su primer clip en el orden base (lista o barajado) y sus clips le siguen en ese orden.
+  - Un grupo con más clips que `maxColumns` se parte en trozos de `maxColumns`, que empiezan uno detrás de otro (aviso `group-split`).
+  - Un grupo con algún clip fijado queda fijado entero en el **menor** `pinTime` de sus clips. Los `pinTime` no válidos se ignoran.
+- **Ventana de orden**: los clips sueltos se ordenan entre sí como antes. Los clips fijados quedan fuera. Un grupo no puede adelantarse más de N posiciones y, cuando llega al final de su ventana, pasa a ser obligatorio.
+- **Fijar un momento** `P`:
+  - Es un evento más de la simulación: los clips fijados entran como **columnas nuevas a la derecha** en un keyframe en `P`, con una animación que termina antes de que acabe cualquier clip de la fila y antes del siguiente clip fijado.
+  - **Reserva**: antes de `P`, las opciones de cada evento se comparan primero por la falta de sitio que dejan en los momentos fijados (`Option.violation`: columnas de más ocupadas en `P`, o 1 si hay columnas pero los clips no caben a su mín.) y luego por coste. Así se libera una columna a tiempo (quitándola en un re-layout, o dándole un clip que termine antes).
+  - Si en `P` no hay sitio, el clip espera: entra en el siguiente evento (en su columna, con un xfade que empieza en `P` exactamente si la columna termina dentro de una transición) o se quita esa columna para hacerle sitio. Aviso `pin-shifted`. Los fijados conservan su orden: si dos no caben a la vez, se desplaza el posterior.
+  - Nunca se deja un hueco: si los demás clips se acaban antes de `P`, el clip fijado entra antes (también con aviso).
+  - Con `maxColumns` = 1 solo es exacto si un clip termina dentro de una transición después de `P`; si no, entra en el siguiente corte.
+- **Grupos**: todos sus clips empiezan en el mismo `time`: en la columna que se libera y en columnas nuevas a su derecha (en un evento normal, en la familia "sustituir"; si es obligatorio, también en las columnas que terminan a la vez). Si no hay sitio, se quita la columna que termina hasta que lo haya. Un grupo cede el sitio a un clip fijado pendiente.
+- **Filas apretadas**: si los clips que deben empezar juntos no caben ni a su mín., todos los de la fila se estrechan en la misma proporción (letterbox, con su aviso) antes que retrasarlos.
+- Sin clips fijados ni grupos el algoritmo no cambia (mismos planes y snapshots). `placements` se ordena por inicio al final, porque un clip fijado puede empezar antes que otro elegido antes.
 
 ## 4. Render de vídeo con ffmpeg
 
@@ -564,7 +588,8 @@ Requisitos: [01-requisitos §10](01-requisitos.md). Resumen técnico; cada task-
   - `settings.encoder = { codec: 'h264' | 'h265', hardware: 'auto' | 'none' | 'nvenc' | 'qsv' | 'videotoolbox' | 'vaapi' }`, por defecto `h264` / `auto` (esquema en `src/common/videomix/encoder.ts`, para main). Hasta T25 el render usa siempre libx264.
   - `settings.music?` pasa a ser `settings.musicPlaylist = { tracks: { id, path, absolutePath, volumeDb }[], crossfade: 2, loop, ducking: { enabled: false, amountDb: -10 } }`. La música de v2 se migra a una pista (id `'music'`) y conserva `loop`; sin música, `tracks: []`. La medida de sonoridad va por pista (clave de cache por fichero; en el mapa de `ensureLoudness`, bajo el id de la pista). Desde T27, `buildAudioGraph` usa la lista completa, con fundidos cruzados y *ducking* (§5.2).
   - Nuevo overlay `type: 'text'`: `text` (multilínea con `\n`), `duration`, `box`, `align`, `color`, `font?`, `border`, `shadow?`, `lineSpacing` (fracción del tamaño de letra), `fadeIn`, `fadeOut` y `entry: { kind: 'none' | 'slide' | 'typewriter', from?: 'left' | 'right' | 'top' | 'bottom', duration }`. T26 añade `fontSize?` (fracción del alto del fotograma, aditivo: si falta, sale de la caja como antes) y lo dibuja (ver [§9.1](#91-textos-y-presets-t26)).
-  - En los clips, `pinTime?: number` (fijar a un momento) y `groupId?: string` (agrupar; un grupo necesita ≥ 2 clips: el reducer disuelve los grupos que se quedan con uno).
+  - En los clips, `pinTime?: number` (fijar a un momento) y `groupId?: string` (agrupar; un grupo necesita ≥ 2 clips: el reducer disuelve los grupos que se quedan con uno). El planificador los usa desde T30 (§3.6).
+- **Ajustes manuales del plan** (T30, implementado): planificador en §3.6. UI: selección múltiple de clips (Ctrl/Cmd y Mayús) en la lista y en la vista Mix; menú de clip con "Fijar aquí" (en el cursor de Mix), "Quitar fijación", "Agrupar seleccionados" y "Desagrupar"; chincheta y color de grupo; arrastrar un bloque en la vista Mix lo fija donde se suelta (un paso de deshacer). Lógica pura en `clipGroups.ts`; hook `hooks/useMixClipPins.ts`.
 
   Los presets (B2) no van en el proyecto: se guardan en la configuración global (`configStore`, clave `overlayStylePresets`, T26). Su tipo, `OverlayStylePreset` (`src/common/videomix/overlayStyles.ts`), guarda solo propiedades de estilo; los esquemas de los overlays de texto, contador y barra se construyen a partir de los mismos esquemas de estilo.
 - **Salida vertical** (T29, implementado): el planificador trabaja en un **eje principal** (`LayoutAxis = 'columns' | 'rows'`, `geometry.ts`).

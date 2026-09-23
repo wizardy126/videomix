@@ -1252,7 +1252,7 @@
   "{{numMissing}} overlay file(s) not found. Select the overlay in the Mix view and use \"Locate...\".": "No se encuentran {{numMissing}} fichero(s) de elementos. Selecciona el elemento en la vista \"Montaje\" y usa \"Localizar...\".",
   "{{start}} to {{end}}": "De {{start}} a {{end}}",
   "A group has clips fixed at different times": "Un grupo tiene clips fijados en momentos distintos",
-  "Clip \"{{clip}}\" is fixed after the end of the other clips: there will be a gap before it": "El clip \"{{clip}}\" está fijado después del final de los demás clips: habrá un hueco antes de él",
+  "Clip \"{{clip}}\" is pinned after the end of the other clips: it will start earlier": "El clip \"{{clip}}\" está fijado después del final de los demás clips: empezará antes",
   "Clip \"{{clip}}\" is the only clip of its group: it is not grouped": "El clip \"{{clip}}\" es el único de su grupo: no se agrupa",
   "Clip \"{{clip}}\": its fixed start time is not valid": "Clip \"{{clip}}\": su momento fijado no es válido",
   "Text \"{{overlay}}\" is empty": "El texto \"{{overlay}}\" está vacío",
@@ -1286,5 +1286,17 @@
   "The music comes back up smoothly in the silences.": "La música vuelve a subir suavemente en los silencios.",
   "Add \"{{name}}\" to the project music playlist?": "¿Añadir \"{{name}}\" a la lista de música del proyecto?",
   "Add to music": "Añadir a la música",
-  "{{numMissing}} music file(s) not found. Use \"Locate...\" in the Music section of the mix settings.": "No se han encontrado {{numMissing}} fichero(s) de música. Usa \"Localizar...\" en la sección Música de los ajustes de montaje."
+  "{{numMissing}} music file(s) not found. Use \"Locate...\" in the Music section of the mix settings.": "No se han encontrado {{numMissing}} fichero(s) de música. Usa \"Localizar...\" en la sección Música de los ajustes de montaje.",
+  "Clip \"{{clip}}\" is pinned at {{pinTime}} but starts at {{time}}: the other clips end before": "El clip \"{{clip}}\" está fijado en {{pinTime}} pero empieza en {{time}}: los demás clips terminan antes",
+  "Clip \"{{clip}}\" is pinned at {{pinTime}} but starts at {{time}}: there is no room for it then": "El clip \"{{clip}}\" está fijado en {{pinTime}} pero empieza en {{time}}: en ese momento no hay sitio para él",
+  "Drag to pin it at another time": "Arrastra para fijarlo en otro momento",
+  "Group selected clips": "Agrupar seleccionados",
+  "Its group doesn't start together: it has more clips than columns, or there is no room for all of them": "Su grupo no empieza a la vez: tiene más clips que columnas, o no hay sitio para todos",
+  "Pin here ({{time}})": "Fijar aquí ({{time}})",
+  "Pinned": "Fijado",
+  "Pinned at {{pinTime}} but starts at {{time}}: there is no room for it then": "Fijado en {{pinTime}} pero empieza en {{time}}: en ese momento no hay sitio para él",
+  "Pinned at {{time}} of the video": "Fijado en {{time}} del vídeo",
+  "The clips {{clips}} are grouped but don't all start together": "Los clips {{clips}} están agrupados pero no empiezan todos a la vez",
+  "Ungroup": "Desagrupar",
+  "Unpin": "Quitar fijación"
 }

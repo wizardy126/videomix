@@ -1,6 +1,6 @@
-import { getBaseOrder } from './random';
 import { getDefaultAxis, getPlanAxis, getPlanAxisLengths } from './types';
 import type { ColumnPlacement, MixPlan, PlanMixInput } from './types';
+import { getEffectiveGroups, getEffectivePins, getPlanUnits } from './units';
 
 const TOL = 1e-6;
 
@@ -25,7 +25,7 @@ export function getAnimatedColumn(layout: Layout, other: Layout, column: number,
 }
 
 /**
- * Check every invariant of 04-diseno §3.2 (plus layout consistency). Returns the problems found, empty if the plan is
+ * Check every invariant of 04-diseno §3.2 (plus layout consistency, pins and groups). Returns the problems found, empty if the plan is
  * valid. Used by the tests and, in development, after each planMix.
  */
 export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): string[] {
@@ -159,19 +159,57 @@ export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): 
     });
   });
 
-  // 5. order within the reorder window (ties in start time are sorted by base index, the most favourable)
-  const baseIndex = new Map(getBaseOrder(clips, settings.order).map((clip, i) => [clip.id, i]));
-  const sorted = [...placements].sort((a, b) => a.startTime - b.startTime);
-  for (let i = 0; i < sorted.length;) {
-    let j = i + 1;
-    while (j < sorted.length && sorted[j]!.startTime - sorted[j - 1]!.startTime <= TOL) j += 1;
-    const tied = sorted.slice(i, j).sort((a, b) => (baseIndex.get(a.clipId) ?? 0) - (baseIndex.get(b.clipId) ?? 0));
-    tied.forEach((p, k) => {
-      const base = baseIndex.get(p.clipId);
-      if (base != null && Math.abs(i + k - base) > N) fail(`Clip ${p.clipId} at position ${i + k}, list index ${base} (window ${N})`);
-    });
-    i = j;
-  }
+  // 5. order within the reorder window (ties in start time are sorted by base index, the most favourable). A4 (T30):
+  // pinned clips are outside the order; the window applies to the single clips among themselves, and a group (one
+  // position among the ordered units, where its first clip was) may wait for room but never starts more than N early.
+  const { ordered } = getPlanUnits(clips, settings);
+  const startOf = new Map(placements.map((p) => [p.clipId, p.startTime]));
+  const positions = <T, >(items: T[], start: (item: T) => number | undefined, base: (item: T) => number) => {
+    const sorted = items.flatMap((item) => {
+      const t = start(item);
+      return t != null ? [{ item, t }] : [];
+    }).sort((a, b) => a.t - b.t);
+    const result: { item: T, position: number }[] = [];
+    for (let i = 0; i < sorted.length;) {
+      let j = i + 1;
+      while (j < sorted.length && sorted[j]!.t - sorted[j - 1]!.t <= TOL) j += 1;
+      sorted.slice(i, j).sort((a, b) => base(a.item) - base(b.item)).forEach(({ item }, k) => result.push({ item, position: i + k }));
+      i = j;
+    }
+    return result;
+  };
+  positions(ordered.filter((u) => u.singleBase >= 0), (u) => startOf.get(u.clips[0]!.id), (u) => u.singleBase).forEach(({ item, position }) => {
+    if (Math.abs(position - item.singleBase) > N) fail(`Clip ${item.clips[0]!.id} at position ${position}, list index ${item.singleBase} (window ${N})`);
+  });
+  const unitStart = (u: (typeof ordered)[number]) => {
+    const starts = u.clips.flatMap((clip) => (startOf.has(clip.id) ? [startOf.get(clip.id)!] : []));
+    return starts.length > 0 ? Math.min(...starts) : undefined;
+  };
+  positions(ordered, unitStart, (u) => u.unitBase).forEach(({ item, position }) => {
+    if (item.singleBase < 0 && position < item.unitBase - N) fail(`Group ${item.groupId} at position ${position}, before its window (list position ${item.unitBase}, window ${N})`);
+  });
+
+  // A4: pinned clips start at their pin time and groups start together, unless the plan warns (and says when)
+  const shifted = new Map(plan.warnings.flatMap((w) => (w.type === 'pin-shifted' ? [[w.clipId, w] as const] : [])));
+  const pins = getEffectivePins(clips);
+  pins.forEach((pinTime, clipId) => {
+    const start = startOf.get(clipId);
+    const warning = shifted.get(clipId);
+    if (start == null) return;
+    if (warning == null && Math.abs(start - pinTime) > TOL) fail(`Clip ${clipId} pinned at ${pinTime} starts at ${start} without warning`);
+    if (warning != null && (Math.abs(warning.time - start) > TOL || Math.abs(warning.pinTime - pinTime) > TOL || Math.abs(start - pinTime) <= TOL)) fail(`Clip ${clipId}: wrong pin-shifted warning`);
+  });
+  shifted.forEach((_w, clipId) => { if (!pins.has(clipId)) fail(`Clip ${clipId} is not pinned but has a pin-shifted warning`); });
+  const split = new Map(plan.warnings.flatMap((w) => (w.type === 'group-split' ? [[w.groupId, w] as const] : [])));
+  const groups = getEffectiveGroups(clips);
+  groups.forEach((members, groupId) => {
+    const starts = members.flatMap((clip) => (startOf.has(clip.id) ? [startOf.get(clip.id)!] : []));
+    const together = starts.length === 0 || Math.max(...starts) - Math.min(...starts) <= TOL;
+    const warning = split.get(groupId);
+    if (!together && warning == null) fail(`Group ${groupId} doesn't start together without warning`);
+    if (warning != null && (together || warning.clipIds.join(',') !== members.map((clip) => clip.id).join(','))) fail(`Group ${groupId}: wrong group-split warning`);
+  });
+  split.forEach((_w, groupId) => { if (!groups.has(groupId)) fail(`Group ${groupId} doesn't exist but has a group-split warning`); });
 
   return issues;
 }

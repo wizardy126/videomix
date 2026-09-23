@@ -286,6 +286,8 @@ export default function useMixClips({ mixProject, currentSourceId, activateSourc
   return {
     selectedClip,
     selectedClipId,
+    /** One undo step, after committing a pending merged edit (for other clip hooks, e.g. useMixClipPins). */
+    dispatchStep,
     undo,
     redo,
     userSelectClip,

@@ -124,11 +124,16 @@ export type RenderWarning =
   | { type: 'upscale', clipName: string, factor: number }
   | { type: 'pillarbox' | 'letterbox', clipName: string, time: number }
   /** `width` is along the main axis: a height when `rows`. */
-  | { type: 'fill', time: number, width: number, rows: boolean };
+  | { type: 'fill', time: number, width: number, rows: boolean }
+  /** A4 (T30): a pinned clip that can't start at its pin time. */
+  | { type: 'pin-shifted', clipName: string, pinTime: number, time: number }
+  /** A4 (T30): a group whose clips don't all start together. */
+  | { type: 'group-split', clipNames: string[] };
 
 /**
  * Plan warnings worth confirming before a render (01-requisitos §4.6): clips upscaled more than ×2, clips shown with
- * fill around them (pillarbox/letterbox) and rows that can't be filled with clips. Shortened transitions are left out:
+ * fill around them (pillarbox/letterbox), rows that can't be filled with clips, and pins or groups the planner couldn't
+ * honour (A4). Shortened transitions are left out:
  * validateMixProject already warns about short clips. One `fill` warning per keyframe would be noise, so only the first.
  */
 export function getRenderWarnings(plan: Pick<MixPlan, 'warnings' | 'axis'>, clips: Pick<MixClip, 'id' | 'name'>[]): RenderWarning[] {
@@ -142,6 +147,10 @@ export function getRenderWarnings(plan: Pick<MixPlan, 'warnings' | 'axis'>, clip
     else if (warning.type === 'fill' && !hasFill) {
       hasFill = true;
       ret.push({ type: 'fill', time: warning.time, width: warning.width, rows: plan.axis === 'rows' });
+    } else if (warning.type === 'pin-shifted') {
+      ret.push({ type: 'pin-shifted', clipName: getName(warning.clipId), pinTime: warning.pinTime, time: warning.time });
+    } else if (warning.type === 'group-split') {
+      ret.push({ type: 'group-split', clipNames: warning.clipIds.map((id) => getName(id)) });
     }
   });
   return ret;

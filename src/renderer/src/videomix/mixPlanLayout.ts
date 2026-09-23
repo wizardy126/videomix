@@ -73,6 +73,7 @@ export function timeToPercent(time: number, duration: number): number {
 export function getPlacementWarnings(plan: Pick<MixPlan, 'warnings'>, placement: Pick<ColumnPlacement, 'clipId' | 'startTime' | 'endTime'>): PlanWarning[] {
   return plan.warnings.filter((w) => {
     if (w.type === 'fill') return false;
+    if (w.type === 'group-split') return w.clipIds.includes(placement.clipId);
     if (w.clipId !== placement.clipId) return false;
     if (w.type === 'pillarbox' || w.type === 'letterbox') return w.time >= placement.startTime - EPS && w.time < placement.endTime + EPS;
     return true;

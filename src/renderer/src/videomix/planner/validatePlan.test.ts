@@ -157,3 +157,74 @@ describe('validatePlan: appearing and disappearing columns (ADR-001)', () => {
     expect(issues).toEqual(['Layout 1 (t=5) columns 0 and 2 overlap during the animation']);
   });
 });
+
+describe('validatePlan: pins and groups (A4, T30)', () => {
+  // three flexible verticals at a time; v5 pinned at 15 s, v3+v4 grouped, v6 pinned where it can't be (after the end)
+  const FLEX = { min: 9 / 16, max: 1, preferred: 9 / 16 };
+  const pinInput: PlanMixInput = {
+    clips: [
+      { id: 'v0', duration: 10, aspectRange: FLEX },
+      { id: 'v1', duration: 12, aspectRange: FLEX },
+      { id: 'v2', duration: 14, aspectRange: FLEX },
+      { id: 'v3', duration: 10, aspectRange: FLEX, groupId: 'g' },
+      { id: 'v4', duration: 11, aspectRange: FLEX, groupId: 'g' },
+      { id: 'v5', duration: 9, aspectRange: FLEX, pinTime: 15 },
+      { id: 'v6', duration: 10, aspectRange: FLEX, pinTime: 500 },
+      { id: 'v7', duration: 8, aspectRange: FLEX },
+    ],
+    settings: { ...input.settings, reorderWindow: 1 },
+  };
+  const pinPlan = planMix(pinInput);
+  const mutatePin = (fn: (plan: MixPlan) => void) => {
+    const plan = structuredClone(pinPlan);
+    fn(plan);
+    return validatePlan(plan, pinInput);
+  };
+  const shift = (pl: MixPlan['placements'][number], by: number) => {
+    pl.startTime += by;
+    pl.endTime += by;
+  };
+
+  test('the base plan is valid: v5 on its pin, the group together, v6 shifted with a warning', () => {
+    expect(validatePlan(pinPlan, pinInput)).toEqual([]);
+    expect(placement(pinPlan, 'v5').startTime).toBe(15);
+    expect(placement(pinPlan, 'v3').startTime).toBe(placement(pinPlan, 'v4').startTime);
+    expect(pinPlan.warnings).toContainEqual({ type: 'pin-shifted', clipId: 'v6', pinTime: 500, time: placement(pinPlan, 'v6').startTime });
+  });
+
+  test('detects a pinned clip off its time without warning, and a wrong warning', () => {
+    expect(mutatePin((p) => { p.warnings.push({ type: 'pin-shifted', clipId: 'v5', pinTime: 15, time: 15 }); })).toContain('Clip v5: wrong pin-shifted warning');
+    expect(mutatePin((p) => { p.warnings = p.warnings.filter((w) => w.type !== 'pin-shifted'); })).toContainEqual(expect.stringContaining('Clip v6 pinned at 500'));
+    expect(mutatePin((p) => {
+      const w = p.warnings.find((x) => x.type === 'pin-shifted');
+      if (w?.type === 'pin-shifted') w.time += 1;
+    })).toContain('Clip v6: wrong pin-shifted warning');
+    expect(mutatePin((p) => { p.warnings.push({ type: 'pin-shifted', clipId: 'v0', pinTime: 3, time: 0 }); })).toContain('Clip v0 is not pinned but has a pin-shifted warning');
+  });
+
+  test('detects a pinned clip moved off its time (the plan being otherwise consistent)', () => {
+    // same plan, but the input pins v5 elsewhere
+    const moved = { ...pinInput, clips: pinInput.clips.map((c) => (c.id === 'v5' ? { ...c, pinTime: 16 } : c)) };
+    expect(validatePlan(pinPlan, moved)).toContainEqual(expect.stringContaining('Clip v5 pinned at 16 starts at 15 without warning'));
+  });
+
+  test('detects a group that doesn\'t start together, and a wrong group-split warning', () => {
+    const issues = mutatePin((p) => { shift(placement(p, 'v4'), 0.2); });
+    expect(issues).toContain('Group g doesn\'t start together without warning');
+    expect(mutatePin((p) => { p.warnings.push({ type: 'group-split', groupId: 'g', clipIds: ['v3', 'v4'] }); })).toContain('Group g: wrong group-split warning');
+    expect(mutatePin((p) => { p.warnings.push({ type: 'group-split', groupId: 'nope', clipIds: [] }); })).toContain('Group nope doesn\'t exist but has a group-split warning');
+  });
+
+  test('the reorder window ignores pinned clips and counts a group as one position', () => {
+    // pinned clips can go anywhere: moving v5's pin to the front of the list changes nothing
+    const reordered = { ...pinInput, clips: [pinInput.clips[5]!, ...pinInput.clips.filter((c) => c.id !== 'v5')] };
+    expect(validatePlan(pinPlan, reordered)).toEqual([]);
+    // with v5 and v6 unpinned and the group last in the list, it starts too early for a window of 0 (5th of 7)
+    const unpinned = pinInput.clips.map((c) => ({ ...c, pinTime: undefined }));
+    const late = { settings: { ...pinInput.settings, reorderWindow: 0 }, clips: [...unpinned.filter((c) => c.groupId == null), ...unpinned.filter((c) => c.groupId != null)] };
+    expect(validatePlan(pinPlan, late)).toContain('Group g at position 5, before its window (list position 6, window 0)');
+    // without the group, its clips are single clips again and their order is checked as such
+    const ungrouped = { ...late, clips: late.clips.map((c) => ({ ...c, groupId: undefined })) };
+    expect(validatePlan(pinPlan, ungrouped).some((m) => m.startsWith('Clip v3 at position') || m.startsWith('Clip v4 at position'))).toBe(true);
+  });
+});

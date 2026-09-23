@@ -1,7 +1,8 @@
 import type { CSSProperties, MouseEventHandler, PointerEvent as ReactPointerEvent, PointerEventHandler, ReactNode } from 'react';
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FaExclamationTriangle, FaFont, FaImage, FaPlus, FaStopwatch, FaVolumeUp } from 'react-icons/fa';
+import type { TFunction } from 'i18next';
+import { FaExclamationTriangle, FaFont, FaImage, FaPlus, FaStopwatch, FaThumbtack, FaVolumeUp } from 'react-icons/fa';
 import { MdLinearScale } from 'react-icons/md';
 
 import { useSegColors } from '../../contexts';
@@ -25,6 +26,8 @@ import { getLinkedCountdown } from '../overlays/anchors';
 import { getCountdownTextAt, getOverlayFrames } from '../overlays/overlayFrames';
 import { getSlideOffset, getTextEntryFrames, getTextFontSizeForBox, getTextOpacity, getTextOverlayFontSize, getTypewriterCount, splitGraphemes, splitTextLines } from '../overlays/textLayout';
 import styles from './MixPlanView.module.css';
+import { getClipSelectModifiers } from '../hooks/useMixClipPins';
+import type { ClipSelectModifiers, UseMixClipPins } from '../hooks/useMixClipPins';
 
 const { pathToFileURL } = window.require('@electron/remote').require('./index.js');
 
@@ -63,18 +66,22 @@ const overlayColors: Record<MixOverlay['type'], string> = {
 
 const toolbarButtonStyle: CSSProperties = { font: 'inherit', fontSize: '.75em', padding: '.1em .5em', border: '1px solid var(--gray-7)', borderRadius: '.3em', background: 'var(--gray-3)', color: 'var(--gray-12)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '.3em', whiteSpace: 'nowrap' };
 
-function warningTooltip(t: (key: string) => string, warnings: PlanWarning[], rows: boolean) {
+function warningTooltip(t: TFunction, warnings: PlanWarning[], rows: boolean) {
   return warnings.map((w) => {
     if (w.type === 'upscale') return t('Enlarged more than the recommended limit');
     // a lane is a row in a vertical plan (T29)
     if (w.type === 'pillarbox' || w.type === 'letterbox') return rows ? t('Gets fill around it in this row') : t('Gets fill around it in this column');
+    // A4 (T30)
+    if (w.type === 'pin-shifted') return t('Pinned at {{pinTime}} but starts at {{time}}: there is no room for it then', { pinTime: formatDuration({ seconds: w.pinTime, shorten: true }), time: formatDuration({ seconds: w.time, shorten: true }) });
+    if (w.type === 'group-split') return t('Its group doesn\'t start together: it has more clips than columns, or there is no room for all of them');
     return t('Its transition is shortened');
   }).join('; ');
 }
 
 // eslint-disable-next-line react/display-name
-const Block = memo(({ placement, laneWidthPercent, color, name, thumbnailUrl, warnings, isSelected, rows }: {
+const Block = memo(({ placement, clip, laneWidthPercent, color, name, thumbnailUrl, warnings, isSelected, rows, pinned, groupColor, dragging, openClipMenu, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: {
   placement: ColumnPlacement,
+  clip: MixClip | undefined,
   laneWidthPercent: { left: number, width: number },
   color: string,
   name: string,
@@ -83,8 +90,22 @@ const Block = memo(({ placement, laneWidthPercent, color, name, thumbnailUrl, wa
   warnings: PlanWarning[],
   isSelected: boolean,
   rows: boolean,
+  /** A4 (T30): pinned (its own pin or its group's), its group's colour, the clip menu and the drag that pins it. */
+  pinned: boolean,
+  groupColor: string | undefined,
+  dragging: boolean,
+  openClipMenu: UseMixClipPins['openClipMenu'],
+  onPointerDown: (e: ReactPointerEvent<HTMLDivElement>, p: ColumnPlacement) => void,
+  onPointerMove: PointerEventHandler<HTMLDivElement>,
+  onPointerUp: PointerEventHandler<HTMLDivElement>,
+  onPointerCancel: PointerEventHandler<HTMLDivElement>,
 }) => {
   const { t } = useTranslation();
+  const handleContextMenu = useCallback<MouseEventHandler<HTMLDivElement>>((e) => {
+    e.preventDefault();
+    if (clip != null) openClipMenu(clip);
+  }, [clip, openClipMenu]);
+  const handlePointerDown = useCallback<PointerEventHandler<HTMLDivElement>>((e) => onPointerDown(e, placement), [onPointerDown, placement]);
   const duration = placement.endTime - placement.startTime;
   // Crossfade with the previous/next clip of the column, as a fraction of this block's own width (visual only).
   const inFrac = duration > 0 ? Math.min(1, placement.transitionIn / duration) : 0;
@@ -101,12 +122,22 @@ const Block = memo(({ placement, laneWidthPercent, color, name, thumbnailUrl, wa
     overflow: 'hidden',
     border: `1px solid ${isSelected ? 'var(--gray-12)' : 'transparent'}`,
     boxSizing: 'border-box',
-    cursor: 'pointer',
+    cursor: dragging ? 'grabbing' : 'pointer',
     containerType: 'inline-size',
-  }), [color, isSelected, laneWidthPercent.left, laneWidthPercent.width]);
+    touchAction: 'none',
+    ...(dragging && { opacity: 0.8, zIndex: 1 }),
+  }), [color, dragging, isSelected, laneWidthPercent.left, laneWidthPercent.width]);
 
   return (
-    <div style={style} title={`${name}${warnings.length > 0 ? ` — ${warningTooltip(t, warnings, rows)}` : ''}`}>
+    <div
+      style={style}
+      title={`${name}${pinned ? ` — ${t('Pinned')}` : ''}${warnings.length > 0 ? ` — ${warningTooltip(t, warnings, rows)}` : ''}\n${t('Drag to pin it at another time')}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onContextMenu={handleContextMenu}
+    >
       {thumbnailUrl != null && (
         <div className={styles['thumbWrap']}>
           <img src={thumbnailUrl} alt="" draggable={false} className={styles['thumbImg']} />
@@ -116,9 +147,11 @@ const Block = memo(({ placement, laneWidthPercent, color, name, thumbnailUrl, wa
       {inFrac > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${inFrac * 100}%`, background: 'linear-gradient(90deg, rgba(255,255,255,.4), transparent)', pointerEvents: 'none' }} />}
       {outFrac > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: `${outFrac * 100}%`, background: 'linear-gradient(90deg, transparent, rgba(0,0,0,.4))', pointerEvents: 'none' }} />}
       <div className="no-user-select" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: '.2em', padding: '0 .3em', fontSize: '.75em', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', pointerEvents: 'none' }}>
+        {pinned && <FaThumbtack style={{ flexShrink: 0 }} />}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
         {warnings.length > 0 && <FaExclamationTriangle style={{ flexShrink: 0, color: warningColor }} />}
       </div>
+      {groupColor != null && <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: groupColor, pointerEvents: 'none' }} />}
     </div>
   );
 });
@@ -319,11 +352,13 @@ const FramePreview = memo(({ plan, tl, time, clipsById, getColor, children }: {
 interface BlockDrag { pointerId: number, mode: BlockDragMode, startX: number, axisWidth: number, start: MixOverlay, rawStart: number, moved: boolean }
 interface BoxDrag { pointerId: number, handle: DragHandle, startX: number, startY: number, scale: number, start: Exclude<MixOverlay, { type: 'sound' }>, moved: boolean }
 
-function MixPlanView({ clips, settings, selectedClipId, onSelect, thumbnailUrls, mixOverlays, overlays, missingOverlayFiles }: {
+function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOverlays, overlays, missingOverlayFiles }: {
   clips: MixClip[],
   settings: MixSettings,
-  selectedClipId: string | undefined,
-  onSelect: (clipId: string) => void,
+  /** Selection (with the multi-selection), pins and groups (A4, T30). */
+  clipPins: Pick<UseMixClipPins, 'selectedClipIds' | 'pinTimes' | 'groupColors' | 'openClipMenu' | 'userPinClip'>,
+  /** With modifiers: Ctrl/Cmd-click and Shift-click multi-selection. */
+  onSelect: (clipId: string, modifiers?: ClipSelectModifiers) => void,
   /** From `useClipThumbnails` (A2, T31), shared with `ClipList`. */
   thumbnailUrls: ReadonlyMap<string, string>,
   mixOverlays: UseMixOverlays,
@@ -368,10 +403,52 @@ function MixPlanView({ clips, settings, selectedClipId, onSelect, thumbnailUrls,
     setCursorTime(timeAtClientX(e.clientX));
   }, [setCursorTime, timeAtClientX]);
 
+  // Clip block drags pin the clip where it's dropped (A4, T30): the block follows the pointer, one undo step on release
+  const clipDragRef = useRef<{ pointerId: number, clipId: string, startX: number, axisWidth: number, startTime: number, moved: boolean }>(undefined);
+  const [clipDrag, setClipDrag] = useState<{ clipId: string, time: number }>();
+  const justDraggedRef = useRef(false);
+
+  const handleClipPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>, placement: ColumnPlacement) => {
+    // no stopPropagation: the press also moves the cursor, and a click without drag selects the clip
+    justDraggedRef.current = false;
+    if (e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    clipDragRef.current = { pointerId: e.pointerId, clipId: placement.clipId, startX: e.clientX, axisWidth: lanesRef.current?.getBoundingClientRect().width ?? 0, startTime: placement.startTime, moved: false };
+  }, []);
+
+  const handleClipPointerMove = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
+    const drag = clipDragRef.current;
+    if (drag == null || drag.pointerId !== e.pointerId || plan == null) return;
+    if (!drag.moved && Math.abs(e.clientX - drag.startX) < 3) return;
+    drag.moved = true;
+    setClipDrag({ clipId: drag.clipId, time: Math.max(0, drag.startTime + pixelsToSeconds(e.clientX - drag.startX, drag.axisWidth, plan.duration)) });
+  }, [plan]);
+
+  const handleClipPointerUp = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
+    const drag = clipDragRef.current;
+    if (drag == null || drag.pointerId !== e.pointerId) return;
+    clipDragRef.current = undefined;
+    setClipDrag(undefined);
+    if (!drag.moved || plan == null) return;
+    justDraggedRef.current = true;
+    clipPins.userPinClip(drag.clipId, Math.max(0, drag.startTime + pixelsToSeconds(e.clientX - drag.startX, drag.axisWidth, plan.duration)));
+  }, [clipPins, plan]);
+
+  const handleClipPointerCancel = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
+    if (clipDragRef.current?.pointerId !== e.pointerId) return;
+    clipDragRef.current = undefined;
+    setClipDrag(undefined);
+  }, []);
+
   const handleLaneClick = useCallback((laneIndex: number): MouseEventHandler<HTMLDivElement> => (e) => {
     if (plan == null) return;
+    // the click that ends a block drag doesn't select
+    if (justDraggedRef.current) {
+      justDraggedRef.current = false;
+      return;
+    }
     const placement = getPlacementAt(plan, laneColumns, laneIndex, timeAtClientX(e.clientX));
-    if (placement != null) onSelect(placement.clipId);
+    if (placement != null) onSelect(placement.clipId, getClipSelectModifiers(e));
   }, [laneColumns, onSelect, plan, timeAtClientX]);
 
   const handleOverlayLaneClick = useCallback(() => setSelectedOverlayId(undefined), [setSelectedOverlayId]);
@@ -571,19 +648,31 @@ function MixPlanView({ clips, settings, selectedClipId, onSelect, thumbnailUrls,
 
                 {plan.placements.filter((p) => p.column === column).map((placement) => {
                   const clip = clipsById.get(placement.clipId);
-                  const left = timeToPercent(placement.startTime, plan.duration);
-                  const width = timeToPercent(placement.endTime, plan.duration) - left;
+                  const dragging = clipDrag?.clipId === placement.clipId;
+                  // a dragged block follows the pointer (it may go past the end of the video)
+                  const start = dragging ? clipDrag.time : placement.startTime;
+                  const left = timeToPercent(start, plan.duration);
+                  const width = (Math.max(0, placement.endTime - placement.startTime) / Math.max(plan.duration, 1e-9)) * 100;
                   return (
                     <Block
                       key={placement.clipId}
                       placement={placement}
+                      clip={clip}
                       laneWidthPercent={{ left, width }}
                       color={clip != null ? getColor(clip) : 'var(--gray-8)'}
                       name={clip?.name ?? placement.clipId}
                       thumbnailUrl={thumbnailUrls.get(placement.clipId)}
                       warnings={getPlacementWarnings(plan, placement)}
-                      isSelected={placement.clipId === selectedClipId}
+                      isSelected={clipPins.selectedClipIds.has(placement.clipId)}
                       rows={getPlanAxis(plan) === 'rows'}
+                      pinned={clipPins.pinTimes.has(placement.clipId)}
+                      groupColor={clip?.groupId != null ? clipPins.groupColors.get(clip.groupId) : undefined}
+                      dragging={dragging}
+                      openClipMenu={clipPins.openClipMenu}
+                      onPointerDown={handleClipPointerDown}
+                      onPointerMove={handleClipPointerMove}
+                      onPointerUp={handleClipPointerUp}
+                      onPointerCancel={handleClipPointerCancel}
                     />
                   );
                 })}
