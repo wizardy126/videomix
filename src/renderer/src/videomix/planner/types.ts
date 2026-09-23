@@ -45,6 +45,14 @@ export interface ColumnPlacement {
    * 0 for the first clip of a column. Below the global duration when a clip is short (see `transition-shortened`).
    */
   transitionIn: number,
+  /**
+   * End of the video (01-requisitos §4.3): the clip has no successor, its column stays in the layout and becomes fill,
+   * so the clip fades out to the fill with the global transition during [endTime - transitionOut, endTime].
+   * Missing (or 0) when the clip is followed in its column (the successor's `transitionIn` is the crossfade), when its
+   * column is removed by a re-layout (it shrinks to 0), or when it ends with the video (the global fade handles it).
+   * ≤ min(D, clip duration / 2), and no layout animation starts inside the fade.
+   */
+  transitionOut?: number | undefined,
 }
 
 /**

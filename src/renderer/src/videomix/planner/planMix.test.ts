@@ -7,7 +7,7 @@ import { formatPlan } from './formatPlan';
 import { planMix } from './planMix';
 import { createRandom } from './random';
 import type { MixPlan, PlanMixInput, PlannerClip, PlannerSettings } from './types';
-import { validatePlan } from './validatePlan';
+import { getAnimatedColumn, validatePlan } from './validatePlan';
 
 const range = (min: number, max: number, preferred = max): AspectRange => ({ min, max, preferred });
 const rigid = (aspect: number) => range(aspect, aspect, aspect);
@@ -179,6 +179,84 @@ describe('edge cases', () => {
     const clips = [clip('v0', 5, V916), clip('v1', 20, V916), clip('v2', 20, V916), clip('h', 5, H169)];
     const p = plan({ clips, settings: settings({ reorderWindow: 0 }) });
     expect(p.warnings.some((w) => (w.type === 'letterbox' && w.clipId === 'h') || w.type === 'fill')).toBe(true);
+  });
+});
+
+describe('decisions after T10 (T10b)', () => {
+  test('fill before direct substitution: a re-layout that removes the fill beats a clip that fits', () => {
+    // window 1 keeps the flexible f4 out of the initial row, so it starts with three rigid verticals and 96 px of fill
+    const clips = [clip('v0', 5, V916), clip('v1', 10, V916), clip('v2', 12, V916), clip('v3', 8, V916), clip('f4', 8, V916_WIDE)];
+    const p = plan({ clips, settings: settings({ reorderWindow: 1 }) });
+    expect(p.layouts[0]!.fills.reduce((acc, f) => acc + f.width, 0)).toBe(96);
+    // v3 fits the freed 608 px column exactly, but f4 widens to 704 px and the fill goes away
+    expect(byClip(p, 'f4')).toMatchObject({ column: 0, startTime: 4.5 });
+    expect(p.layouts[1]).toEqual({ time: 4.5, transitionDuration: 0.5, columns: [{ column: 0, x: 0, width: 704 }, { column: 1, x: 704, width: 608 }, { column: 2, x: 1312, width: 608 }], fills: [] });
+  });
+
+  test('fill before direct substitution only when the fill clearly goes down', () => {
+    // no flexible clip in the window: nothing reduces the fill, so v3 goes in directly without animating
+    const clips = [clip('v0', 5, V916), clip('v1', 10, V916), clip('v2', 12, V916), clip('v3', 8, V916), clip('v4', 8, V916)];
+    const p = plan({ clips, settings: settings({ reorderWindow: 1 }) });
+    expect(p.layouts).toHaveLength(1);
+    expect(byClip(p, 'v3')).toMatchObject({ column: 0, startTime: 4.5 });
+  });
+
+  test('without fill, direct substitution keeps its priority', () => {
+    const clips = [clip('f0', 5, V916_WIDE), clip('f1', 10, V916_WIDE), clip('f2', 12, V916_WIDE), clip('f3', 8, V916_WIDE), clip('h4', 8, H169_NARROW)];
+    const p = plan({ clips, settings: settings() });
+    expect(byClip(p, 'f3')).toMatchObject({ column: 0, startTime: 4.5 });
+    expect(p.layouts.map((l) => l.time)).not.toContain(4.5);
+  });
+
+  test('balanced columns: a flexible horizontal is narrowed to sit next to a vertical', () => {
+    // the 16:9 clip keeps 1312 px (68 % of its max) instead of taking the whole frame alone
+    const clips = [clip('h0', 10, H169_NARROW), clip('v1', 10, V916), clip('h2', 10, H169_NARROW), clip('v3', 10, V916)];
+    const p = plan({ clips, settings: settings() });
+    expect(p.layouts[0]!.columns.map((c) => c.width)).toEqual([1312, 608]);
+  });
+
+  test('balanced columns: full screen when sharing would crop more than ~40 % of the max', () => {
+    // next to a square clip the 16:9 one would keep 840 px (44 % of its max): it goes alone, full screen
+    const p = plan({ clips: [clip('h0', 10, H169_NARROW), clip('s1', 10, rigid(1))], settings: settings() });
+    expect(p.layouts[0]!.columns.map((c) => c.width)).toEqual([1920]);
+    // two 16:9 clips side by side would keep 50 % each
+    const pair = plan({ clips: [clip('a', 10, H169_NARROW), clip('b', 10, H169_NARROW)], settings: settings() });
+    expect(columnsOf(pair).size).toBe(1);
+  });
+
+  test('a new column grows from width 0 next to its right neighbour and its clip starts without crossfade', () => {
+    // no fitting clip for the full-width column: h0 is replaced by three flexible verticals at once
+    const clips = [clip('h0', 6, H169), clip('f1', 10, V916_WIDE), clip('f2', 10, V916_WIDE), clip('f3', 10, V916_WIDE)];
+    const p = plan({ clips, settings: settings({ reorderWindow: 0 }) });
+    const [before, after] = p.layouts;
+    expect(after).toMatchObject({ time: 5.5, transitionDuration: 0.5 });
+    expect(after!.columns).toEqual([{ column: 0, x: 0, width: 640 }, { column: 1, x: 640, width: 640 }, { column: 2, x: 1280, width: 640 }]);
+    expect(p.placements.filter((pl) => pl.column !== 0).map((pl) => [pl.clipId, pl.startTime, pl.transitionIn])).toEqual([['f2', 5.5, 0], ['f3', 5.5, 0]]);
+    expect(byClip(p, 'f1')).toMatchObject({ column: 0, startTime: 5.5, transitionIn: 0.5 });
+    // at the start of the animation the new columns are 0 px wide at the right edge of the freed column
+    expect(getAnimatedColumn(before!, after!, 1, 1920, 0)).toEqual({ x: 1920, width: 0 });
+    expect(getAnimatedColumn(before!, after!, 2, 1920, 0)).toEqual({ x: 1920, width: 0 });
+  });
+
+  test('end of the video: a clip without successor fades out to the fill', () => {
+    const clips = [clip('v0', 5, V916), clip('v1', 0.6, V916), clip('v2', 12, V916), clip('v3', 8, V916)];
+    const p = plan({ clips, settings: settings() });
+    // v0 and v3 end before the video (v2) does: they fade out; v1 is followed by v3; v2 ends the video
+    expect(p.placements.map((pl) => [pl.clipId, pl.transitionOut ?? 0])).toEqual([['v0', 0.5], ['v1', 0], ['v2', 0], ['v3', 0.5]]);
+    // like a crossfade, at most half the clip
+    const short = plan({ clips: [clip('v0', 0.6, V916), clip('v1', 12, V916), clip('v2', 12, V916)], settings: settings() });
+    expect(byClip(short, 'v0').transitionOut).toBe(0.3);
+  });
+
+  test('end of the video: a column removed by a re-layout does not fade out', () => {
+    // see the merged-event test: one column is removed while w0 comes in
+    const wide = rigid(1.2);
+    const clips = [clip('v0', 10, V916), clip('v1', 10.2, V916), clip('v2', 30, V916), clip('w0', 8, wide), clip('w1', 8, wide)];
+    const p = plan({ clips, settings: settings({ reorderWindow: 0 }) });
+    const lastColumns = new Set(p.layouts.at(-1)!.columns.map((c) => c.column));
+    const removed = p.placements.filter((pl) => !lastColumns.has(pl.column));
+    expect(removed.length).toBeGreaterThan(0);
+    expect(removed.every((pl) => pl.transitionOut == null)).toBe(true);
   });
 });
 

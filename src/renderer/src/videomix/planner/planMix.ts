@@ -28,12 +28,32 @@ const LETTERBOX_WEIGHT = 10;
 const RELAYOUT_WEIGHT = 3;
 /** Per position a clip starts away from its index in the base list. */
 const ORDER_WEIGHT = 1;
-/** Per column, times the fraction of its max rect that is cropped away (showing less than the user marked). */
+/**
+ * Balanced columns vs full screen (01-requisitos §4.3, decided after T10): cropping up to this fraction of a clip's max
+ * rect is cheap, beyond it is expensive. With {@link COLUMN_COUNT_WEIGHT} this makes 2–3 columns win (flexible
+ * horizontals narrowed towards their min) unless that loses more than ~40 % of a clip's max, and then a full-screen
+ * clip wins. E.g. at 16:9: a 16:9 clip next to a 9:16 one keeps 1312 px (68 % of its max, 2 columns); two 16:9 clips
+ * side by side keep 50 % each (full screen instead).
+ */
+const MAX_CROP_LOSS = 0.4;
+/** Per column, times the fraction of its max rect that is cropped away (showing less than the user marked), up to {@link MAX_CROP_LOSS}. */
 const PREF_WEIGHT = 4;
+/** Per column, times the cropped fraction beyond {@link MAX_CROP_LOSS}. */
+const EXCESS_CROP_WEIGHT = 40;
 /** Per column, per unit of scale factor above x2. */
 const UPSCALE_WEIGHT = 5;
-/** Per column outside the usual 2–3 (slight preference only). */
-const COLUMN_COUNT_WEIGHT = 0.5;
+/**
+ * Per column outside the usual 2–3. Above what cropping two clips to {@link MAX_CROP_LOSS} costs (2 × 0.4 ×
+ * {@link PREF_WEIGHT} = 3.2), so a lone clip only wins when more columns would crop beyond it.
+ */
+const COLUMN_COUNT_WEIGHT = 4;
+
+/**
+ * Fill before direct substitution (01-requisitos §4.3, decided after T10): when the row has structural fill, a
+ * re-layout that leaves at most this fraction of it (or ≤ 1 px) beats a clip that fits the freed column exactly.
+ * Re-layouts that don't reduce the fill that clearly aren't worth the animation.
+ */
+const CLEAR_FILL_REDUCTION = 0.5;
 
 /**
  * Pruning: at most this many candidate subsets per event. The candidate list (clips in the reorder window, in base
@@ -190,7 +210,8 @@ export function planMix({ clips: inputClips, settings }: PlanMixInput): MixPlan 
       const { range } = clip;
       cost += misfitCost(clip, width, seconds);
       const aspect = Math.min(range.max, Math.max(range.min, width / H));
-      cost += PREF_WEIGHT * (1 - Math.min(aspect / range.preferred, range.preferred / aspect));
+      const loss = 1 - Math.min(aspect / range.preferred, range.preferred / aspect);
+      cost += PREF_WEIGHT * Math.min(loss, MAX_CROP_LOSS) + EXCESS_CROP_WEIGHT * Math.max(0, loss - MAX_CROP_LOSS);
       if (clip.size != null) {
         // crop height as in getCropForAspect (fill/pillarbox); overestimates letterbox, which is penalized anyway
         const { maxWidth, maxHeight, minHeight } = clip.size;
@@ -315,14 +336,20 @@ export function planMix({ clips: inputClips, settings }: PlanMixInput): MixPlan 
     const w1 = widthOf.get(trigger.id)!;
     const rowFillSeconds = (ids: number[]) => Math.min(ROW_FILL_SECONDS, ...ids.map((id) => columns.get(id)!.end - e1));
 
-    // 1. Direct substitution: the first clip in order that fits the freed width. No layout change.
+    // 1. Direct substitution: the first clip in order that fits the freed width. No layout change. It wins outright
+    // unless the row has structural fill: then a re-layout that clearly reduces it goes first (see CLEAR_FILL_REDUCTION).
     const singleWindow = getWindow(1);
+    let direct: Option | undefined;
     for (const clip of singleWindow) {
       if (getColumnFit(clip.range, w1, H) === 'fill' && getOrderCost([clip]) != null) {
         const transitionIn = getTransition(a1, clip, e1, lastStart);
-        return { cost: 0, assignments: [{ column: trigger.id, clip, start: e1 - transitionIn, transitionIn }] };
+        direct = { cost: 0, assignments: [{ column: trigger.id, clip, start: e1 - transitionIn, transitionIn }] };
+        break;
       }
     }
+    if (direct != null && rowFill <= 1) return direct;
+    /** With a direct substitution at hand, only re-layouts that clearly reduce the fill are considered. */
+    const maxRelayoutFill = direct != null ? Math.max(1, rowFill * CLEAR_FILL_REDUCTION) : Infinity;
 
     let best: Option | undefined;
     const consider = (option: Option) => {
@@ -330,22 +357,24 @@ export function planMix({ clips: inputClips, settings }: PlanMixInput): MixPlan 
     };
 
     // 2a. In place with fill (pillarbox/letterbox), no layout change.
-    singleWindow.forEach((clip) => {
-      const orderCost = getOrderCost([clip]);
-      if (orderCost == null) return;
-      const transitionIn = getTransition(a1, clip, e1, lastStart);
-      const start = e1 - transitionIn;
-      const items = order.map((id) => {
-        const col = columns.get(id)!;
-        return id === trigger.id
-          ? { clip, width: w1, seconds: clip.duration }
-          : { clip: col.clip, width: widthOf.get(id)!, seconds: col.end - e1 };
+    if (direct == null) {
+      singleWindow.forEach((clip) => {
+        const orderCost = getOrderCost([clip]);
+        if (orderCost == null) return;
+        const transitionIn = getTransition(a1, clip, e1, lastStart);
+        const start = e1 - transitionIn;
+        const items = order.map((id) => {
+          const col = columns.get(id)!;
+          return id === trigger.id
+            ? { clip, width: w1, seconds: clip.duration }
+            : { clip: col.clip, width: widthOf.get(id)!, seconds: col.end - e1 };
+        });
+        consider({
+          cost: orderCost + fillCost(rowFill, rowFillSeconds(order.filter((id) => id !== trigger.id))) + rowCost(items),
+          assignments: [{ column: trigger.id, clip, start, transitionIn }],
+        });
       });
-      consider({
-        cost: orderCost + fillCost(rowFill, rowFillSeconds(order.filter((id) => id !== trigger.id))) + rowCost(items),
-        assignments: [{ column: trigger.id, clip, start, transitionIn }],
-      });
-    });
+    }
 
     // 2b. Re-layout. Columns whose clip ends before this animation would finish plus a transition are decided now
     // too (merged event), so animations never overlap.
@@ -436,6 +465,7 @@ export function planMix({ clips: inputClips, settings }: PlanMixInput): MixPlan 
 
       const dist = distribute(row.map((item) => item.clip));
       if (dist == null) return;
+      if (dist.fill > maxRelayoutFill || (direct != null && row.some((item, i) => getColumnFit(item.clip.range, dist.widths[i]!, H) !== 'fill'))) return;
 
       const unchanged = family === 'replace' && newClips.length === 0 && dist.fill === rowFill
         && row.every((item, i) => widthOf.get(item.column!) === dist.widths[i]);
@@ -460,6 +490,7 @@ export function planMix({ clips: inputClips, settings }: PlanMixInput): MixPlan 
       for (const idx of subsets(candidates.length, m)) evaluate('remove', idx.map((i) => candidates[i]!));
     }
 
+    if (best == null && direct != null) return direct;
     invariant(best != null, 'No option for event');
     return best;
   }
@@ -509,6 +540,17 @@ export function planMix({ clips: inputClips, settings }: PlanMixInput): MixPlan 
   // Remaining columns just run out: their areas become fill, no re-layout (01-requisitos §4.3).
 
   const duration = Math.max(...placements.map((p) => p.endTime));
+
+  // End of the video: a clip without successor whose column stays in the layout fades out to the fill.
+  const lastLayout = layouts.at(-1)!;
+  placements.forEach((placement, i) => {
+    const { column, startTime, endTime } = placement;
+    if (endTime >= duration - EPS || placements.slice(i + 1).some((p) => p.column === column)) return;
+    if (!lastLayout.columns.some((c) => c.column === column)) return; // removed by a re-layout: it shrinks to 0
+    // as a crossfade: at most half the clip, so it never overlaps the clip's own crossfade in
+    const transitionOut = Math.min(D, (endTime - startTime) / 2);
+    if (transitionOut > 0) placements[i] = { ...placement, transitionOut };
+  });
   const planWithoutWarnings: MixPlan = { width: W, height: H, duration, placements, layouts, warnings: [] };
   const plan: MixPlan = { ...planWithoutWarnings, warnings: getPlanWarnings(planWithoutWarnings, inputClips, D) };
 

@@ -16,7 +16,7 @@ function formatWarning(w: PlanWarning) {
 /**
  * Compact text view of a plan, for tests and debugging:
  * one line per layout (`time+animation: fill=px | cN=px | …`), one per column (clips with start-end, `>` marks a
- * crossfaded substitution) and one per warning.
+ * crossfaded substitution, `~fade` the end-of-video fade out to fill) and one per warning.
  */
 // eslint-disable-next-line import/prefer-default-export
 export function formatPlan(plan: MixPlan) {
@@ -32,7 +32,7 @@ export function formatPlan(plan: MixPlan) {
   const columns = [...new Set(plan.placements.map((p) => p.column))].sort((a, b) => a - b);
   columns.forEach((column) => {
     const clips = plan.placements.filter((p) => p.column === column).sort((a, b) => a.startTime - b.startTime);
-    lines.push(`c${column}: ${clips.map((p) => `${p.clipId} ${s(p.startTime)}-${s(p.endTime)}`).join(' > ')}`);
+    lines.push(`c${column}: ${clips.map((p) => `${p.clipId} ${s(p.startTime)}-${s(p.endTime)}${p.transitionOut ? ` ~fade ${s(p.transitionOut)}` : ''}`).join(' > ')}`);
   });
   plan.warnings.forEach((w) => lines.push(`warning: ${formatWarning(w)}`));
   return lines.join('\n');

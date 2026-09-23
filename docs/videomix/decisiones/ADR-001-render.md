@@ -350,7 +350,10 @@ Mismo camino con W×H de previsualización (640×360), `ultrafast` y CRF alto. E
 - **T10** (invariantes del plan que el render necesita):
   - **durante una animación, las columnas conservan su orden** de izquierda a derecha (el apilado depende de él);
   - una columna que aparece o desaparece lo hace con ancho 0 pegada a su vecina derecha, y su clip termina o empieza con la animación;
+    - Regla exacta (T10b): en el extremo donde falta, la columna tiene ancho 0 y `x` = `x` de la primera columna posterior que existe en ambos keyframes − `gap` (o `W` si no hay ninguna). Está en `getAnimatedColumn` (`planner/validatePlan.ts`).
+    - El planificador crea las columnas nuevas justo a la derecha de la columna liberada (crecen desde su borde derecho) y nunca añade y quita columnas en la misma animación, así que es compatible. `validatePlan` comprueba ambas invariantes (orden estable y ausencia de solapes con esta regla).
   - las transiciones que coinciden con una animación empiezan dentro de ella, o se fusionan en el mismo intervalo;
+    - Esto incluye el fundido al relleno del final del vídeo (`ColumnPlacement.transitionOut`, T10b), que ocupa `[endTime − transitionOut, endTime]` y se trata como un intervalo ocupado más.
   - las columnas de un bloque estable empiezan en su inicio (en `t = 0` o al acabar una animación).
 - **T12**: audio en pasada única (`-vn`), mezclado con `-c copy` al unir.
 - **T13**:

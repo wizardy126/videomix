@@ -34,7 +34,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T07 | Clips: creación, sincronización y lista | M2 | Opus | T05, T06 | hecha |
 | T09 | Spike: estrategia de render ffmpeg (ADR-001) | M3 | Opus | T02 | hecha |
 | T10 | Planificador de montaje | M3 | Opus | T03 | hecha |
-| T10b | Ajuste del planificador (decisiones del usuario) | M3 | Opus | T10, T09 | pendiente |
+| T10b | Ajuste del planificador (decisiones del usuario) | M3 | Opus | T10, T09 | hecha |
 | T11 | Generador del grafo de vídeo | M3 | Opus | T09, T10 | pendiente |
 | T12 | Audio: análisis de sonoridad y grafo de audio | M3 | Opus | T03, T09 | pendiente |
 | T13 | Orquestación del render y la previsualización | M4 | Opus | T07, T11, T12 | pendiente |

@@ -3,11 +3,28 @@ import type { ColumnPlacement, MixPlan, PlanMixInput } from './types';
 
 const TOL = 1e-6;
 
+type Layout = MixPlan['layouts'][number];
+
+/**
+ * Geometry of `column` at the `layout` end of an animation between `layout` and `other` (ADR-001): its own, or width 0
+ * just left of its right neighbour when it is missing from `layout` (x of the first column after it in `other` that
+ * is also in `layout`, minus the gap; W if there is none).
+ */
+export function getAnimatedColumn(layout: Layout, other: Layout, column: number, width: number, gap: number) {
+  const own = layout.columns.find((c) => c.column === column);
+  if (own != null) return { x: own.x, width: own.width };
+  const after = other.columns.slice(other.columns.findIndex((c) => c.column === column) + 1);
+  for (const c of after) {
+    const neighbour = layout.columns.find((lc) => lc.column === c.column);
+    if (neighbour != null) return { x: neighbour.x - gap, width: 0 };
+  }
+  return { x: width, width: 0 };
+}
+
 /**
  * Check every invariant of 04-diseno §3.2 (plus layout consistency). Returns the problems found, empty if the plan is
  * valid. Used by the tests and, in development, after each planMix.
  */
-// eslint-disable-next-line import/prefer-default-export
 export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): string[] {
   const issues: string[] = [];
   const fail = (message: string) => issues.push(message);
@@ -63,6 +80,27 @@ export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): 
 
     // 7. no re-layout once all clips have started
     if (layout.time > maxStart + TOL) fail(`${at} re-layout after the last clip started`);
+
+    // ADR-001: during an animation the columns keep their left-to-right order, and a column that appears or
+    // disappears does it at width 0 just left of its right neighbour (its x minus the gap; W if it has none)
+    if (prev != null) {
+      const prevOrder = prev.columns.map((c) => c.column).filter((id) => layout.columns.some((c) => c.column === id));
+      const nextOrder = layout.columns.map((c) => c.column).filter((id) => prev.columns.some((c) => c.column === id));
+      if (prevOrder.join(',') !== nextOrder.join(',')) fail(`${at} changes the column order (${prevOrder.join(',')} → ${nextOrder.join(',')})`);
+
+      const ends = [...new Set([...prev.columns, ...layout.columns].map((c) => c.column))].map((id) => ({
+        id,
+        from: getAnimatedColumn(prev, layout, id, W, gap),
+        to: getAnimatedColumn(layout, prev, id, W, gap),
+      }));
+      // positions are blends of the two ends, so being on the same side at both ends means no overlap in between
+      const after = (a: { x: number }, b: { x: number, width: number }) => a.x + TOL >= b.x + b.width;
+      ends.forEach((a, k) => ends.slice(k + 1).forEach((b) => {
+        if (!(after(a.from, b.from) && after(a.to, b.to)) && !(after(b.from, a.from) && after(b.to, a.to))) {
+          fail(`${at} columns ${a.id} and ${b.id} overlap during the animation`);
+        }
+      }));
+    }
   });
 
   // columns: 4. substitution with crossfade, 6. initial columns at t=0, 7. ended columns become fill
@@ -101,6 +139,14 @@ export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): 
     } else if (maxStart > lastPlacement.endTime + TOL) {
       fail(`${at} left empty at ${lastPlacement.endTime} while clips are still pending`);
     }
+
+    // end of the video: the last clip fades out to the fill (unless its column is removed or the video ends with it)
+    list.forEach((p) => {
+      const out = p.transitionOut ?? 0;
+      const fades = p === lastPlacement && removal == null && p.endTime < maxEnd - TOL;
+      const expected = fades ? Math.min(D, (p.endTime - p.startTime) / 2) : 0;
+      if (Math.abs(out - expected) > TOL) fail(`${at} ${p.clipId} fades out for ${out}s instead of ${expected}s`);
+    });
   });
 
   // 5. order within the reorder window (ties in start time are sorted by base index, the most favourable)
