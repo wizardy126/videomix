@@ -42,7 +42,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T14 | Diálogo de ajustes de montaje | M4 | Sonnet | T04 | hecha |
 | T15 | Timeline del montaje (vista del plan) | M5 | Sonnet | T10, T13 | hecha |
 | T16 | Limpieza de la UI heredada de LosslessCut | M5 | Sonnet | T13 | hecha |
-| T17 | i18n (es), atajos y manual de usuario | M5 | Sonnet | T16 | pendiente |
+| T17 | i18n (es), atajos y manual de usuario | M5 | Sonnet | T16 | hecha |
 | T18 | Empaquetado de VideoMix | M6 | Sonnet | T17 | pendiente |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
@@ -70,3 +70,19 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 | La sincronización clips ↔ segmentos es frágil | Alternativa de segmentos derivados (04-diseno §6.3), decidida en T07 con ADR |
 | `App.tsx` es enorme y está acoplado | Cambios mínimos, hooks o componentes nuevos, flag VideoMix localizado |
 | Fuentes con rotación, VFR o códecs no soportados por Chromium | Coordenadas en el espacio orientado, `fps` en el grafo, reutilizar html5ify y el reproductor compat |
+
+## Pendientes al integrar en la rama por defecto
+
+- `userManualUrl` en `src/common/constants.ts` apunta a la rama `claude/videomix-analysis-planning-97c8lp`; hay que cambiarla a la rama por defecto.
+
+## Backlog (fuera de v1)
+
+- Keyframes o paneo del rectángulo.
+- Ajustes manuales del plan de montaje.
+- Ducking de la música.
+- Varias pistas de música.
+- Notas en los clips.
+- H.265 y encoders por hardware.
+- Resolución libre.
+- Miniaturas en la lista de clips y en la vista del plan; zoom horizontal del plan.
+- Borrar el código de LosslessCut que ahora está oculto (batch, export lossless, EDL, `reporting.tsx`…).

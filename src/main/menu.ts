@@ -3,7 +3,7 @@ import type { BrowserWindow, MenuItem, MenuItemConstructorOptions } from 'electr
 import electron from 'electron';
 import { t } from 'i18next';
 
-import { homepageUrl, getReleaseUrl, licensesUrl, thanksUrl, usageUrl, faqUrl, troubleshootingUrl, featureRequestUrl, githubUrl } from '../common/constants.js';
+import { homepageUrl, getReleaseUrl, licensesUrl, thanksUrl, usageUrl, faqUrl, troubleshootingUrl, featureRequestUrl, githubUrl, userManualUrl } from '../common/constants.js';
 import { logFilePath } from './logger.js';
 import { getConfigPath } from './configStore.js';
 import { videoMixMode } from '../common/videomix/legacyUi.js';
@@ -279,6 +279,14 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
         },
         { type: 'separator' },
         {
+          // VideoMix (T17): "Split segment at cursor" (T16 pendientes) is otherwise only reachable with B
+          label: esc(t('Split clip')),
+          click() {
+            mainWindow.webContents.send('splitCurrentSegment');
+          },
+        },
+        { type: 'separator' },
+        {
           label: esc(t('Mix settings...')),
           click() {
             mainWindow.webContents.send('showMixSettings');
@@ -513,7 +521,9 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
       role: 'help',
       label: esc(t('Help')),
       submenu: [
-        {
+        // VideoMix (T17): these help links are specific to upstream LosslessCut (usage, FAQ, troubleshooting,
+        // homepage, bug reporter); "User manual" below replaces them for VideoMix
+        ...llcOnly<MenuItemConstructorOptions>([{
           label: esc(t('How to use')),
           click() { openExternal(usageUrl); },
         },
@@ -524,27 +534,33 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
         {
           label: esc(t('Troubleshooting')),
           click() { openExternal(troubleshootingUrl); },
-        },
+        }]),
         {
           label: esc(t('Keyboard & mouse shortcuts')),
           click() {
             mainWindow.webContents.send('toggleKeyboardShortcuts');
           },
         },
-        {
+        ...llcOnly<MenuItemConstructorOptions>([{
           label: esc(t('Learn More')),
           click() { openExternal(homepageUrl); },
-        },
-        { type: 'separator' },
-        {
-          label: esc(t('Report an error')),
-          click() { mainWindow.webContents.send('openSendReportDialog'); },
-        },
-        // VideoMix: LosslessCut's feature requests and donations are for LosslessCut
-        ...llcOnly([{
-          label: esc(t('Feature request')),
-          click() { openExternal(featureRequestUrl); },
         }]),
+        {
+          label: esc(t('User manual')),
+          click() { openExternal(userManualUrl); },
+        },
+        ...llcOnly<MenuItemConstructorOptions>([
+          { type: 'separator' },
+          {
+            label: esc(t('Report an error')),
+            click() { mainWindow.webContents.send('openSendReportDialog'); },
+          },
+          // VideoMix: LosslessCut's feature requests and donations are for LosslessCut
+          {
+            label: esc(t('Feature request')),
+            click() { openExternal(featureRequestUrl); },
+          },
+        ]),
         ...(!isStoreBuild && !videoMixMode ? [{
           label: esc(`${t('Donate')} ❤️`),
           click() { openExternal(thanksUrl); },

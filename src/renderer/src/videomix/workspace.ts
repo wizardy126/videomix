@@ -17,6 +17,10 @@ const audioExtensions = new Set(['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga
 // Project/EDL/subtitle files that LosslessCut would import as segments. They make no sense as VideoMix sources.
 const unsupportedExtensions = new Set(['llc', 'csv', 'pbf', 'edl', 'cue', 'xml', 'fcpxml', 'otio', 'srt', 'txt', 'vmx-recovery']);
 
+// T16/T17: "Open folder" reads a directory recursively and used to add every unrecognized file (including images) as a
+// video source. Images are never valid sources, so they are treated like the unsupported extensions above.
+const imageExtensions = new Set(['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'tif', 'tiff', 'heic', 'heif', 'avif', 'svg']);
+
 const getBaseName = (filePath: string) => filePath.split(/[/\\]/).pop() ?? filePath;
 
 /** Lowercase extension without the dot ('' if none). `.vmx-recovery` counts as one extension. */
@@ -41,7 +45,7 @@ export function classifyOpenedPaths(filePaths: string[]): OpenedPaths {
     const ext = getFileExtension(filePath);
     if (ext === mixProjectExtension) ret.projectPaths.push(filePath);
     else if (audioExtensions.has(ext)) ret.audioPaths.push(filePath);
-    else if (unsupportedExtensions.has(ext)) ret.unsupportedPaths.push(filePath);
+    else if (unsupportedExtensions.has(ext) || imageExtensions.has(ext)) ret.unsupportedPaths.push(filePath);
     else ret.mediaPaths.push(filePath);
   });
   return ret;

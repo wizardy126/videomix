@@ -30,6 +30,16 @@ describe('classifyOpenedPaths', () => {
   test('unknown extensions are tried as media', () => {
     expect(classifyOpenedPaths(['/a/clip.mts', '/a/noext']).mediaPaths).toEqual(['/a/clip.mts', '/a/noext']);
   });
+
+  // T16/T17: "Open folder" reads a directory recursively; images found there must not become video sources
+  test('images are unsupported, not media', () => {
+    expect(classifyOpenedPaths(['/a/photo.JPG', '/a/icon.png', '/a/v.mp4'])).toEqual({
+      projectPaths: [],
+      audioPaths: [],
+      mediaPaths: ['/a/v.mp4'],
+      unsupportedPaths: ['/a/photo.JPG', '/a/icon.png'],
+    });
+  });
 });
 
 describe('getSourceMeta', () => {

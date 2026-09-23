@@ -1,7 +1,10 @@
 export const homepageUrl = 'https://losslesscut.app/';
-export const githubUrl = 'https://github.com/mifi/lossless-cut/';
+// VideoMix (T17): "Source code" and the about panel point to the VideoMix fork, not upstream LosslessCut
+export const githubUrl = 'https://github.com/wizardy126/videomix/';
 export const getReleaseUrl = (version: string) => `https://github.com/mifi/lossless-cut/releases/tag/v${version}`;
 export const compareReleasesUrl = (fromVersion: string, toVersion: string) => `https://github.com/mifi/lossless-cut/compare/v${fromVersion}...v${toVersion}`;
+// VideoMix (T17): "User manual", opens docs/videomix/manual-usuario.md on the branch the project is developed on (01-requisitos §8 W1)
+export const userManualUrl = `${githubUrl}blob/claude/videomix-analysis-planning-97c8lp/docs/videomix/manual-usuario.md`;
 export const licensesUrl = 'https://losslesscut.mifi.no/licenses.txt';
 export const thanksUrl = 'https://mifi.no/thanks';
 export const discussionsUrl = 'https://mifi.no/losslesscut/discussions';

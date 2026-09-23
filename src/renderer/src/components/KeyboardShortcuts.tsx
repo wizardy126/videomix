@@ -753,7 +753,8 @@ const KeyboardShortcuts = memo(({
         category: otherCategory,
       },
       quit: {
-        name: t('Quit LosslessCut'),
+        // VideoMix (T17): renamed from "Quit LosslessCut"
+        name: t('Quit VideoMix'),
         category: otherCategory,
       },
 

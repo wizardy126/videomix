@@ -214,7 +214,8 @@ function Settings({
 
         {showAdvancedSettings && (
           <Row>
-            <KeyCell>{t('Allow multiple instances of LosslessCut to run concurrently? (experimental)')}</KeyCell>
+            {/* VideoMix (T17): renamed from "Allow multiple instances of LosslessCut..." */}
+            <KeyCell>{t('Allow multiple instances of VideoMix to run concurrently? (experimental)')}</KeyCell>
             <td>
               <Switch checked={allowMultipleInstances} onCheckedChange={setAllowMultipleInstances} />
             </td>
