@@ -12,6 +12,13 @@ Poder generar instalables de VideoMix.
 - `package.json` (`build`)
 - T01 (identidad)
 
+## Decisiones del usuario
+
+- **Objetivos**: Linux (AppImage + tar) y Windows (zip/7z). Sin Mac, sin Microsoft Store (appx), sin Mac App Store y sin snap.
+- **Icono**: generar uno provisional (SVG sencillo que evoque columnas de vídeo) a partir del que usa `script/generateIcon.ts`.
+- **`author`**: `{ "name": "wizardy126", "url": "https://wizardy.net" }`. Se mantiene el crédito a LosslessCut / Mikael Finstad en el panel About y en las licencias.
+- **CI**: no se reactiva ningún workflow de build.
+
 ## Alcance
 
 1. **Configuración de electron-builder para VideoMix**:
