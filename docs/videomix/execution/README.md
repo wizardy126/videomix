@@ -66,5 +66,6 @@
 | T19 | [T19-overlays-modelo.md](T19-overlays-modelo.md) |
 | T20 | [T20-overlays-render.md](T20-overlays-render.md) |
 | T21 | [T21-overlays-sonido.md](T21-overlays-sonido.md) |
+| T21b | [T21b-sonidos-cortos.md](T21b-sonidos-cortos.md) |
 | T22 | [T22-overlays-ui.md](T22-overlays-ui.md) |
 | T23 | [T23-overlays-cierre.md](T23-overlays-cierre.md) |
