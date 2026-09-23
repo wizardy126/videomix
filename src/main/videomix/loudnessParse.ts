@@ -1,0 +1,93 @@
+/**
+ * Result of the first `loudnorm` pass over a clip (EBU R128). Mirrors `LoudnessMeasurement` in
+ * src/renderer/src/videomix/types.ts (main can't import the renderer types).
+ */
+export type LoudnessAnalysis = {
+  hasAudio: true,
+  /** Integrated loudness (LUFS). */
+  inputI: number,
+  /** True peak (dBTP). */
+  inputTp: number,
+  /** Loudness range (LU). */
+  inputLra: number,
+  inputThresh: number,
+  /** Of the analyzed audio stream, for getFixChannelLayoutFilter when mixing. */
+  channels?: number | undefined,
+  channelLayout?: string | undefined,
+} | { hasAudio: false };
+
+/**
+ * Integrated loudness at or below this is treated as silence. -70 LUFS is the EBU R128 absolute gate: loudnorm reports
+ * `-inf` (or values around the gate) when no block is above it.
+ */
+export const SILENCE_LOUDNESS = -70;
+
+function parseLoudnormNumber(value: unknown) {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const str = String(value).trim();
+  if (str === '-inf') return -Infinity;
+  if (str === 'inf' || str === '+inf') return Infinity;
+  const num = Number(str);
+  return str !== '' && !Number.isNaN(num) ? num : undefined;
+}
+
+/**
+ * Extracts the JSON block that `loudnorm=print_format=json` prints to stderr at the end:
+ * `[Parsed_loudnorm_0 @ 0x…] \n{\n\t"input_i" : "-18.76",\n …}`. The values are strings (`"-inf"` for silence).
+ */
+export function parseLoudnormOutput(stderr: string) {
+  const tagIndex = stderr.lastIndexOf('[Parsed_loudnorm_');
+  if (tagIndex === -1) return undefined;
+  const jsonStart = stderr.indexOf('{', tagIndex);
+  const jsonEnd = stderr.indexOf('}', jsonStart);
+  if (jsonStart === -1 || jsonEnd === -1) return undefined;
+
+  let json: unknown;
+  try {
+    json = JSON.parse(stderr.slice(jsonStart, jsonEnd + 1));
+  } catch {
+    return undefined;
+  }
+  if (json == null || typeof json !== 'object') return undefined;
+  const obj = json as Record<string, unknown>;
+
+  const inputI = parseLoudnormNumber(obj['input_i']);
+  const inputTp = parseLoudnormNumber(obj['input_tp']);
+  const inputLra = parseLoudnormNumber(obj['input_lra']);
+  const inputThresh = parseLoudnormNumber(obj['input_thresh']);
+  if (inputI == null || inputTp == null || inputLra == null || inputThresh == null) return undefined;
+  return { inputI, inputTp, inputLra, inputThresh };
+}
+
+/**
+ * Turns the parsed loudnorm values into a cacheable measurement. Silence (`input_i = -inf`, or at the absolute gate)
+ * counts as no audio (04-diseno §5.1). Non-finite values can't be stored in the JSON5 project either.
+ */
+export function toLoudnessAnalysis(
+  values: NonNullable<ReturnType<typeof parseLoudnormOutput>>,
+  { channels, channelLayout }: { channels?: number | undefined, channelLayout?: string | undefined } = {},
+): LoudnessAnalysis {
+  const { inputI, inputTp, inputLra, inputThresh } = values;
+  if (!Number.isFinite(inputI) || inputI <= SILENCE_LOUDNESS || !Number.isFinite(inputTp)) return { hasAudio: false };
+  return {
+    hasAudio: true,
+    inputI,
+    inputTp,
+    inputLra: Number.isFinite(inputLra) ? inputLra : 0,
+    inputThresh: Number.isFinite(inputThresh) ? inputThresh : SILENCE_LOUDNESS,
+    ...(channels != null && { channels }),
+    ...(channelLayout != null && { channelLayout }),
+  };
+}
+
+/** Picks channels/layout of the first audio stream from `ffprobe -select_streams a:0 -show_entries stream=… -of json`. */
+export function parseFfprobeAudioStream(stdout: string) {
+  const json: unknown = JSON.parse(stdout);
+  const streams = json != null && typeof json === 'object' ? (json as { streams?: unknown }).streams : undefined;
+  if (!Array.isArray(streams) || streams.length === 0) return undefined;
+  const stream = streams[0] as { channels?: unknown, channel_layout?: unknown };
+  return {
+    channels: typeof stream.channels === 'number' ? stream.channels : undefined,
+    channelLayout: typeof stream.channel_layout === 'string' ? stream.channel_layout : undefined,
+  };
+}

@@ -293,35 +293,64 @@ Decidido en el spike T09: **[ADR-001](decisiones/ADR-001-render.md)**, con las m
 
 ## 5. Audio
 
+Implementado en T12 (detalles y medidas en [T12](execution/T12-audio.md)).
+
 ### 5.1 Análisis de sonoridad
 
-- **Nueva función en main** (`src/main/videomix/loudness.ts`, expuesta como `ffmpeg`/`videomix` en `remoteApiLegacy`):
+- **Main**: `measureLoudness({ filePath, start, end, abortSignal? })` en `src/main/videomix/loudness.ts`, expuesta en `remoteApiLegacy` como `videomix.measureLoudness`. Devuelve `LoudnessMeasurement`.
+  1. `ffprobe -select_streams a:0` → canales y layout de la primera pista de audio. Sin pista → `{ hasAudio: false }`.
+  2. Primera pasada de `loudnorm` sobre esa pista:
 
-  ```
-  ffmpeg -hide_banner -ss <start> -t <dur> -i <path> -map 0:a:0 -af loudnorm=I=-23:TP=-2:LRA=11:print_format=json -f null -
-  ```
+     ```
+     ffmpeg -hide_banner -nostats -ss <start> -t <dur> -i <path> -map 0:a:0 -af [channelmap,]loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json -f null -
+     ```
 
-  Parsea el bloque JSON de stderr (`input_i`, `input_tp`, `input_lra`, `input_thresh`).
-- **Clave de cache**: `sha1(absolutePath + mtime + size + start + end)`. Se guarda en `loudnessCache` del proyecto.
-- **Clips sin pista de audio**: `hasAudio: false`, y se excluyen de la mezcla.
-- **Silencio** (`input_i = -inf`): se trata como sin audio.
+  3. `loudnessParse.ts` (puro, con tests) parsea el bloque JSON de stderr (`input_i`, `input_tp`, `input_lra`, `input_thresh`).
+  - **Silencio** (`input_i = -inf` o ≤ −70 LUFS, la puerta absoluta de EBU R128): `{ hasAudio: false }`.
+  - **Sin `dual_mono`**: la mezcla convierte mono en estéreo con la matriz por defecto de swresample (−3 dB por canal), que conserva la sonoridad medida en un canal. Comprobado con el script de demo.
+  - La medida guarda además `channels` y `channelLayout` (opcionales en el esquema) para aplicar `getFixChannelLayoutFilter` también al mezclar.
+- **Renderer**: `ensureLoudness({ project, onProgress?, abortSignal?, onCacheEntries?, deps?, concurrency = 2 })` en `videomix/loudness.ts`.
+  - Mide solo los clips no silenciados con duración > 0 cuya clave no está en `loudnessCache`; los clips con el mismo fichero y rango comparten medida.
+  - `onCacheEntries` recibe las entradas nuevas (pasar `setLoudnessCache` de `useMixProject`), también las ya medidas si se cancela o falla.
+  - Devuelve las medidas **por id de clip**, la entrada de `buildAudioGraph`.
+  - Cancelación: `abortSignal` llega a `runFfmpeg` como `cancelSignal`; `abortFfmpegs` también sirve.
+- **Clave de cache**: `sha1(absolutePath \n mtimeMs \n size \n start \n end)` en hexadecimal (`getLoudnessCacheKey`, Web Crypto), con `fs.stat` de `MixSource.absolutePath`.
 
-### 5.2 Mezcla
+### 5.2 Mezcla (`render/buildAudioGraph.ts`, puro)
 
-1. **Por clip**:
-   - `atrim` o `-ss/-t`;
-   - `aresample=48000`, `aformat=channel_layouts=stereo`, reutilizando `getFixChannelLayoutFilter` para layouts raros;
-   - `volume=<gananciaNormalización + gainDb>dB`, con `gananciaNormalización = objetivo − input_i` (objetivo **−16 LUFS**): la segunda pasada es una ganancia lineal y estática, y evita el bombeo;
-   - `afade=t=in:d=D` y `afade=t=out:st=dur−D:d=D`;
-   - `adelay` hasta su `startTime`.
-2. **Suma**: `amix=inputs=N:normalize=0:duration=longest`.
-3. **Compensación de simultaneidad**: ganancia por tramos `volume='…':eval=frame` en función de `n(t)`, el número de clips con audio sonando. El valor es `−10·log10(n)` dB, con rampas de duración `D`. Alternativamente, se aplica por clip. La implementación puede elegir y lo documenta.
-4. **Música**:
-   - `-stream_loop -1` si `loop`, y `atrim` a la duración total;
-   - `volume=volumeDb`;
-   - `afade=t=out` final de 2 s o `D`, el mayor;
-   - `amix` con la mezcla de clips.
-5. **Salida**: `alimiter` para evitar el clipping y `afade` in/out global si `fadeInOut`. AAC 192 kbps, 48 kHz, estéreo.
+**Firma** (encaja en el *hook* `buildAudioGraph` de `buildRenderJob`, T11):
+
+```ts
+buildAudioGraph({ plan, clips, sourcePaths, settings, duration?, loudness }): AudioPass
+// clips: Pick<MixClip, 'id' | 'sourceId' | 'start' | 'muted' | 'gainDb'>[]
+// sourcePaths: sourceId → ruta (MixSource.absolutePath, la misma que se midió)
+// duration: duración exacta del vídeo (fotogramas / fps); por defecto plan.duration
+// loudness: medidas por id de clip (ensureLoudness)
+// AudioPass = { inputs: string[][], filterComplex: string, outLabel: 'aout' }, igual que AudioGraph de T11
+```
+
+El `RenderClip` del *hook* no lleva `muted` ni `gainDb`, así que el llamador (T13) cierra sobre los clips completos: `buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness })`. La codificación (AAC 192 kbps, 48 kHz, estéreo, `.m4a`) la pone `buildRenderJob`.
+
+1. **Por clip audible** (no silenciado y `hasAudio`):
+   - entrada `-vn -ss <start> -t <dur + 0,1> -i <ruta>`;
+   - `asetpts=PTS-STARTPTS`, `channelmap` si el layout es raro, `aresample=48000`, `aformat=fltp:stereo`, `atrim=duration=dur`;
+   - `volume=<normalización + gainDb>dB`. **Normalización** = `min(−16 − input_i, 24, 5 − input_tp)` (`LOUDNESS_TARGET` = −16 LUFS, `MAX_NORMALIZATION_GAIN` = 24 dB, `MAX_NORMALIZED_PEAK` = +5 dBTP): una ganancia lineal y estática, sin bombeo;
+   - `afade` in/out con `curve=qsin` (potencia constante) según `getPlacementFades`:
+     - sustitución en la columna: el `transitionIn` del clip entrante, en los dos clips;
+     - columna que aparece o desaparece en un re-layout: la duración de esa animación;
+     - final del vídeo hacia el relleno: `transitionOut` (T10b);
+     - corte seco: 10 ms (`DECLICK_DURATION`) para evitar chasquidos;
+   - `adelay=<muestras>S:all=1` hasta su `startTime`.
+2. **Suma**: `amix=inputs=N:normalize=0:duration=longest` (o `anullsrc` si no hay ningún clip audible: siempre hay pista de audio) y `apad` hasta la duración.
+3. **Compensación de simultaneidad**: global, sobre la suma, con `volume='<expr>':eval=frame` (`getCompensationExpr`).
+   - Ganancia `1/√n` (−10·log10(n) dB), con `n` = clips audibles sonando.
+   - Un clip cuenta desde la mitad de su fundido de entrada hasta la mitad del de salida: en una sustitución el entrante empieza a contar justo cuando el saliente deja de hacerlo, así que la ganancia no cambia. Con fundidos de potencia constante, la potencia se mantiene.
+   - Cada cambio es una rampa lineal centrada en ese instante y tan larga como el fundido que lo causa. Se escribe como suma plana `g0 ± Δ·clip((t−a)/r,0,1) …`, sin `if()` anidados.
+   - Se descartó la compensación por clip: exigiría también ganancias variables por clip.
+4. **Música**: `-stream_loop -1` si `loop`; `aresample`/`aformat`, `atrim` a la duración, `volume=volumeDb` (**sin normalizar**), `afade=t=out` final de `max(2 s, D)`; `amix` de 2 entradas con `normalize=0:duration=first`.
+5. **Salida**: `atrim` a la duración, `alimiter=limit=−1 dBFS:level=disabled:latency=1` (`latency=1` compensa el retardo del *lookahead*: sin él, el audio llega 5 ms tarde), `afade` in/out global de `getGlobalFadeDuration(settings)` (= `D` si `fadeInOut`; el vídeo debe usar la misma) y `aformat` final estéreo 48 kHz.
+
+**Demo**: `node script/videomix/audioDemo.ts [--music] [--columns n]` mezcla los medios de T02 con el planificador real y mide la sonoridad integrada de cada tramo. Para cargar módulos del renderer desde Node, `script/videomix/rendererImports.ts` registra un *hook* de resolución (imports sin extensión e `import.meta.env`).
 
 ## 6. Interfaz y flujo
 

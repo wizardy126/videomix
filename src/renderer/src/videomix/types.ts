@@ -109,16 +109,21 @@ export const mixSettingsSchema = z.object({
 export type MixSettings = z.infer<typeof mixSettingsSchema>;
 
 /**
- * Cached loudnorm analysis of a clip (placeholder, T12 completes it).
+ * Cached loudnorm analysis (first pass, EBU R128) of a clip's first audio stream, see src/main/videomix/loudness.ts.
  * Clips without audio (or pure silence) are cached as `{ hasAudio: false }`.
  */
 export const loudnessMeasurementSchema = z.discriminatedUnion('hasAudio', [
   z.object({
     hasAudio: z.literal(true),
+    /** Integrated loudness (LUFS). */
     inputI: z.number(),
+    /** True peak (dBTP). */
     inputTp: z.number(),
     inputLra: z.number(),
     inputThresh: z.number(),
+    /** Of the audio stream, to fix unusual channel layouts when mixing (getFixChannelLayoutFilter). */
+    channels: z.number().int().positive().optional(),
+    channelLayout: z.string().optional(),
   }),
   z.object({ hasAudio: z.literal(false) }),
 ]);
