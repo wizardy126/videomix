@@ -8,13 +8,16 @@ import Switch from '../../components/Switch';
 import Truncated from '../../components/Truncated';
 import { controlsBackground, darkModeTransition, warningColor } from '../../colors';
 import { formatDuration } from '../../util/duration';
-import type { MixClip, MixOverlay, OverlayAnchor, OverlayBox } from '../types';
+import type { CountdownOverlay, MixClip, MixOverlay, OverlayAnchor, OverlayBox, TextOverlay } from '../types';
 import { progressBarDirections } from '../types';
 import type { MixOverlayPatch } from '../projectReducer';
 import type { OverlayFileKind } from '../projectFile';
 import type { ResolvedOverlayTime } from '../overlays/resolveOverlayTimes';
 import { canOverlayDependOn, getOverlaysById, getLinkedCountdown } from '../overlays/anchors';
 import { getOverlayBoxPreset } from '../overlays/factories';
+import { getTextOverlayFontSize, getTextOverlayLayoutPatch } from '../overlays/textLayout';
+import { isStyledOverlay } from '../overlayStylePresets';
+import OverlayStylePresets from './OverlayStylePresets';
 import type { OverlayBoxPreset } from '../overlays/factories';
 import { getAnchorOfKind, joinOverlayColor, roundOverlayTime, splitOverlayColor } from '../overlayTimeline';
 import { getOverlayTimeWarningText, getOverlayTypeLabel } from '../overlayTexts';
@@ -140,6 +143,97 @@ const PercentField = memo(({ label, field, box, onChange }: { label: string, fie
   );
 });
 
+/** Multi-line text, applied on blur or Ctrl/Cmd+Enter (Escape reverts), so typing is one edit. */
+// eslint-disable-next-line react/display-name
+const TextField = memo(({ value, onCommit }: { value: string, onCommit: (text: string) => void }) => {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState<string>();
+  const commit = useCallback(() => {
+    if (draft != null && draft !== value) onCommit(draft);
+    setDraft(undefined);
+  }, [draft, onCommit, value]);
+  const handleKeyDown = useCallback<KeyboardEventHandler<HTMLTextAreaElement>>((e) => {
+    // Enter adds a line; don't trigger the app's keyboard shortcuts while typing
+    e.stopPropagation();
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) commit();
+    if (e.key === 'Escape') setDraft(undefined);
+  }, [commit]);
+  return (
+    <textarea
+      style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', fontSize: '.85em', resize: 'vertical', minHeight: '3.5em', marginBottom: '.35em' }}
+      rows={Math.min(8, Math.max(2, (draft ?? value).split('\n').length))}
+      value={draft ?? value}
+      title={t('One line per row. Applied when leaving the field (or with Ctrl+Enter).')}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={handleKeyDown}
+    />
+  );
+});
+
+type TextStyledOverlay = CountdownOverlay | TextOverlay;
+
+/** Color and font of a countdown or a text. */
+// eslint-disable-next-line react/display-name
+const FontRows = memo(({ overlay, set, setTransient, commitTransient, onChooseFont }: {
+  overlay: TextStyledOverlay,
+  set: (patch: MixOverlayPatch) => void,
+  setTransient: (patch: MixOverlayPatch, transient: boolean) => void,
+  commitTransient: () => void,
+  onChooseFont: () => void,
+}) => {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Row label={t('Color')}>
+        <ColorField value={overlay.color} onChange={(color, transient) => setTransient({ color }, transient)} onCommit={commitTransient} />
+      </Row>
+      <Row label={t('Font')}>
+        <Truncated maxWidth="7em" title={overlay.font?.absolutePath ?? ''}>{overlay.font != null ? basename(overlay.font.absolutePath) : t('Default font')}</Truncated>
+        <button type="button" style={iconButtonStyle} title={t('Choose a font')} onClick={onChooseFont}><FaFolderOpen /></button>
+        {overlay.font != null && <button type="button" style={iconButtonStyle} title={t('Use the default font')} onClick={() => set({ font: undefined })}><FaTimes /></button>}
+      </Row>
+    </>
+  );
+});
+
+/** Alignment, border and shadow of a countdown or a text. */
+// eslint-disable-next-line react/display-name
+const OutlineRows = memo(({ overlay, set, setTransient, commitTransient }: {
+  overlay: TextStyledOverlay,
+  set: (patch: MixOverlayPatch) => void,
+  setTransient: (patch: MixOverlayPatch, transient: boolean) => void,
+  commitTransient: () => void,
+}) => {
+  const { t } = useTranslation();
+  const { shadow } = overlay;
+  return (
+    <>
+      <Row label={t('Align')}>
+        <Select style={selectStyle} value={overlay.align} onChange={(e) => set({ align: e.target.value as 'left' | 'center' | 'right' })}>
+          <option value="left">{t('Left')}</option>
+          <option value="center">{t('Center')}</option>
+          <option value="right">{t('Right')}</option>
+        </Select>
+      </Row>
+      <Row label={t('Border (px)')}>
+        <NumberField value={overlay.border.width} step={1} min={0} onCommit={(v) => set({ border: { ...overlay.border, width: v } })} />
+        <ColorField value={overlay.border.color} onChange={(color, transient) => setTransient({ border: { ...overlay.border, color } }, transient)} onCommit={commitTransient} />
+      </Row>
+      <Row label={t('Shadow')}>
+        <Switch checked={shadow != null} onCheckedChange={(checked) => set({ shadow: checked ? { x: 3, y: 3, color: '#000000' } : undefined })} />
+      </Row>
+      {shadow != null && (
+        <Row label={t('Shadow (px)')}>
+          <NumberField value={shadow.x} step={1} onCommit={(v) => set({ shadow: { ...shadow, x: v } })} title={t('Horizontal')} />
+          <NumberField value={shadow.y} step={1} onCommit={(v) => set({ shadow: { ...shadow, y: v } })} title={t('Vertical')} />
+          <ColorField value={shadow.color} onChange={(color, transient) => setTransient({ shadow: { ...shadow, color } }, transient)} onCommit={commitTransient} />
+        </Row>
+      )}
+    </>
+  );
+});
+
 /** Where the overlay starts: at a time, or anchored to an edge of a clip or of another overlay (01-requisitos §9.2). */
 // eslint-disable-next-line react/display-name
 const AnchorFields = memo(({ overlayId, anchor, overlays, clips, rawStart, onChange }: {
@@ -226,7 +320,7 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
   onLocate: (overlayId: string, kind: OverlayFileKind) => void,
 }) {
   const { t } = useTranslation();
-  const { update, commitTransient, userRemoveOverlay, userDuplicateOverlay, userMoveOverlayLayer, userChooseOverlayFile, setSelectedOverlayId, outputSize } = mixOverlays;
+  const { update, commitTransient, userRemoveOverlay, userDuplicateOverlay, userMoveOverlayLayer, userChooseOverlayFile, setSelectedOverlayId, outputSize, withErrorHandling } = mixOverlays;
   const { id } = overlay;
   const times = resolved.get(id);
 
@@ -257,8 +351,11 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
   const handleBoxChange = useCallback((newBox: OverlayBox) => set({ box: newBox }), [set]);
 
   const handlePreset = useCallback((preset: OverlayBoxPreset) => {
-    if (box != null) set({ box: getOverlayBoxPreset(preset, { width: Math.min(1, box.width), height: Math.min(1, box.height) }) });
-  }, [box, set]);
+    if (box == null) return;
+    // a text keeps its height (fitted to its lines): "full screen" is the full width, centered
+    if (overlay.type === 'text') set({ box: getOverlayBoxPreset(preset === 'fullScreen' ? 'center' : preset, { width: preset === 'fullScreen' ? 1 : Math.min(1, box.width), height: Math.min(1, box.height) }) });
+    else set({ box: getOverlayBoxPreset(preset, { width: Math.min(1, box.width), height: Math.min(1, box.height) }) });
+  }, [box, overlay.type, set]);
 
   const fileName = overlay.type === 'image' || overlay.type === 'sound' ? basename(overlay.absolutePath) as string : undefined;
 
@@ -352,7 +449,8 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
           <PercentField field="x" label={t('Left')} box={box} onChange={handleBoxChange} />
           <PercentField field="y" label={t('Top')} box={box} onChange={handleBoxChange} />
           <PercentField field="width" label={t('Width')} box={box} onChange={handleBoxChange} />
-          <PercentField field="height" label={overlay.type === 'countdown' ? t('Text size') : t('Height')} box={box} onChange={handleBoxChange} />
+          {/* a text's height follows its lines and size (Text section) */}
+          {overlay.type !== 'text' && <PercentField field="height" label={overlay.type === 'countdown' ? t('Text size') : t('Height')} box={box} onChange={handleBoxChange} />}
           <div style={{ fontSize: '.7em', opacity: 0.7, marginBottom: '.3em' }}>
             {t('% of the video frame ({{width}}×{{height}}). You can also drag the box on the frame view.', { width: outputSize.width, height: outputSize.height })}
           </div>
@@ -374,14 +472,7 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
       {overlay.type === 'countdown' && (
         <>
           <h4 style={sectionTitleStyle}>{t('Text')}</h4>
-          <Row label={t('Color')}>
-            <ColorField value={overlay.color} onChange={(color, transient) => setTransient({ color }, transient)} onCommit={commitTransient} />
-          </Row>
-          <Row label={t('Font')}>
-            <Truncated maxWidth="7em" title={overlay.font?.absolutePath ?? ''}>{overlay.font != null ? basename(overlay.font.absolutePath) : t('Default font')}</Truncated>
-            <button type="button" style={iconButtonStyle} title={t('Choose a font')} onClick={() => userChooseOverlayFile(id, 'font')}><FaFolderOpen /></button>
-            {overlay.font != null && <button type="button" style={iconButtonStyle} title={t('Use the default font')} onClick={() => set({ font: undefined })}><FaTimes /></button>}
-          </Row>
+          <FontRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} onChooseFont={() => userChooseOverlayFile(id, 'font')} />
           <Row label={t('Decimals')}>
             <Select style={selectStyle} value={overlay.decimals} onChange={(e) => set({ decimals: Number(e.target.value) as 0 | 1 | 2 | 3 })}>
               {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
@@ -390,29 +481,48 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
           <Row label={t('Leading zeros')}>
             <Switch checked={overlay.leadingZeros} onCheckedChange={(checked) => set({ leadingZeros: checked })} />
           </Row>
-          <Row label={t('Align')}>
-            <Select style={selectStyle} value={overlay.align} onChange={(e) => set({ align: e.target.value as 'left' | 'center' | 'right' })}>
-              <option value="left">{t('Left')}</option>
-              <option value="center">{t('Center')}</option>
-              <option value="right">{t('Right')}</option>
-            </Select>
-          </Row>
-          <Row label={t('Border (px)')}>
-            <NumberField value={overlay.border.width} step={1} min={0} onCommit={(v) => set({ border: { ...overlay.border, width: v } })} />
-            <ColorField value={overlay.border.color} onChange={(color, transient) => setTransient({ border: { ...overlay.border, color } }, transient)} onCommit={commitTransient} />
-          </Row>
-          <Row label={t('Shadow')}>
-            <Switch checked={overlay.shadow != null} onCheckedChange={(checked) => set({ shadow: checked ? { x: 3, y: 3, color: '#000000' } : undefined })} />
-          </Row>
-          {overlay.shadow != null && (
-            <Row label={t('Shadow (px)')}>
-              <NumberField value={overlay.shadow.x} step={1} onCommit={(v) => overlay.shadow != null && set({ shadow: { ...overlay.shadow, x: v } })} title={t('Horizontal')} />
-              <NumberField value={overlay.shadow.y} step={1} onCommit={(v) => overlay.shadow != null && set({ shadow: { ...overlay.shadow, y: v } })} title={t('Vertical')} />
-              <ColorField value={overlay.shadow.color} onChange={(color, transient) => overlay.shadow != null && setTransient({ shadow: { ...overlay.shadow, color } }, transient)} onCommit={commitTransient} />
-            </Row>
-          )}
+          <OutlineRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} />
           <SecondsField label={t('Fade out')} value={overlay.fadeOut} onCommit={(v) => set({ fadeOut: roundOverlayTime(v) })} />
           <div style={{ fontSize: '.7em', opacity: 0.7 }}>{t('Border and shadow in px of a 1080p video (scaled for other resolutions).')}</div>
+        </>
+      )}
+
+      {overlay.type === 'text' && (
+        <>
+          <h4 style={sectionTitleStyle}>{t('Text')}</h4>
+          <TextField key={id} value={overlay.text} onCommit={(text) => set(getTextOverlayLayoutPatch(overlay, { text }))} />
+          <Row label={t('Text size')}>
+            <NumberField value={Math.round(getTextOverlayFontSize(overlay) * 1000) / 10} step={0.5} min={0.5} max={100} onCommit={(percent) => set(getTextOverlayLayoutPatch(overlay, { fontSize: percent / 100 }))} title={t('% of the video frame height')} />
+            <span style={{ fontSize: '.75em' }}>%</span>
+          </Row>
+          <Row label={t('Line spacing')}>
+            <NumberField value={overlay.lineSpacing} step={0.1} min={0} max={5} onCommit={(lineSpacing) => set(getTextOverlayLayoutPatch(overlay, { lineSpacing }))} title={t('Space between lines, as a fraction of the text size')} />
+          </Row>
+          <FontRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} onChooseFont={() => userChooseOverlayFile(id, 'font')} />
+          <OutlineRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} />
+          <SecondsField label={t('Fade in')} value={overlay.fadeIn} onCommit={(v) => set({ fadeIn: roundOverlayTime(v) })} />
+          <SecondsField label={t('Fade out')} value={overlay.fadeOut} onCommit={(v) => set({ fadeOut: roundOverlayTime(v) })} />
+          <div style={{ fontSize: '.7em', opacity: 0.7 }}>{t('Border and shadow in px of a 1080p video (scaled for other resolutions).')}</div>
+
+          <h4 style={sectionTitleStyle}>{t('Entry animation')}</h4>
+          <Row label={t('Animation')}>
+            <Select style={selectStyle} value={overlay.entry.kind} onChange={(e) => set({ entry: { ...overlay.entry, kind: e.target.value as TextOverlay['entry']['kind'], ...(e.target.value === 'slide' && overlay.entry.from == null && { from: 'left' as const }) } })}>
+              <option value="none">{t('None')}</option>
+              <option value="slide">{t('Slide in')}</option>
+              <option value="typewriter">{t('Typewriter')}</option>
+            </Select>
+          </Row>
+          {overlay.entry.kind === 'slide' && (
+            <Row label={t('From')}>
+              <Select style={selectStyle} value={overlay.entry.from ?? 'left'} onChange={(e) => set({ entry: { ...overlay.entry, from: e.target.value as 'left' | 'right' | 'top' | 'bottom' } })}>
+                <option value="left">{t('Left')}</option>
+                <option value="right">{t('Right')}</option>
+                <option value="top">{t('Top')}</option>
+                <option value="bottom">{t('Bottom')}</option>
+              </Select>
+            </Row>
+          )}
+          {overlay.entry.kind !== 'none' && <SecondsField label={t('Duration')} value={overlay.entry.duration} onCommit={(v) => set({ entry: { ...overlay.entry, duration: roundOverlayTime(v) } })} />}
         </>
       )}
 
@@ -443,6 +553,13 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
               <option value="empty">{t('Empties')}</option>
             </Select>
           </Row>
+        </>
+      )}
+
+      {isStyledOverlay(overlay) && (
+        <>
+          <h4 style={sectionTitleStyle}>{t('Style')}</h4>
+          <OverlayStylePresets overlay={overlay} withErrorHandling={withErrorHandling} onApply={set} />
         </>
       )}
 

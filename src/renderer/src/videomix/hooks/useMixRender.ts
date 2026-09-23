@@ -19,12 +19,15 @@ import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
 import { getOverlayTimeWarningText } from '../overlayTexts';
 import { getKnownSoundDurations } from './useOverlaySoundDurations';
 import { buildRenderJob, getChunkConcurrency } from '../render/buildRenderJob';
+import type { ResolvedEncoder } from '../render/buildRenderJob';
 import { buildAudioGraph } from '../render/buildAudioGraph';
 import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
 import { RenderAbortedError, runRenderJob } from '../render/runRenderJob';
 import type { RenderRunnerDeps } from '../render/runRenderJob';
-import { askForRenderWarnings, getIssueText, getRenderWarningText, showRenderProblems } from '../renderDialogs';
+import { askForRenderWarnings, getIssueText, getRenderWarningText, showHardwareEncoderFallbackWarning, showRenderProblems } from '../renderDialogs';
 import { showMixPreviewDialog } from '../components/MixPreviewDialog';
+import { detectEncoders } from '../encoders';
+import { resolveEncoderHardware } from '../../../../common/videomix/encoder';
 
 const path = window.require('node:path');
 const fs = window.require('node:fs/promises');
@@ -190,30 +193,53 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       setProgress(0);
       const { plan, settings, encoding } = renderPlan;
       const overlayTimes = resolveOverlayTimes(project, plan, { soundDurations: getSoundDurations(loudness, soundOverlays) });
-      const job = buildRenderJob({
-        plan,
-        clips: project.clips,
-        sourcePaths: Object.fromEntries(project.sources.map((source) => [source.id, source.absolutePath])),
-        settings,
-        encoding,
-        workDir,
-        outPath: partialPath,
-        // RenderClip has no muted/gainDb: close over the full clips (T12)
-        buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness, overlays: soundOverlays, overlayTimes }),
-        join: path.join,
-        // images, countdowns and progress bars (T20)
-        overlays: { overlays: project.overlays, times: overlayTimes, defaultFontPath: getDefaultOverlayFontPath() },
-      });
-      await runRenderJob({
-        job,
-        workDir,
-        outPath,
-        concurrency: getChunkConcurrency({ height: plan.height, cpuCount: navigator.hardwareConcurrency }),
-        deps: runnerDeps,
-        onProgress: setProgress,
-        onCommand: appendFfmpegCommandLog,
-        abortSignal: abortController.signal,
-      });
+
+      // T25: 'auto'/a specific choice resolved against what actually works on this machine (main's detectEncoders,
+      // cached for the session); a manual choice that isn't available (e.g. a project made on another machine)
+      // falls back to software too.
+      const available = await detectEncoders();
+      const hardware = resolveEncoderHardware({ encoder: settings.encoder, available });
+
+      const runWithEncoder = async (resolvedEncoder: ResolvedEncoder) => {
+        const job = buildRenderJob({
+          plan,
+          clips: project.clips,
+          sourcePaths: Object.fromEntries(project.sources.map((source) => [source.id, source.absolutePath])),
+          settings,
+          encoding,
+          resolvedEncoder,
+          workDir,
+          outPath: partialPath,
+          // RenderClip has no muted/gainDb: close over the full clips (T12)
+          buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness, overlays: soundOverlays, overlayTimes }),
+          join: path.join,
+          // images, countdowns and progress bars (T20)
+          overlays: { overlays: project.overlays, times: overlayTimes, defaultFontPath: getDefaultOverlayFontPath() },
+        });
+        await runRenderJob({
+          job,
+          workDir,
+          outPath,
+          concurrency: getChunkConcurrency({ height: plan.height, cpuCount: navigator.hardwareConcurrency }),
+          deps: runnerDeps,
+          onProgress: setProgress,
+          onCommand: appendFfmpegCommandLog,
+          abortSignal: abortController.signal,
+        });
+      };
+
+      try {
+        await runWithEncoder({ codec: settings.encoder.codec, hardware });
+      } catch (err) {
+        // Cancelling isn't a hardware failure: let it propagate as-is. A hardware encoder can fail mid-render (a
+        // driver quirk a short test-encode didn't catch): retry once with software rather than losing the render.
+        if (hardware === 'none' || err instanceof RenderAbortedError) throw err;
+        console.warn('Hardware encoder failed, retrying with software', err);
+        await showHardwareEncoderFallbackWarning();
+        setWorking({ text: preview ? i18n.t('Rendering preview') : i18n.t('Rendering mix'), abortController });
+        setProgress(0);
+        await runWithEncoder({ codec: settings.encoder.codec, hardware: 'none' });
+      }
     } finally {
       setWorking(undefined);
       setProgress(undefined);

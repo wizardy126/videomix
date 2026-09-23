@@ -16,7 +16,7 @@ import type { MixPlan } from '../planner/types';
 import { planRender } from '../render/renderOutput';
 import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
 import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
-import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay } from '../overlays/factories';
+import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay, createTextOverlay } from '../overlays/factories';
 import { getImageBox } from '../overlayTimeline';
 import { getDuplicateClipName, getNextNumberedName } from '../clips';
 import { getOverlayTypeLabel } from '../overlayTexts';
@@ -125,7 +125,11 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
     add(createProgressBarOverlay({ id: nanoid(), name: getNextNumberedName(getOverlayTypeLabel('progressBar'), overlays.map((o) => o.name)), start: cursorTime }));
   }, [add, cursorTime, overlays]);
 
-  /** Replace an image/sound file, or choose the countdown font. */
+  const userAddText = useCallback(() => {
+    add(createTextOverlay({ id: nanoid(), name: getNextNumberedName(getOverlayTypeLabel('text'), overlays.map((o) => o.name)), start: cursorTime, text: i18n.t('Your text') }));
+  }, [add, cursorTime, overlays]);
+
+  /** Replace an image/sound file, or choose the countdown/text font. */
   const userChooseOverlayFile = useCallback(async (overlayId: string, kind: OverlayFileKind) => {
     const overlay = overlays.find((o) => o.id === overlayId);
     if (overlay == null) return;
@@ -173,6 +177,7 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
     userAddSound,
     userAddCountdown,
     userAddProgressBar,
+    userAddText,
     userChooseOverlayFile,
     update,
     commitTransient,
@@ -180,6 +185,8 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
     userRemoveOverlay,
     userDuplicateOverlay,
     userMoveOverlayLayer,
+    // for the style presets of the properties panel (T26)
+    withErrorHandling,
   };
 }
 

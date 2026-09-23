@@ -400,6 +400,12 @@ describe('validateMixProject', () => {
       expect(codes(withOverlays(text({ duration: 0 })))).toEqual(['overlay-invalid-duration']);
       expect(codes(withOverlays(text({ box: { x: 0.5, y: 0, width: 0.6, height: 0.1 } })))).toEqual(['overlay-box-out-of-range']);
       expect(codes(withOverlays(text({ shadow: { x: 1, y: 1, color: 'black' } })))).toEqual(['overlay-invalid-color']);
+      // T26: explicit size, optional (derived from the box when missing)
+      expect(codes(withOverlays(text({ fontSize: 0 })))).toEqual(['overlay-invalid-font-size']);
+      expect(codes(withOverlays(text({ fontSize: Number.NaN })))).toEqual(['overlay-invalid-font-size']);
+      const withoutSize = text();
+      delete withoutSize.fontSize;
+      expect(codes(withOverlays(withoutSize))).toEqual([]);
     });
 
     test('colors (for projects not built by the schema)', () => {

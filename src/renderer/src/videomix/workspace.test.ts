@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { classifyOpenedPaths, countClipsBySource, getFileExtension, getMixProjectTitle, getSourceMeta, isSourceMetaChanged, replaceMusic } from './workspace';
+import { classifyOpenedPaths, countClipsBySource, getFileExtension, getMixProjectTitle, getSourceMeta, isSourceMetaChanged, appendMusicTracks } from './workspace';
 import { defaultMusicPlaylist } from './types';
 import type { MixSource } from './types';
 import type { FFprobeStream } from '../../../common/ffprobe';
@@ -79,16 +79,14 @@ describe('isSourceMetaChanged', () => {
   });
 });
 
-describe('replaceMusic', () => {
-  test('a single track, keeping the volume and loop of the replaced music', () => {
+describe('appendMusicTracks', () => {
+  const track = (id: string) => ({ id, path: `/${id}.mp3`, absolutePath: `/${id}.mp3`, volumeDb: -12 });
+
+  test('new music does not loop; existing music keeps its tracks and loop', () => {
     const empty = { ...defaultMusicPlaylist, loop: true };
-    expect(replaceMusic(empty, { id: 'a', filePath: '/m.mp3', loopIfNew: false })).toEqual({
-      ...empty, tracks: [{ id: 'a', path: '/m.mp3', absolutePath: '/m.mp3', volumeDb: -12 }], loop: false, // T12b default volume
-    });
-    const withMusic = { ...defaultMusicPlaylist, loop: true, tracks: [{ id: 'a', path: '/m.mp3', absolutePath: '/m.mp3', volumeDb: -6 }, { id: 'b', path: '/o.mp3', absolutePath: '/o.mp3', volumeDb: 0 }] };
-    expect(replaceMusic(withMusic, { id: 'c', filePath: '/n.mp3', loopIfNew: false })).toEqual({
-      ...withMusic, tracks: [{ id: 'c', path: '/n.mp3', absolutePath: '/n.mp3', volumeDb: -6 }], loop: true,
-    });
+    expect(appendMusicTracks(empty, [track('a'), track('b')])).toEqual({ ...empty, tracks: [track('a'), track('b')], loop: false });
+    const withMusic = { ...defaultMusicPlaylist, loop: true, tracks: [track('a')] };
+    expect(appendMusicTracks(withMusic, [track('b')])).toEqual({ ...withMusic, tracks: [track('a'), track('b')], loop: true });
   });
 });
 

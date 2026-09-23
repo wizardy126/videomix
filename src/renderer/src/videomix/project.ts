@@ -81,6 +81,8 @@ export type MixProjectIssueCode =
   | 'overlay-empty-text'
   | 'overlay-invalid-entry'
   | 'overlay-entry-too-long'
+  // T26
+  | 'overlay-invalid-font-size'
   | 'pin-time-out-of-range'
   | 'pin-time-after-end'
   | 'group-too-small'
@@ -178,6 +180,9 @@ function validateOverlays({ overlays }: MixProject, clipIds: ReadonlySet<string>
       // Renders nothing: probably left empty by mistake
       if (overlay.text.trim() === '') add('warning', 'overlay-empty-text', `Text ${overlayId} is empty`);
       if (overlay.entry.kind === 'slide' && overlay.entry.from == null) add('error', 'overlay-invalid-entry', `Text ${overlayId} slides in from no side`);
+      if (overlay.fontSize != null && !(Number.isFinite(overlay.fontSize) && overlay.fontSize > 0)) {
+        add('error', 'overlay-invalid-font-size', `Text ${overlayId} has invalid font size ${overlay.fontSize}`);
+      }
     }
 
     if (overlayColors(overlay).some((color) => !OVERLAY_COLOR_REGEX.test(color))) {

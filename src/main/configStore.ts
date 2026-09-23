@@ -10,6 +10,7 @@ import logger from './logger.js';
 import { isWindows, pathExists } from './util.js';
 import { fallbackLng } from './i18nCommon.js';
 import { isKeyboardActionRetired } from '../common/videomix/legacyUi.js';
+import { overlayStylePresetSchema } from '../common/videomix/overlayStyles.js';
 
 const { app } = electron;
 
@@ -201,6 +202,7 @@ const defaults: Config = {
   keyframesEnabled: true,
   reducedMotion: 'user',
   ffmpegHwaccel: 'none',
+  overlayStylePresets: [],
 };
 
 const configFileName = 'config.json'; // note: this is also hard-coded inside electron-store
@@ -298,6 +300,15 @@ export async function init({ customConfigDir }: { customConfigDir: string | unde
     store.delete('customOutDir');
     set('recentCustomOutDirs', [customOutDir]);
     set('enableCustomOutDir', customOutDir != null);
+  }
+
+  // VideoMix style presets (T26): a missing key gets the default []; drop entries that aren't valid presets (edited by
+  // hand, or written by a newer version) instead of failing later
+  const overlayStylePresets: unknown = store.get('overlayStylePresets');
+  const validPresets = Array.isArray(overlayStylePresets) ? overlayStylePresets.filter((preset) => overlayStylePresetSchema.safeParse(preset).success) : [];
+  if (!Array.isArray(overlayStylePresets) || validPresets.length !== overlayStylePresets.length) {
+    logger.warn('Dropping invalid overlay style presets');
+    set('overlayStylePresets', validPresets);
   }
 
   // const configVersion: number = store.get('version');

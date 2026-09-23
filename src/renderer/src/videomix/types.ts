@@ -6,7 +6,8 @@ import { countdownOverlayStyleSchema, overlayFileSchema, progressBarOverlayStyle
 // Shared with main since T24 (style presets), re-exported for the existing imports
 export { OVERLAY_COLOR_REGEX, overlayFileSchema, progressBarDirections } from '../../../common/videomix/overlayStyles';
 export type { OverlayFile } from '../../../common/videomix/overlayStyles';
-export type { MixEncoderSettings } from '../../../common/videomix/encoder';
+export { mixEncoderCodecs, mixEncoderHardware } from '../../../common/videomix/encoder';
+export type { MixEncoderSettings, MixEncoderCodec, MixEncoderHardware, HardwareEncoderCandidate, ResolvedEncoder } from '../../../common/videomix/encoder';
 
 /** Rectangle in oriented source pixels (after applying rotation metadata). Integer values. */
 export const rectSchema = z.object({

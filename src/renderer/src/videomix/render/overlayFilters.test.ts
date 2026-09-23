@@ -1,12 +1,12 @@
 import { describe, test, expect } from 'vitest';
 
 import { getAspectRange } from '../geometry';
-import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay } from '../overlays/factories';
+import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay, createTextOverlay } from '../overlays/factories';
 import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
 import { planMix } from '../planner/planMix';
 import { createRandom } from '../planner/random';
 import type { PlannerClip } from '../planner/types';
-import type { MixOverlay } from '../types';
+import type { MixOverlay, TextOverlay } from '../types';
 import { buildRenderJob } from './buildRenderJob';
 import { buildVideoGraph } from './buildVideoGraph';
 import type { RenderClip } from './buildVideoGraph';
@@ -131,6 +131,76 @@ describe('overlay filters', () => {
   });
 });
 
+describe('text overlays', () => {
+  const tl = getRenderTimeline(testPlans.static, { fps: 30, gap: 8, transitionDuration: 0.5 });
+  const settings = testSettings({ fadeInOut: false });
+  const W = testPlans.static.width;
+  const H = testPlans.static.height;
+
+  const drawtexts = (overlays: MixOverlay[], chunk?: { f0: number, f1: number }) => {
+    const graph = buildVideoGraph({ timeline: tl, clips: testClips, sourcePaths: testSourcePaths('/m'), settings, chunk: chunk ?? { f0: 0, f1: 90 }, overlays: overlaysFor(overlays, testPlans.static) });
+    expect(verifyFilterGraph(graph)).toEqual([]);
+    return parseFilterGraph(graph.filterComplex).flatMap((c) => c.filters).filter((f) => f.startsWith('drawtext=')).map((f) => parseFilterOptions(f));
+  };
+  const text = (props: Partial<TextOverlay>): TextOverlay => ({ ...createTextOverlay({ id: 't', name: 'T', start: 0.5, text: '' }), duration: 2, fadeIn: 0, fadeOut: 0, ...props });
+
+  test('one literal drawtext per line, aligned in the box and placed by font metrics', () => {
+    const special = String.raw`it's 100% {x} \ a:b [c];`;
+    const options = drawtexts([text({ text: `First\n\n${special}   \n  last`, align: 'right', fontSize: 0.1, lineSpacing: 0.5, box: { x: 0.1, y: 0.2, width: 0.5, height: 0.4 } })]);
+    // the empty line takes its place but isn't drawn; trailing spaces are dropped, leading ones kept
+    expect(options.map((o) => o['text'])).toEqual(['First', special, '  last']);
+    const size = Math.round(0.1 * H);
+    expect(options.every((o) => o['fontsize'] === String(size) && o['y_align'] === 'font' && o['expansion'] === 'none')).toBe(true);
+    const boxX = 2 * Math.round((0.1 * W) / 2);
+    const boxW = 2 * Math.round((0.5 * W) / 2);
+    expect(options[0]!['x']).toBe(`${boxX}+(${boxW}-text_w)*1`);
+    // 4 lines of `size` with 0.5·size between them, centered in the box: line i at blockTop + i·1.5·size + size/2
+    const boxY = 2 * Math.round((0.2 * H) / 2);
+    const boxH = 2 * Math.round((0.4 * H) / 2);
+    const blockTop = boxY + (boxH - size * 5.5) / 2;
+    const ys = options.map((o) => Number(/^([\d.-]+)-\(font_a\+font_d\)\/2$/.exec(o['y']!)![1]));
+    [0, 2, 3].forEach((line, i) => expect(ys[i]).toBeCloseTo(blockTop + line * 1.5 * size + size / 2, 5));
+    // frames [15, 75)
+    expect(options.every((o) => o['enable'] === 'between(t,0.483333,2.483333)')).toBe(true);
+    // no alpha without fades
+    expect(options[0]!['alpha']).toBeUndefined();
+  });
+
+  test('fades: alpha from the raw start and until the raw end, with absolute frames in any chunk', () => {
+    const [first] = drawtexts([text({ text: 'Hi', fadeIn: 0.5, fadeOut: 1 })]);
+    expect(first!['alpha']).toBe('min(min(1,(-15+round(t*30))/15),(75-round(t*30))/30)');
+    const [mid] = drawtexts([text({ text: 'Hi', fadeIn: 0.5, fadeOut: 1 })], { f0: 45, f1: 90 });
+    expect(mid!['alpha']).toBe('min(min(1,(30+round(t*30))/15),(30-round(t*30))/30)');
+  });
+
+  test('slide: eased x or y from outside the frame', () => {
+    const fromLeft = drawtexts([text({ text: 'Hi', align: 'left', entry: { kind: 'slide', from: 'left', duration: 1 } })])[0]!;
+    expect(fromLeft['x']).toMatch(/^(\d+)-\(max\(\d+,\1\+text_w\)\+\d+\)\*pow\(1-min\(1,\(-15\+round\(t\*30\)\)\/30\),3\)$/);
+    const fromBottom = drawtexts([text({ text: 'Hi', entry: { kind: 'slide', from: 'bottom', duration: 1 } })])[0]!;
+    expect(fromBottom['y']).toMatch(/-\(font_a\+font_d\)\/2\+[\d.]+\*pow\(1-min\(1,\(-15\+round\(t\*30\)\)\/30\),3\)$/);
+    expect(fromBottom['x']).not.toContain('pow');
+  });
+
+  test('typewriter: one drawtext per step, partial lines aligned by the whole line, contiguous in time', () => {
+    // 5 characters in 0.2 s (6 frames): none on the text's first frame (15), then one per frame
+    const options = drawtexts([text({ text: 'ab c\nd', align: 'center', entry: { kind: 'typewriter', duration: 0.2 } })]);
+    const sec = (f: number) => String(Math.round((f / 30) * 1e6) / 1e6);
+    expect(options.map((o) => [o['text'], o['enable'], o['line_spacing']])).toEqual([
+      // "ab " looks like "ab": merged
+      ['a\nab c', `between(t,${sec(15.5)},${sec(16.5)})`, String(10 * H)],
+      ['ab\nab c', `between(t,${sec(16.5)},${sec(18.5)})`, String(10 * H)],
+      ['ab c', `between(t,${sec(18.5)},${sec(74.5)})`, undefined],
+      ['d', `between(t,${sec(19.5)},${sec(74.5)})`, undefined],
+    ]);
+    // all of them aligned with text_w (of the whole line for the partial ones)
+    expect(new Set(options.map((o) => o['x'])).size).toBe(1);
+  });
+
+  test('empty text draws nothing', () => {
+    expect(drawtexts([text({ text: ' \n ' })])).toEqual([]);
+  });
+});
+
 describe('random plans with overlays', () => {
   const sourceIds = Object.keys(testSources) as TestSourceId[];
 
@@ -151,12 +221,26 @@ describe('random plans with overlays', () => {
     for (let i = 0; i < 6; i += 1) {
       const start = Math.round(random() * plan.duration * 100) / 100 - 0.5;
       const common = { id: `o${i}`, name: `o${i}`, start: Math.max(0, start) };
-      const kind = Math.floor(random() * 3);
+      const kind = Math.floor(random() * 4);
       const box = { x: random() * 0.5, y: random() * 0.5, width: 0.05 + random() * 0.4, height: 0.05 + random() * 0.4 };
       const duration = 0.2 + random() * 70;
-      if (kind === 0) overlays.push({ ...createImageOverlay({ ...common, filePath: `/i/${i}.png` }), box, duration, fadeIn: random(), fadeOut: random() * 3 });
-      else if (kind === 1) overlays.push({ ...createCountdownOverlay(common), box, duration, decimals: Math.floor(random() * 4) as 0 | 1 | 2 | 3, leadingZeros: random() < 0.5, align: 'center', fadeOut: random() });
-      else overlays.push({ ...createProgressBarOverlay(common), box, duration, direction: (['ltr', 'rtl', 'btt', 'ttb'] as const)[i % 4]!, mode: random() < 0.5 ? 'fill' : 'empty', border: { width: random() * 20, color: '#ff0000' } });
+      switch (kind) {
+        case 0: { overlays.push({ ...createImageOverlay({ ...common, filePath: `/i/${i}.png` }), box, duration, fadeIn: random(), fadeOut: random() * 3 }); break; }
+        case 1: { overlays.push({ ...createCountdownOverlay(common), box, duration, decimals: Math.floor(random() * 4) as 0 | 1 | 2 | 3, leadingZeros: random() < 0.5, align: 'center', fadeOut: random() }); break; }
+        case 2: { overlays.push({ ...createProgressBarOverlay(common), box, duration, direction: (['ltr', 'rtl', 'btt', 'ttb'] as const)[i % 4]!, mode: random() < 0.5 ? 'fill' : 'empty', border: { width: random() * 20, color: '#ff0000' } }); break; }
+        default: {
+          const lines = ['50% off!', String.raw`it's {new}; [a,b] C:\x`, '', '  indented  ', 'é🎉 ok'];
+          overlays.push({
+            ...createTextOverlay({ ...common, text: lines.slice(0, 1 + (i % 5)).join('\n') }),
+            box,
+            duration,
+            align: (['left', 'center', 'right'] as const)[i % 3]!,
+            fadeIn: random(),
+            fadeOut: random(),
+            entry: { kind: (['none', 'slide', 'typewriter'] as const)[i % 3]!, from: (['left', 'right', 'top', 'bottom'] as const)[i % 4]!, duration: random() * 3 },
+          });
+        }
+      }
     }
     const settings = testSettings({ fps, gap: { width: 4, color: '#101010' } });
     const tl = getRenderTimeline(plan, { fps, gap: 4, transitionDuration: 0.5 });

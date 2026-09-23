@@ -1,30 +1,37 @@
 import type { ChangeEventHandler, FormEventHandler, ReactNode } from 'react';
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FaFolderOpen, FaMusic, FaRandom, FaTimes } from 'react-icons/fa';
-import { nanoid } from 'nanoid';
+import { FaRandom } from 'react-icons/fa';
 
 import * as Dialog from '../../components/Dialog';
 import Button from '../../components/Button';
 import Select from '../../components/Select';
 import Switch from '../../components/Switch';
-import Truncated from '../../components/Truncated';
-import { showOpenDialog } from '../../dialogs';
 import type { EditOptions } from '../hooks/useMixProject';
-import { getOutputSize, mixFpsValues, mixOutputResolutions, mixPresets, transitionTypes } from '../types';
-import type { MixOutput, MixOutputResolution, MixSettings, TransitionType } from '../types';
-import { replaceMusic } from '../workspace';
-
-const { basename } = window.require('node:path');
-
-/** Audio containers accepted for the music track (01-requisitos §5). */
-const MUSIC_EXTENSIONS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus'];
+import useEncoderAvailability from '../hooks/useEncoderAvailability';
+import { getOutputSize, mixEncoderCodecs, mixEncoderHardware, mixFpsValues, mixOutputResolutions, mixPresets, transitionTypes } from '../types';
+import type { MixEncoderCodec, MixEncoderHardware, MixMusicPlaylist, MixOutput, MixOutputResolution, MixSettings, TransitionType } from '../types';
+import MixMusicSection from './MixMusicSection';
 
 // e.g. "1080p (1920×1080)", "4K (3840×2160)"
 function getResolutionLabel(output: MixOutput) {
   const { width, height } = getOutputSize(output);
   return `${output.resolution === '2160' ? '4K' : `${output.resolution}p`} (${width}×${height})`;
 }
+
+const codecLabels: Record<MixEncoderCodec, string> = {
+  h264: 'H.264',
+  h265: 'H.265 (HEVC)',
+};
+
+const hardwareLabels: Record<MixEncoderHardware, string> = {
+  auto: 'Auto (hardware if available)',
+  none: 'Software only',
+  nvenc: 'NVIDIA NVENC',
+  qsv: 'Intel Quick Sync',
+  videotoolbox: 'Apple VideoToolbox',
+  vaapi: 'VAAPI',
+};
 
 const transitionLabels: Record<TransitionType, string> = {
   fade: 'Fade',
@@ -69,21 +76,33 @@ function toEvenNonNegative(value: number) {
  * pass the project's `settings`; every edit goes through `onChange`, which the caller normally wires to
  * `useMixProject().updateSettings` so it lands in undo history and marks the project dirty.
  *
- * Continuous controls (CRF, transition duration, music volume) send `{ transient: true }` while dragging
+ * Continuous controls (CRF, transition duration, music volumes…) send `{ transient: true }` while dragging
  * and a final call without it on release, matching `useMixProject`'s transient-edit convention: the caller
  * doesn't need to call `commitTransient` itself (a non-transient `updateSettings` call already does).
  *
- * `onPickMusicFile` lets the caller supply its own music file picker (e.g. to reuse app-level dialog
- * state); if omitted, an audio-filtered `showOpenDialog` is used.
+ * The Music section (playlist and ducking, T27) is MixMusicSection.
  */
-function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusicFile }: {
+function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
   open: boolean,
   onOpenChange: (isOpen: boolean) => void,
   settings: MixSettings,
   onChange: (patch: Partial<MixSettings>, options?: EditOptions) => void,
-  onPickMusicFile?: (() => Promise<string | undefined>) | undefined,
 }) {
   const { t } = useTranslation();
+
+  // Hardware encoders actually detected on this machine (T25); undefined while still detecting.
+  const availableEncoders = useEncoderAvailability();
+  const isHardwareAvailable = useCallback((hardware: MixEncoderHardware) => (
+    availableEncoders?.some((c) => c.codec === settings.encoder.codec && c.hardware === hardware) ?? false
+  ), [availableEncoders, settings.encoder.codec]);
+
+  const handleCodecChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
+    onChange({ encoder: { ...settings.encoder, codec: e.target.value as MixEncoderCodec } });
+  }, [onChange, settings.encoder]);
+
+  const handleEncoderHardwareChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
+    onChange({ encoder: { ...settings.encoder, hardware: e.target.value as MixEncoderHardware } });
+  }, [onChange, settings.encoder]);
 
   const handleResolutionChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
     onChange({ output: { ...settings.output, resolution: e.target.value as MixOutputResolution } });
@@ -153,51 +172,9 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
     onChange({ fadeInOut: checked });
   }, [onChange]);
 
-  const pickMusicFile = useCallback(async () => {
-    if (onPickMusicFile) return onPickMusicFile();
-    const { canceled, filePaths } = await showOpenDialog({
-      title: t('Choose a music file'),
-      properties: ['openFile'],
-      filters: [{ name: t('Audio files'), extensions: MUSIC_EXTENSIONS }],
-    });
-    const [filePath] = filePaths;
-    if (canceled || filePath == null) return undefined;
-    return filePath;
-  }, [onPickMusicFile, t]);
-
-  // Until the playlist UI (T27), this section edits a single track: the first one
-  const { musicPlaylist } = settings;
-  const [music] = musicPlaylist.tracks;
-
-  const handleChooseMusicClick = useCallback(async () => {
-    const filePath = await pickMusicFile();
-    if (filePath == null) return;
-    // Same absolute path for both fields at pick time; saving the project relativizes `path` (projectFile.ts)
-    onChange({ musicPlaylist: replaceMusic(musicPlaylist, { id: nanoid(), filePath, loopIfNew: true }) });
-  }, [musicPlaylist, onChange, pickMusicFile]);
-
-  const handleRemoveMusicClick = useCallback(() => {
-    onChange({ musicPlaylist: { ...musicPlaylist, tracks: [] } });
-  }, [musicPlaylist, onChange]);
-
-  const setMusicVolume = useCallback((volumeDb: number, options?: EditOptions) => {
-    if (music == null) return;
-    onChange({ musicPlaylist: { ...musicPlaylist, tracks: musicPlaylist.tracks.map((track) => (track === music ? { ...track, volumeDb } : track)) } }, options);
-  }, [music, musicPlaylist, onChange]);
-
-  const handleMusicVolumeInput = useCallback<FormEventHandler<HTMLInputElement>>((e) => {
-    setMusicVolume(Number(e.currentTarget.value), { transient: true });
-  }, [setMusicVolume]);
-
-  const handleMusicVolumeCommit = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    setMusicVolume(Number(e.target.value));
-  }, [setMusicVolume]);
-
-  const handleMusicLoopChange = useCallback((checked: boolean) => {
-    onChange({ musicPlaylist: { ...musicPlaylist, loop: checked } });
-  }, [musicPlaylist, onChange]);
-
-  const musicFileName = useMemo(() => (music != null ? basename(music.absolutePath) as string : undefined), [music]);
+  const handleMusicPlaylistChange = useCallback((musicPlaylist: MixMusicPlaylist, options?: EditOptions) => {
+    onChange({ musicPlaylist }, options);
+  }, [onChange]);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -239,6 +216,32 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
                 {mixPresets.map((preset) => <option key={preset} value={preset}>{preset}</option>)}
               </Select>
               <div style={detailsStyle}>{t('Slower presets compress better at the same quality, but take longer to render.')}</div>
+            </label>
+
+            {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
+            <label style={rowStyle}>
+              {t('Video codec')}<br />
+              <Select value={settings.encoder.codec} onChange={handleCodecChange}>
+                {mixEncoderCodecs.map((codec) => <option key={codec} value={codec}>{t(codecLabels[codec])}</option>)}
+              </Select>
+            </label>
+
+            {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
+            <label style={rowStyle}>
+              {t('Encoder')}<br />
+              <Select value={settings.encoder.hardware} onChange={handleEncoderHardwareChange}>
+                {mixEncoderHardware.map((hardware) => {
+                  const isFixed = hardware === 'auto' || hardware === 'none';
+                  const available = isFixed || isHardwareAvailable(hardware);
+                  const suffix = isFixed ? '' : (available ? t(' (detected)') : t(' (not detected)'));
+                  return (
+                    <option key={hardware} value={hardware} disabled={!isFixed && !available}>
+                      {t(hardwareLabels[hardware])}{suffix}
+                    </option>
+                  );
+                })}
+              </Select>
+              <div style={detailsStyle}>{t('"Auto" uses the first available hardware encoder and falls back to software if none work or if it fails while rendering.')}</div>
             </label>
           </Section>
 
@@ -328,31 +331,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
           </Section>
 
           <Section title={t('Music')}>
-            {music == null ? (
-              <Button onClick={handleChooseMusicClick}>
-                <FaFolderOpen style={{ verticalAlign: 'middle', marginRight: '.3em' }} />{t('Choose music file…')}
-              </Button>
-            ) : (
-              <>
-                <div style={inlineRowStyle}>
-                  <FaMusic style={{ verticalAlign: 'middle' }} />
-                  <Truncated maxWidth="16em" title={music.absolutePath}>{musicFileName}</Truncated>
-                  <Button onClick={handleRemoveMusicClick} title={t('Remove music')}><FaTimes /></Button>
-                </div>
-
-                {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
-                <label style={rowStyle}>
-                  {t('Music volume')}: {t('{{db}} dB', { db: music.volumeDb.toFixed(1) })}<br />
-                  <input type="range" min={-30} max={6} step={0.5} style={{ width: '100%' }} value={music.volumeDb} onInput={handleMusicVolumeInput} onChange={handleMusicVolumeCommit} />
-                  <div style={detailsStyle}>{t('0 dB = as loud as the clips')}</div>
-                </label>
-
-                <div style={inlineRowStyle}>
-                  <span>{t('Loop if shorter than the video')}</span>
-                  <Switch checked={musicPlaylist.loop} onCheckedChange={handleMusicLoopChange} />
-                </div>
-              </>
-            )}
+            <MixMusicSection playlist={settings.musicPlaylist} onChange={handleMusicPlaylistChange} />
           </Section>
 
           <Dialog.ButtonRow>

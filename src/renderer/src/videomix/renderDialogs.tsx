@@ -34,6 +34,7 @@ export function getIssueText(issue: MixProjectIssue, clipName: string | undefine
     case 'overlay-empty-text': { return i18n.t('Text "{{overlay}}" is empty', { overlay }); }
     case 'overlay-invalid-entry': { return i18n.t('Text "{{overlay}}": choose the side it slides in from', { overlay }); }
     case 'overlay-entry-too-long': { return i18n.t('Text "{{overlay}}": its entry animation is longer than its duration', { overlay }); }
+    case 'overlay-invalid-font-size': { return i18n.t('Text "{{overlay}}": its text size is not valid', { overlay }); }
     case 'pin-time-out-of-range': { return i18n.t('Clip "{{clip}}": its fixed start time is not valid', { clip }); }
     case 'pin-time-after-end': { return i18n.t('Clip "{{clip}}" is fixed after the end of the other clips: there will be a gap before it', { clip }); }
     case 'group-too-small': { return i18n.t('Clip "{{clip}}" is the only clip of its group: it is not grouped', { clip }); }
@@ -66,6 +67,15 @@ export async function showRenderProblems({ title, lines }: { title: string, line
     icon: 'error',
     title,
     html: <List lines={lines} />,
+  });
+}
+
+/** The hardware encoder failed mid-render (T25): useMixRender retries with software before giving up. */
+export async function showHardwareEncoderFallbackWarning() {
+  await getSwal().ReactSwal.fire({
+    icon: 'warning',
+    title: i18n.t('Hardware encoding failed'),
+    text: i18n.t('The hardware encoder failed while rendering. Retrying with software encoding, which is slower.'),
   });
 }
 

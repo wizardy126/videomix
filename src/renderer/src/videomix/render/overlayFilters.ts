@@ -1,7 +1,8 @@
 import { overlayPxToOutput } from '../overlays/factories';
 import { getCountdownMinutesFormat, getOverlayFrames, getOverlayPixelBox } from '../overlays/overlayFrames';
 import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
-import type { CountdownOverlay, ImageOverlay, MixOverlay, ProgressBarOverlay } from '../types';
+import { getTextEntryFrames, getTextLineCenters, getTextOverlayFontSize, getTypewriterStages, splitTextLines } from '../overlays/textLayout';
+import type { CountdownOverlay, ImageOverlay, MixOverlay, ProgressBarOverlay, TextOverlay } from '../types';
 import { escapeFilterValue, formatNumber, toFfmpegColor as toColor } from './ffmpegArgs';
 
 // Filters of the visual overlays of one render chunk (T20, 04-diseno §8.2), composed over the chunk's canvas after the
@@ -14,7 +15,7 @@ export interface VideoGraphOverlays {
   overlays: readonly MixOverlay[],
   /** `resolveOverlayTimes(project, plan, …)` for the plan being rendered. */
   times: ResolvedOverlayTimes,
-  /** Bundled font (main: `getDefaultOverlayFontPath`), for countdowns without their own. */
+  /** Bundled font (main: `getDefaultOverlayFontPath`), for countdowns and texts without their own. */
   defaultFontPath: string,
 }
 
@@ -32,6 +33,24 @@ interface Context {
 
 /** Reference px → output px; a non-zero length stays at least 1 px. */
 const lengthPx = (value: number, height: number) => (value > 0 ? Math.max(1, Math.round(overlayPxToOutput(value, height))) : 0);
+
+const alignFactors = { left: '0', center: '0.5', right: '1' } as const;
+
+/** drawtext options shared by the countdown and the text: font, size (px), color, border and shadow. */
+function textStyleOptions(overlay: CountdownOverlay | TextOverlay, fontSize: number, defaultFontPath: string, height: number) {
+  const borderWidth = lengthPx(overlay.border.width, height);
+  return [
+    `fontfile=${escapeFilterValue(overlay.font?.absolutePath ?? defaultFontPath)}`,
+    `fontsize=${fontSize}`,
+    `fontcolor=${toColor(overlay.color)}`,
+    ...(borderWidth > 0 ? [`borderw=${borderWidth}`, `bordercolor=${toColor(overlay.border.color)}`] : []),
+    ...(overlay.shadow != null ? [
+      `shadowx=${Math.round(overlayPxToOutput(overlay.shadow.x, height))}`,
+      `shadowy=${Math.round(overlayPxToOutput(overlay.shadow.y, height))}`,
+      `shadowcolor=${toColor(overlay.shadow.color)}`,
+    ] : []),
+  ];
+}
 
 /** Adds the overlay filters on top of the canvas `cv`. Returns the new inputs, the filter chains and the output label. */
 export function buildOverlayFilters({ overlays, times, defaultFontPath }: VideoGraphOverlays, ctx: Context, cv: string) {
@@ -83,18 +102,9 @@ export function buildOverlayFilters({ overlays, times, defaultFontPath }: VideoG
       ? `%{eif:floor(${units}/${60 * p})${pad}}:%{eif:mod(floor(${units}/${p}),60):d:2}${fraction}`
       : `%{eif:${decimals > 0 ? `floor(${units}/${p})` : units}${pad}}${fraction}`;
 
-    const borderWidth = lengthPx(overlay.border.width, H);
-    const alignFactor = { left: '0', center: '0.5', right: '1' }[overlay.align];
+    const alignFactor = alignFactors[overlay.align];
     const options = [
-      `fontfile=${escapeFilterValue(overlay.font?.absolutePath ?? defaultFontPath)}`,
-      `fontsize=${Math.max(1, Math.round(overlay.box.height * H))}`,
-      `fontcolor=${toColor(overlay.color)}`,
-      ...(borderWidth > 0 ? [`borderw=${borderWidth}`, `bordercolor=${toColor(overlay.border.color)}`] : []),
-      ...(overlay.shadow != null ? [
-        `shadowx=${Math.round(overlayPxToOutput(overlay.shadow.x, H))}`,
-        `shadowy=${Math.round(overlayPxToOutput(overlay.shadow.y, H))}`,
-        `shadowcolor=${toColor(overlay.shadow.color)}`,
-      ] : []),
+      ...textStyleOptions(overlay, Math.max(1, Math.round(overlay.box.height * H)), defaultFontPath, H),
       // aligned inside the box (the text width changes with the value), vertically centred
       `x=${box.x}${alignFactor === '0' ? '' : `+(${box.width}-text_w)*${alignFactor}`}`,
       `y=${box.y}+(${box.height}-text_h)/2`,
@@ -105,6 +115,81 @@ export function buildOverlayFilters({ overlays, times, defaultFontPath }: VideoG
     const next = newLabel('cv');
     filters.push(`[${out}]drawtext=${options}:text=${escapeFilterValue(text)}:${enable(lo, hi)}[${next}]`);
     out = next;
+  };
+
+  // Free text (B1, T26): one drawtext per line (and per typewriter step), each aligned in the box by its own width.
+  // Lines are placed by font metrics (y_align=font: y is the top of the font's ascent), so every line has the same
+  // baseline offset whatever its glyphs: line centre − (font_a + font_d) / 2. The text is literal (expansion=none).
+  const addText = (overlay: TextOverlay, raw: { start: number, end: number }, lo: number, hi: number) => {
+    // trailing spaces don't count for the alignment
+    const lines = splitTextLines(overlay.text).map((line) => line.trimEnd());
+    const box = getOverlayPixelBox(overlay.box, W, H);
+    const size = Math.max(1, Math.round(getTextOverlayFontSize(overlay) * H));
+    const centers = getTextLineCenters({ lineCount: lines.length, fontSize: size, lineSpacing: overlay.lineSpacing, boxTop: box.y, boxHeight: box.height });
+    const { entry } = overlay;
+    const entryFrames = getTextEntryFrames(entry, fps);
+    // frames since the raw start, and until the raw end
+    const since = `(${f0 - raw.start}+${n})`;
+    const remaining = `(${raw.end - f0}-${n})`;
+
+    // linear fades (textLayout.getTextOpacity); min() takes two arguments
+    const alphas = [
+      ...(overlay.fadeIn > 0 ? [`${since}/${formatNumber(overlay.fadeIn * fps)}`] : []),
+      ...(overlay.fadeOut > 0 ? [`${remaining}/${formatNumber(overlay.fadeOut * fps)}`] : []),
+    ];
+    const style = [
+      ...textStyleOptions(overlay, size, defaultFontPath, H),
+      'y_align=font',
+      'expansion=none',
+      ...(alphas.length > 0 ? [`alpha='${alphas.reduce((acc, a) => `min(${acc},${a})`, '1')}'`] : []),
+    ];
+
+    const xAligned = `${box.x}${alignFactors[overlay.align] === '0' ? '' : `+(${box.width}-text_w)*${alignFactors[overlay.align]}`}`;
+    let x = xAligned;
+    let yOffset = '';
+    if (entry.kind === 'slide' && entry.from != null) {
+      // Ease-out cubic (textLayout.getSlideRemaining) from just outside the frame side: the box, or the line if it's
+      // wider, is fully out at the start. `m` covers the border, the shadow and the glyphs outside the line cell.
+      const e = `pow(1-min(1,${since}/${entryFrames}),3)`;
+      const shadow = Math.max(Math.abs(overlay.shadow?.x ?? 0), Math.abs(overlay.shadow?.y ?? 0));
+      const m = size + lengthPx(overlay.border.width, H) + Math.ceil(overlayPxToOutput(shadow, H));
+      const blockTop = Math.min(box.y, centers[0]! - size / 2);
+      const blockBottom = Math.max(box.y + box.height, centers.at(-1)! + size / 2);
+      if (entry.from === 'left') x = `${xAligned}-(max(${box.x + box.width},${xAligned}+text_w)+${m})*${e}`;
+      if (entry.from === 'right') x = `${xAligned}+(${W}-min(${box.x},${xAligned})+${m})*${e}`;
+      if (entry.from === 'top') yOffset = `-${formatNumber(blockBottom + m)}*${e}`;
+      if (entry.from === 'bottom') yOffset = `+${formatNumber(H - blockTop + m)}*${e}`;
+    }
+
+    // `text` during frames [a, b) after the raw start (b undefined: until the end), cut to the chunk
+    const drawLine = (i: number, text: string, a: number, b: number | undefined, extraOptions: string[] = []) => {
+      const from = Math.max(lo, raw.start + a - f0);
+      const to = Math.min(hi, b != null ? raw.start + b - f0 : hi);
+      if (to <= from) return;
+      const y = `${formatNumber(centers[i]!)}-(font_a+font_d)/2${yOffset}`;
+      const next = newLabel('cv');
+      const options = [...style, ...extraOptions, `x='${x}'`, `y='${y}'`];
+      filters.push(`[${out}]drawtext=${options.join(':')}:text=${escapeFilterValue(text)}:${enable(from, to)}[${next}]`);
+      out = next;
+    };
+
+    if (entry.kind !== 'typewriter') {
+      lines.forEach((line, i) => {
+        if (line.trim() !== '') drawLine(i, line, 0, undefined);
+      });
+      return;
+    }
+
+    // Typewriter: one drawtext per step of each line (textLayout.getTypewriterStages), without if(). A partial line is
+    // drawn as `prefix\nwhole line` with the whole line pushed far below the frame (line_spacing): text_w is then the
+    // whole line's width, so the prefix is already where it ends up (it doesn't move as it grows, whatever the alignment).
+    getTypewriterStages(lines, entryFrames).forEach((stages, i) => {
+      const whole = lines[i]!;
+      stages.forEach(({ text, start, end }) => {
+        if (text === whole) drawLine(i, whole, start, end);
+        else drawLine(i, `${text}\n${whole}`, start, end, [`line_spacing=${10 * H}`]);
+      });
+    });
   };
 
   const addProgressBar = (overlay: ProgressBarOverlay, raw: { start: number, end: number }, lo: number, hi: number) => {
@@ -161,7 +246,7 @@ export function buildOverlayFilters({ overlays, times, defaultFontPath }: VideoG
       case 'image': { addImage(overlay, raw, lo, hi); break; }
       case 'countdown': { addCountdown(overlay, raw, lo, hi); break; }
       case 'progressBar': { addProgressBar(overlay, raw, lo, hi); break; }
-      // todo text overlays (v3): rendered by T26
+      case 'text': { addText(overlay, raw, lo, hi); break; }
       default:
     }
   });

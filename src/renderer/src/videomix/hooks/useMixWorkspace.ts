@@ -14,7 +14,7 @@ import type { UseMixProject } from './useMixProject';
 import type { LoadedMixProject, MissingOverlayFile, OverlayFileKind } from '../projectFile';
 import { getOverlayFiles } from '../projectFile';
 import { askForRecoverProject } from '../dialogs';
-import { classifyOpenedPaths, countClipsBySource, getMixProjectTitle, getSourceMeta, isSourceMetaChanged, replaceMusic } from '../workspace';
+import { classifyOpenedPaths, appendMusicTracks, countClipsBySource, createMusicTrack, getMixProjectTitle, getSourceMeta, isSourceMetaChanged } from '../workspace';
 
 const { basename, dirname } = window.require('node:path');
 
@@ -37,7 +37,7 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   withErrorHandling: WithErrorHandling,
   confirmDialog: ConfirmDialog,
 }) {
-  const { project, addSources, removeSource, relinkSource, updateSettings, setSourceMeta, relinkOverlayFile, relinkMusicTrack } = mixProject;
+  const { project, addSources, removeSource, relinkSource, updateSettings, setSourceMeta, relinkOverlayFile } = mixProject;
 
   // Sources whose file wasn't found (when opening/recovering the project or activating the source)
   const [missingSourceIds, setMissingSourceIds] = useState<ReadonlySet<string>>(new Set());
@@ -155,39 +155,22 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     setSourceMissing(sourceId, false);
   }, [clipCountBySource, closeMedia, confirmDialog, currentSourceId, project.sources, removeSource, setSourceMissing, workingRef]);
 
-  // Until the playlist UI (T27), an opened audio file replaces the whole music (as when there was a single music file)
-  const askToUseAsMusic = useCallback(async (musicPath: string) => {
+  // Opened audio files become the project music, or are added at the end of its playlist (C2)
+  const askToUseAsMusic = useCallback(async (musicPaths: string[]) => {
     const { musicPlaylist } = project.settings;
-    const name = basename(musicPath);
+    const name = musicPaths.map((p) => basename(p)).join('", "');
+    const hasMusic = musicPlaylist.tracks.length > 0;
     const confirmed = await confirmDialog({
       title: i18n.t('Project music'),
-      description: musicPlaylist.tracks.length > 0
-        ? i18n.t('Replace the project music with "{{name}}"?', { name })
+      description: hasMusic
+        ? i18n.t('Add "{{name}}" to the project music playlist?', { name })
         : i18n.t('Use "{{name}}" as the project music? It will be mixed with the audio of the clips.', { name }),
-      confirmButtonText: i18n.t('Use as music'),
+      confirmButtonText: hasMusic ? i18n.t('Add to music') : i18n.t('Use as music'),
       focusConfirm: true,
     });
-    if (confirmed) updateSettings({ musicPlaylist: replaceMusic(musicPlaylist, { id: nanoid(), filePath: musicPath, loopIfNew: false }) });
+    if (!confirmed) return;
+    updateSettings({ musicPlaylist: appendMusicTracks(musicPlaylist, musicPaths.map((musicPath) => createMusicTrack({ id: nanoid(), filePath: musicPath }))) });
   }, [confirmDialog, project.settings, updateSettings]);
-
-  // One question per missing track, in play order
-  const askToLocateMusic = useCallback(async (loaded: LoadedMixProject) => {
-    const missingIds = new Set(loaded.missingMusicTrackIds);
-    for (const track of loaded.project.settings.musicPlaylist.tracks.filter((t) => missingIds.has(t.id))) {
-      // eslint-disable-next-line no-await-in-loop
-      const confirmed = await confirmDialog({
-        title: i18n.t('Project music'),
-        description: i18n.t('The music file of the project was not found: {{path}}. Do you want to locate it?', { path: track.absolutePath }),
-        confirmButtonText: i18n.t('Locate...'),
-      });
-      if (confirmed) {
-        // eslint-disable-next-line no-await-in-loop
-        const { canceled, filePaths } = await showOpenDialog({ properties: ['openFile'], defaultPath: dirname(track.absolutePath), title: i18n.t('Project music') });
-        const [newPath] = filePaths;
-        if (!canceled && newPath != null) relinkMusicTrack(track.id, newPath);
-      }
-    }
-  }, [confirmDialog, relinkMusicTrack]);
 
   // After new/open/recover: the old file isn't part of the new project, so unload it, then show the first source found
   const handleProjectReplaced = useCallback(async (loaded: LoadedMixProject | undefined) => {
@@ -203,10 +186,13 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     if (missing.size === 0 && loaded.missingOverlayFiles.length > 0) {
       getSwal().toast.fire({ icon: 'warning', timer: 10000, title: i18n.t('{{numMissing}} overlay file(s) not found. Select the overlay in the Mix view and use "Locate...".', { numMissing: loaded.missingOverlayFiles.length }) });
     }
-    await askToLocateMusic(loaded);
+    // Relinked in the Music section of the mix settings, like the overlay files in their panel (T22)
+    if (missing.size === 0 && loaded.missingOverlayFiles.length === 0 && loaded.missingMusicTrackIds.length > 0) {
+      getSwal().toast.fire({ icon: 'warning', timer: 10000, title: i18n.t('{{numMissing}} music file(s) not found. Use "Locate..." in the Music section of the mix settings.', { numMissing: loaded.missingMusicTrackIds.length }) });
+    }
     const firstFound = loaded.project.sources.find((s) => !missing.has(s.id));
     if (firstFound != null) await activateSourceFile(firstFound);
-  }, [activateSourceFile, askToLocateMusic, closeMedia]);
+  }, [activateSourceFile, closeMedia]);
 
   const userNewProject = useCallback(async () => {
     await withErrorHandling(async () => {
@@ -256,8 +242,7 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     const newPaths = [...new Set(mediaPaths)].filter((p) => !existingPaths.has(p));
     if (newPaths.length > 0) addSources(newPaths);
 
-    const [firstAudioPath] = audioPaths;
-    if (firstAudioPath != null) await askToUseAsMusic(firstAudioPath);
+    if (audioPaths.length > 0) await askToUseAsMusic(audioPaths);
 
     // Show the first new video (switching sources loses nothing, the clips are in the project).
     // Opening a single file that is already a source switches to it, like clicking it in the list.

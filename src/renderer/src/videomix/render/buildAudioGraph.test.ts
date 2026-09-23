@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'vitest';
 
-import { buildAudioGraph, getCompensationExpr, getNormalizationGain, getPlacementFades } from './buildAudioGraph';
+import { buildAudioGraph, getCompensationExpr, getDuckingFilter, getMusicSchedule, getNormalizationGain, getPlacementFades, MAX_MUSIC_OCCURRENCES } from './buildAudioGraph';
 import { createEmptyMixProject, defaultMusicPlaylist } from '../types';
-import type { LoudnessMeasurement, MixClip, MixSettings, SoundOverlay } from '../types';
+import type { LoudnessMeasurement, MixClip, MixMusicPlaylist, MixMusicTrack, MixSettings, SoundOverlay } from '../types';
 import type { LayoutKeyframe, MixPlan } from '../planner/types';
 import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
+import { verifyFilterGraph } from './verifyFilterGraph';
 
 const rect = { x: 0, y: 0, width: 1920, height: 1080 };
 
@@ -16,7 +17,7 @@ const sourcePaths = { s1: '/media/h.mp4', s2: '/media/v.mp4', s3: '/media/sq.mp4
 
 const makeSettings = (settings: Partial<MixSettings> = {}): MixSettings => ({ ...createEmptyMixProject().settings, ...settings });
 
-// A single music track (the only music before T24's playlist)
+// A single music track (the only music before T24's playlist), without a measurement: unknown duration
 const withMusic = ({ volumeDb, loop }: { volumeDb: number, loop: boolean }): Pick<MixSettings, 'musicPlaylist'> => ({
   musicPlaylist: { ...defaultMusicPlaylist, tracks: [{ id: 'music', path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb }], loop },
 });
@@ -148,7 +149,8 @@ describe('buildAudioGraph', () => {
     const clips = [clip('a', 's3', 1, 7), clip('b', 's2', 0, 6, { muted: true }), clip('c', 's3', 0, 8)];
     const settings = makeSettings(withMusic({ volumeDb: 0, loop: false }));
     const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips, sourcePaths, settings, loudness: { a: { hasAudio: false }, c: { hasAudio: false } } });
-    expect(audioPass.inputs).toEqual([['-vn', '-i', '/media/m.mp3']]);
+    // unknown duration (no measurement) and no loop: plays once, only what the video needs is read
+    expect(audioPass.inputs).toEqual([['-vn', '-t', '11.600000', '-i', '/media/m.mp3']]);
     expect(audioPass).toMatchSnapshot();
   });
 
@@ -186,7 +188,7 @@ describe('buildAudioGraph: sound overlays (T21)', () => {
     expect(audioPass.filterComplex).toContain('adelay=96000S:all=1'); // 2s * 48000
     expect(audioPass.filterComplex).toContain('atrim=duration=1.5'); // 3.5 - 2
     // after the clips' compensation and (no music here) right before the limiter
-    expect(audioPass.filterComplex).toMatch(/\[clips]\[s\d+]amix=inputs=2:normalize=0:duration=first\[withSounds];\n\[withSounds]atrim.*alimiter/s);
+    expect(audioPass.filterComplex).toMatch(/\[clips]\[s\d+]amix=inputs=2:normalize=0:duration=first,asetpts=N\/SR\/TB\[withSounds];\n\[withSounds]atrim.*alimiter/s);
     expect(audioPass).toMatchSnapshot();
   });
 
@@ -196,7 +198,7 @@ describe('buildAudioGraph: sound overlays (T21)', () => {
     const loudness = { ...twoColumnLoudness, beep: measured(-16, -3) };
     const settings = makeSettings(withMusic({ volumeDb: -12, loop: true }));
     const { filterComplex } = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness, overlays, overlayTimes });
-    expect(filterComplex).toMatch(/\[mix]\[s\d+]amix=inputs=2:normalize=0:duration=first\[withSounds]/);
+    expect(filterComplex).toMatch(/\[mix]\[s\d+]amix=inputs=2:normalize=0:duration=first,asetpts=N\/SR\/TB\[withSounds]/);
   });
 
   test('a resolved zero-duration overlay (outside the video) is left out', () => {
@@ -242,5 +244,112 @@ describe('buildAudioGraph: sound overlays (T21)', () => {
     const withoutOverlays = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings({ fadeInOut: false }), loudness: twoColumnLoudness });
     const withEmptyOverlays = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings({ fadeInOut: false }), loudness: twoColumnLoudness, overlays: [], overlayTimes: new Map() });
     expect(withEmptyOverlays).toEqual(withoutOverlays);
+  });
+});
+
+describe('music playlist (C2, T27)', () => {
+  const track = (id: string, volumeDb = -12): MixMusicTrack => ({ id, path: `${id}.mp3`, absolutePath: `/media/${id}.mp3`, volumeDb });
+  const playlist = (tracks: MixMusicTrack[], patch: Partial<MixMusicPlaylist> = {}): MixMusicPlaylist => ({ ...defaultMusicPlaylist, tracks, ...patch });
+  const schedule = (occurrences: ReturnType<typeof getMusicSchedule>) => occurrences.map(({ track: { id }, start, crossfade }) => [id, start, crossfade]);
+
+  test('tracks in sequence with crossfades, the list repeated while looping', () => {
+    const occurrences = getMusicSchedule({ playlist: playlist([track('a'), track('b')], { crossfade: 2, loop: true }), durations: { a: 20, b: 15 }, totalDuration: 50 });
+    expect(schedule(occurrences)).toEqual([['a', 0, 0], ['b', 18, 2], ['a', 31, 2], ['b', 49, 2]]);
+  });
+
+  test('without loop, the list plays once', () => {
+    const occurrences = getMusicSchedule({ playlist: playlist([track('a'), track('b')], { crossfade: 2, loop: false }), durations: { a: 20, b: 15 }, totalDuration: 100 });
+    expect(schedule(occurrences)).toEqual([['a', 0, 0], ['b', 18, 2]]);
+  });
+
+  test('a single looped track crossfades into itself', () => {
+    const occurrences = getMusicSchedule({ playlist: playlist([track('a')], { crossfade: 1, loop: true }), durations: { a: 10 }, totalDuration: 25 });
+    expect(schedule(occurrences)).toEqual([['a', 0, 0], ['a', 9, 1], ['a', 18, 1]]);
+  });
+
+  test('the crossfade is at most half of the shorter track', () => {
+    const occurrences = getMusicSchedule({ playlist: playlist([track('a'), track('b')], { crossfade: 5, loop: false }), durations: { a: 20, b: 3 }, totalDuration: 100 });
+    expect(schedule(occurrences)).toEqual([['a', 0, 0], ['b', 18.5, 1.5]]);
+  });
+
+  test('a track of unknown duration plays to the end; empty tracks are skipped', () => {
+    const occurrences = getMusicSchedule({ playlist: playlist([track('a'), track('empty'), track('b'), track('c')], { crossfade: 2, loop: true }), durations: { a: 10, empty: 0, c: 10 }, totalDuration: 100 });
+    expect(schedule(occurrences)).toEqual([['a', 0, 0], ['b', 8, 2]]);
+    expect(occurrences[1]!.duration).toBe(Infinity);
+  });
+
+  test('stops at the end of the video, and after MAX_MUSIC_OCCURRENCES', () => {
+    expect(getMusicSchedule({ playlist: playlist([track('a')], { crossfade: 0, loop: true }), durations: { a: 10 }, totalDuration: 20 })).toHaveLength(2);
+    expect(getMusicSchedule({ playlist: playlist([track('a')], { crossfade: 0, loop: true }), durations: { a: 0.1 }, totalDuration: 3600 })).toHaveLength(MAX_MUSIC_OCCURRENCES);
+    expect(getMusicSchedule({ playlist: playlist([]), durations: {}, totalDuration: 20 })).toEqual([]);
+  });
+
+  test('graph: one input per occurrence, normalized per track, placed with equal-power fades', () => {
+    const settings = makeSettings({ musicPlaylist: playlist([track('a', -12), track('b', -6)], { crossfade: 2, loop: true }) });
+    const loudness = { ...twoColumnLoudness, a: measured(-10, -2, { duration: 7 }), b: measured(-20, -8, { duration: 5 }) };
+    const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness });
+    // a 0–7, b 5–10 (crossfade 2), a 8–15 (crossfade 2; half of b's 5 s would allow 2.5)
+    expect(audioPass.inputs.slice(3)).toEqual([
+      ['-vn', '-i', '/media/a.mp3'],
+      ['-vn', '-i', '/media/b.mp3'],
+      ['-vn', '-t', '3.600000', '-i', '/media/a.mp3'],
+    ]);
+    // a: min(-6, 24, 7) - 12 = -18; b: min(4, 24, 13) - 6 = -2
+    expect(audioPass.filterComplex).toContain('[3:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=7,volume=-18dB,afade=t=out:st=5:d=2:curve=qsin[m0]');
+    expect(audioPass.filterComplex).toContain('[4:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=5,volume=-2dB,afade=t=in:d=2:curve=qsin,afade=t=out:st=3:d=2:curve=qsin,adelay=240000S:all=1[m1]');
+    expect(audioPass.filterComplex).toContain('[5:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=7,volume=-18dB,afade=t=in:d=2:curve=qsin,adelay=384000S:all=1[m2]');
+    expect(audioPass.filterComplex).toContain('[m0][m1][m2]amix=inputs=3:normalize=0:duration=longest,asetpts=N/SR/TB,atrim=duration=11.5,afade=t=out:st=9.5:d=2[music]');
+    expect(verifyFilterGraph(audioPass)).toEqual([]);
+    expect(audioPass).toMatchSnapshot();
+  });
+
+  test('no crossfade: back to back, with anti-click fades', () => {
+    const settings = makeSettings({ musicPlaylist: playlist([track('a'), track('b')], { crossfade: 0, loop: false }) });
+    const loudness = { ...twoColumnLoudness, a: measured(-10, -2, { duration: 5 }), b: measured(-20, -8, { duration: 5 }) };
+    const { filterComplex } = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness });
+    expect(filterComplex).toContain('afade=t=out:st=4.99:d=0.01:curve=qsin[m0]');
+    expect(filterComplex).toContain('afade=t=in:d=0.01:curve=qsin,adelay=240000S:all=1[m1]');
+  });
+
+  test('a looped track of unknown duration is looped with -stream_loop (as before T27)', () => {
+    const settings = makeSettings(withMusic({ volumeDb: -12, loop: true }));
+    const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness: twoColumnLoudness });
+    expect(audioPass.inputs.at(-1)).toEqual(['-stream_loop', '-1', '-vn', '-t', '11.600000', '-i', '/media/m.mp3']);
+  });
+});
+
+describe('ducking (C1, T27)', () => {
+  const duckedSettings = (ducking: MixMusicPlaylist['ducking']) => makeSettings({
+    musicPlaylist: { ...defaultMusicPlaylist, tracks: [{ id: 'm', path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb: -12 }], ducking },
+  });
+  const loudness = { ...twoColumnLoudness, m: measured(-14, -1, { duration: 30 }) };
+
+  test('sidechaincompress whose maximum reduction is amountDb', () => {
+    // threshold = -10 / (1 - 1/20) = -10.526 dB
+    expect(getDuckingFilter({ enabled: true, amountDb: -10 })).toBe('sidechaincompress=threshold=0.297635:ratio=20:knee=1:attack=50:release=400:detection=rms:link=maximum');
+    expect(getDuckingFilter({ enabled: false, amountDb: -10 })).toBeUndefined();
+    expect(getDuckingFilter({ enabled: true, amountDb: 0 })).toBeUndefined();
+    // never below sidechaincompress's minimum threshold
+    expect(getDuckingFilter({ enabled: true, amountDb: -80 })).toContain('threshold=0.000977:');
+  });
+
+  test('the clips drive the compressor on the music, before the sounds and the limiter', () => {
+    const overlays = [{ id: 'beep', absolutePath: '/media/beep.wav', gainDb: 0 }];
+    const overlayTimes: ResolvedOverlayTimes = new Map([['beep', { start: 1, end: 2, rawStart: 1, rawEnd: 2, warnings: [] }]]);
+    const audioPass = buildAudioGraph({
+      plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: duckedSettings({ enabled: true, amountDb: -10 }), loudness: { ...loudness, beep: measured(-16, -3) }, overlays, overlayTimes,
+    });
+    expect(audioPass.filterComplex).toMatch(/\[clips]asplit=2\[clipsMix]\[clipsSidechain];\n\[clipsSidechain]volume=30dB,asoftclip=type=hard\[duckingControl];\n\[music]\[duckingControl]sidechaincompress=[^[]*\[duckedMusic];\n\[clipsMix]\[duckedMusic]amix=inputs=2:normalize=0:duration=first,asetpts=N\/SR\/TB\[mix];\n.*\[mix]\[s\d+]amix/s);
+    expect(verifyFilterGraph(audioPass)).toEqual([]);
+    expect(audioPass).toMatchSnapshot();
+  });
+
+  test('disabled, or without audible clips: no ducking', () => {
+    const disabled = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: duckedSettings({ enabled: false, amountDb: -10 }), loudness });
+    expect(disabled.filterComplex).not.toContain('sidechaincompress');
+    const clips = twoColumnClips.map((c) => ({ ...c, muted: true }));
+    const noClips = buildAudioGraph({ plan: twoColumnPlan, clips, sourcePaths, settings: duckedSettings({ enabled: true, amountDb: -10 }), loudness });
+    expect(noClips.filterComplex).not.toContain('sidechaincompress');
+    expect(noClips.filterComplex).toContain('[clips][music]amix');
   });
 });

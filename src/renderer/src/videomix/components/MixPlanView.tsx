@@ -1,7 +1,7 @@
 import type { CSSProperties, MouseEventHandler, PointerEvent as ReactPointerEvent, PointerEventHandler, ReactNode } from 'react';
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FaExclamationTriangle, FaImage, FaPlus, FaStopwatch, FaVolumeUp } from 'react-icons/fa';
+import { FaExclamationTriangle, FaFont, FaImage, FaPlus, FaStopwatch, FaVolumeUp } from 'react-icons/fa';
 import { MdLinearScale } from 'react-icons/md';
 
 import { useSegColors } from '../../contexts';
@@ -21,7 +21,7 @@ import type { OverlayFrameBox, OverlayLaneItem } from '../overlayTimeline';
 import { getOverlayLaneLabel, getOverlayTimeWarningText } from '../overlayTexts';
 import { getLinkedCountdown } from '../overlays/anchors';
 import { getCountdownTextAt, getOverlayFrames } from '../overlays/overlayFrames';
-import { getTextOverlayFontSize } from '../overlays/factories';
+import { getSlideOffset, getTextEntryFrames, getTextFontSizeForBox, getTextOpacity, getTextOverlayFontSize, getTypewriterCount, splitGraphemes, splitTextLines } from '../overlays/textLayout';
 
 const { pathToFileURL } = window.require('@electron/remote').require('./index.js');
 
@@ -30,6 +30,7 @@ const { pathToFileURL } = window.require('@electron/remote').require('./index.js
 // geometry the render uses (render/renderTimeline.ts), so what's shown here matches T13's render.
 // T22 adds the overlay lanes (images, countdowns/bars, sounds) with draggable blocks, the Mix view cursor where new
 // overlays are added, and the overlay boxes on the mini frame, which can be moved/resized there.
+// T26 adds the texts (in the countdowns/bars lane), drawn on the mini frame with their fades and entry animation.
 
 const LANE_HEIGHT = 22;
 const OVERLAY_ROW_HEIGHT = 16;
@@ -196,13 +197,32 @@ const OverlayBoxContent = memo(({ frameBox, fps }: { frameBox: OverlayFrameBox, 
     );
   }
   if (overlay.type === 'text') {
-    // Approximate (no fades or entry animation): the render is T26's
+    // Approximate (system font, border as a soft shadow), but with the render's layout (textLayout: lines centered in
+    // cells of the font size, the block centered in the box), fades and entry animation at that frame
+    // When it isn't on screen at that time (shown because it's selected, to place it): as it looks once fully in
+    const frames = times != null && frameBox.visible ? getOverlayFrames(times, fps) : undefined;
+    const frame = frames != null ? Math.round(elapsed * fps) : Infinity;
+    const entry = frames != null ? overlay.entry : { kind: 'none' as const, duration: 0 };
+    const lines = splitTextLines(overlay.text).map((line) => splitGraphemes(line.trimEnd()));
+    const total = lines.reduce((acc, l) => acc + l.length, 0);
+    const shown = entry.kind === 'typewriter' ? getTypewriterCount(frame, total, getTextEntryFrames(entry, fps)) : total;
+    // characters before each line
+    const before = lines.map((_, i) => lines.slice(0, i).reduce((acc, l) => acc + l.length, 0));
+    const { dx, dy } = getSlideOffset({ box: overlay.box, entry }, frame, fps);
+    const fontSize = getTextOverlayFontSize(overlay);
+    const lineHeight = 1 + overlay.lineSpacing;
     return (
-      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', textAlign: overlay.align, color: overlay.color, fontSize: `${getTextOverlayFontSize(overlay) * 100}cqh`, lineHeight: 1, gap: `${overlay.lineSpacing}em`, whiteSpace: 'pre', fontWeight: 600, textShadow: overlay.border.width > 0 ? `0 0 1px ${overlay.border.color}, 0 0 1px ${overlay.border.color}` : undefined }}>
-        {overlay.text.split('\n').map((line, i) => (
-          // eslint-disable-next-line react/no-array-index-key
-          <div key={i}>{line}</div>
-        ))}
+      <div style={{ position: 'absolute', left: 0, right: 0, top: '50%', transform: `translate(${dx * 100}cqw, calc(-50% + ${dy * 100}cqh))`, opacity: frames != null ? getTextOpacity(overlay, frame, frames.rawEnd - frames.rawStart, fps) : 1, textAlign: overlay.align, color: overlay.color, fontSize: `${fontSize * 100}cqh`, lineHeight, whiteSpace: 'pre', fontWeight: 600, textShadow: overlay.border.width > 0 ? `0 0 1px ${overlay.border.color}, 0 0 1px ${overlay.border.color}` : undefined, pointerEvents: 'none' }}>
+        {lines.map((chars, i) => {
+          // typewriter: the hidden part keeps its place, so the visible one is where the render draws it
+          const count = Math.max(0, shown - before[i]!);
+          const visible = chars.slice(0, count).join('');
+          const hidden = chars.slice(count).join('');
+          return (
+            // eslint-disable-next-line react/no-array-index-key
+            <div key={i} style={{ height: `${lineHeight}em` }}>{visible}{hidden !== '' && <span style={{ visibility: 'hidden' }}>{hidden}</span>}</div>
+          );
+        })}
       </div>
     );
   }
@@ -288,7 +308,7 @@ function MixPlanView({ clips, settings, selectedClipId, onSelect, mixOverlays, o
   const { getSegColor } = useSegColors();
   const [hoverTime, setHoverTime] = useState<number>();
 
-  const { plan, resolved, selectedOverlayId, setSelectedOverlayId, cursorTime, setCursorTime, update, commitTransient, cancelTransient, userAddImage, userAddCountdown, userAddProgressBar, userAddSound } = mixOverlays;
+  const { plan, resolved, selectedOverlayId, setSelectedOverlayId, cursorTime, setCursorTime, update, commitTransient, cancelTransient, userAddImage, userAddCountdown, userAddProgressBar, userAddText, userAddSound } = mixOverlays;
 
   const clipsById = useMemo(() => new Map(clips.map((clip) => [clip.id, clip])), [clips]);
   const getColor = useCallback((clip: MixClip) => getSegColor({ segColorIndex: clip.color }).desaturate(0.1).lightness(darkMode ? 40 : 55).string(), [darkMode, getSegColor]);
@@ -400,7 +420,9 @@ function MixPlanView({ clips, settings, selectedClipId, onSelect, mixOverlays, o
     const aspect = lockAspect && start.box.height > 0 ? (start.box.width * frame.width) / (start.box.height * frame.height) : undefined;
     const box = applyOverlayBoxDrag({ start: start.box, handle: drag.handle, dx: (e.clientX - drag.startX) * drag.scale, dy: (e.clientY - drag.startY) * drag.scale, frame, aspect });
     drag.moved = true;
-    update(start.id, { box }, { transient: true });
+    // A text's size follows its box height (its lines fill it), like the countdown's
+    if (start.type === 'text' && box.height !== start.box.height) update(start.id, { box, fontSize: getTextFontSizeForBox(start.text, start.lineSpacing, box.height) }, { transient: true });
+    else update(start.id, { box }, { transient: true });
   }, [plan, update]);
 
   const handleBoxPointerUp = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
@@ -480,6 +502,7 @@ function MixPlanView({ clips, settings, selectedClipId, onSelect, mixOverlays, o
         <div className="no-user-select" style={{ display: 'flex', alignItems: 'center', gap: '.3em', flexWrap: 'wrap' }}>
           <FaPlus style={{ fontSize: '.7em', opacity: 0.7 }} />
           <button type="button" style={toolbarButtonStyle} onClick={userAddImage} title={t('Adds a PNG image at the cursor')}><FaImage />{t('Add image…')}</button>
+          <button type="button" style={toolbarButtonStyle} onClick={userAddText}><FaFont />{t('Add text')}</button>
           <button type="button" style={toolbarButtonStyle} onClick={userAddCountdown}><FaStopwatch />{t('Add countdown')}</button>
           <button type="button" style={toolbarButtonStyle} onClick={userAddProgressBar}><MdLinearScale />{t('Add progress bar')}</button>
           <button type="button" style={toolbarButtonStyle} onClick={userAddSound}><FaVolumeUp />{t('Add sound…')}</button>

@@ -2,11 +2,15 @@ import type { MixPlan } from '../planner/types';
 import type { MixSettings, mixPresets } from '../types';
 import { buildVideoGraph, formatNumber } from './buildVideoGraph';
 import type { RenderClip, VideoGraphSettings } from './buildVideoGraph';
+import { getVideoEncodeArgs } from './encoderArgs';
+import type { ResolvedEncoder } from './encoderArgs';
 import type { VideoGraphOverlays } from './overlayFilters';
 import { MAX_CHUNK_SECONDS, getRenderChunks } from './renderChunks';
 import type { RenderChunk } from './renderChunks';
 import { getRenderTimeline } from './renderTimeline';
 import type { RenderTimeline } from './renderTimeline';
+
+export type { ResolvedEncoder } from './encoderArgs';
 
 // Whole render as independent ffmpeg invocations (ADR-001 "Arquitectura de render"): video chunks (run 2 at a time),
 // one audio pass over the whole duration, then concat demuxer (-c copy) + audio mux. Pure: it only returns args and
@@ -91,11 +95,6 @@ export function getChunkConcurrency({ height, cpuCount }: { height: number, cpuC
   return height > 1080 || cpuCount < 4 ? 1 : 2;
 }
 
-/** Encoding args shared by every chunk: they must be identical for the concat demuxer to copy the streams. */
-export function getVideoEncodeArgs({ fps, crf, preset }: { fps: number } & EncodingOptions) {
-  return ['-c:v', 'libx264', '-preset', preset, '-crf', String(crf), '-pix_fmt', 'yuv420p', '-r', String(fps)];
-}
-
 /**
  * Build the whole render job for a plan. `plan.width/height` is the output size (the plan is computed for it, also
  * for the low-resolution preview). `encoding` overrides the project's CRF/preset (preview).
@@ -107,6 +106,9 @@ export function buildRenderJob({
   sourcePaths,
   settings,
   encoding,
+  // Software by default (as before T25): callers that don't resolve hardware availability themselves (dev
+  // scripts, tests, previews before T25) always get libx264/libx265 for `settings.encoder.codec`.
+  resolvedEncoder,
   workDir,
   outPath,
   maxChunkSeconds = MAX_CHUNK_SECONDS,
@@ -119,6 +121,8 @@ export function buildRenderJob({
   sourcePaths: Record<string, string>,
   settings: MixSettings,
   encoding?: Partial<EncodingOptions> | undefined,
+  /** Which encoder to actually use (T25): resolved from `settings.encoder` against `detectEncoders` (useMixRender). */
+  resolvedEncoder?: ResolvedEncoder | undefined,
   workDir: string,
   outPath: string,
   maxChunkSeconds?: number | undefined,
@@ -131,7 +135,10 @@ export function buildRenderJob({
   const timeline: RenderTimeline = getRenderTimeline(plan, { fps, gap: settings.gap.width, transitionDuration: settings.transition.duration });
   const { totalFrames } = timeline;
   const duration = totalFrames / fps;
-  const encodeArgs = getVideoEncodeArgs({ fps, crf: encoding?.crf ?? settings.crf, preset: encoding?.preset ?? settings.preset });
+  const { codec, hardware } = resolvedEncoder ?? { codec: settings.encoder.codec, hardware: 'none' };
+  const { globalArgs: encoderGlobalArgs, outputArgs: encodeArgs } = getVideoEncodeArgs({
+    codec, hardware, fps, crf: encoding?.crf ?? settings.crf, preset: encoding?.preset ?? settings.preset,
+  });
   const graphSettings: VideoGraphSettings = settings;
   const common = ['-hide_banner', '-nostdin', '-y'];
 
@@ -152,6 +159,7 @@ export function buildRenderJob({
       duration: graph.frames / fps,
       args: [
         ...common,
+        ...encoderGlobalArgs,
         ...graph.inputs.flat(),
         '-/filter_complex', graphPath,
         '-map', `[${graph.outLabel}]`,

@@ -45,3 +45,18 @@ export async function askForRecoverProject({ projectName, savedAt, numSources, n
   if (isDenied) return 'discard';
   return 'later';
 }
+
+/** Name of a new overlay style preset (T26). Undefined if cancelled. */
+export async function askForStylePresetName(defaultName: string): Promise<string | undefined> {
+  const { value } = await getSwal().Swal.fire<string>({
+    title: i18n.t('Save style'),
+    text: i18n.t('The style can then be applied to other overlays of the same type, in any project.'),
+    input: 'text',
+    inputValue: defaultName,
+    showCancelButton: true,
+    confirmButtonText: i18n.t('Save'),
+    cancelButtonText: i18n.t('Cancel'),
+    inputValidator: (v) => (v.trim() === '' ? i18n.t('Enter a name') : null),
+  });
+  return value != null ? value.trim() : undefined;
+}

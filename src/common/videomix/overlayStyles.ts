@@ -42,10 +42,13 @@ export type TextEntry = z.infer<typeof textEntrySchema>;
 
 /**
  * Style of a text overlay (everything but `text`, times, anchor and box).
- * The font size comes from the box: `box.height = n · size + (n − 1) · lineSpacing · size` for `n` lines, so a single
- * line has `size = box.height`, like the countdown.
+ * `fontSize` (T26) is a fraction of the output frame height. The UI keeps the box fitted to the lines
+ * (`box.height = n · size + (n − 1) · lineSpacing · size` for `n` lines, see overlays/textLayout.ts), so adding a line
+ * grows the box instead of shrinking the text. Missing (v3 projects saved before T26): derived from the box that way.
  */
 export const textOverlayStyleSchema = z.object({
+  /** Fraction of the output height. Not limited here (like the boxes): validateMixProject checks it. */
+  fontSize: z.number().optional(),
   align: overlayTextAlignSchema,
   color: overlayColorSchema,
   /** TTF/OTF file; if missing, the bundled font. */

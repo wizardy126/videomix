@@ -1,5 +1,8 @@
 import { OVERLAY_REFERENCE_HEIGHT } from '../types';
+import { fitTextBox, getTextBlockHeight, splitTextLines } from './textLayout';
 import type { CountdownOverlay, ImageOverlay, OverlayAnchor, OverlayBox, ProgressBarOverlay, SoundOverlay, TextOverlay } from '../types';
+
+export { getTextOverlayFontSize } from './textLayout';
 
 // Defaults for new overlays (T22 places them at the Mix view cursor with an absolute anchor).
 
@@ -96,8 +99,17 @@ export function createProgressBarOverlay({ id, name, start = 0, linkedCountdownI
   };
 }
 
-/** Centered white text with a black border and the bundled font, fading in and out, without an entry animation. */
+/** Default text size: 8 % of the frame height (86 px at 1080p). */
+export const DEFAULT_TEXT_FONT_SIZE = 0.08;
+
+/**
+ * Centered white text with a black border and the bundled font, fading in and out, without an entry animation. The box
+ * is fitted to the lines (textLayout.fitTextBox).
+ */
 export function createTextOverlay({ id, name, start = 0, text }: CommonParams & { text: string }): TextOverlay {
+  const lineSpacing = 0.2;
+  const fontSize = DEFAULT_TEXT_FONT_SIZE;
+  const height = getTextBlockHeight(fontSize, splitTextLines(text).length, lineSpacing);
   return {
     id,
     name,
@@ -105,24 +117,16 @@ export function createTextOverlay({ id, name, start = 0, text }: CommonParams & 
     anchor: absoluteAnchor(start),
     text,
     duration: DEFAULT_TEXT_DURATION,
-    box: getOverlayBoxPreset('center', { width: 0.6, height: 0.1 }),
+    box: fitTextBox(getOverlayBoxPreset('center', { width: 0.6, height: Math.min(1, height) }), { text, fontSize, lineSpacing }),
+    fontSize,
     align: 'center',
     color: '#ffffff',
     border: { width: 4, color: '#000000' },
-    lineSpacing: 0.2,
+    lineSpacing,
     fadeIn: 0.5,
     fadeOut: 0.5,
     entry: { kind: 'none', duration: 0.5 },
   };
-}
-
-/**
- * Font size of a text overlay, as a fraction of the output height: its lines (and the `lineSpacing` between them) fill
- * the box height, so one line is as high as the box (like the countdown).
- */
-export function getTextOverlayFontSize({ text, box, lineSpacing }: Pick<TextOverlay, 'text' | 'box' | 'lineSpacing'>) {
-  const lines = text.split('\n').length;
-  return box.height / (lines + (lines - 1) * lineSpacing);
 }
 
 /** 0 dB = as loud as the clips (after normalization). */

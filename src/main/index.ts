@@ -40,6 +40,7 @@ import * as compatPlayer from './compatPlayer.js';
 import { downloadMediaUrl } from './ffmpeg.js';
 import { hasDisabledNetworking, setDisableNetworking } from './networking.js';
 import { measureLoudness } from './videomix/loudness.js';
+import { detectEncoders } from './videomix/encoders.js';
 
 
 electronUnhandled({ showDialog: true, logger: (err) => logger.error('electron-unhandled', err) });
@@ -480,7 +481,7 @@ const remoteApiLegacy = {
   lossyMode,
   pathToFileURL,
   hasDisabledNetworking,
-  videomix: { measureLoudness },
+  videomix: { measureLoudness, detectEncoders },
 };
 
 export type RemoteApiLegacy = typeof remoteApiLegacy;

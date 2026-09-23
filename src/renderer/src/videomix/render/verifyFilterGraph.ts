@@ -111,7 +111,9 @@ export function verifyFilterGraph(
       if (name === 'drawtext') {
         if (!options['fontfile']) issues.push(`chain ${i}: drawtext without fontfile`);
         const text = options['text'] ?? '';
-        if (text === '' || text.split('%{').length !== text.split('}').length) issues.push(`chain ${i}: bad drawtext text ${text}`);
+        // literal texts (expansion=none, T26) may contain anything but must not be empty
+        const balanced = options['expansion'] === 'none' || text.split('%{').length === text.split('}').length;
+        if (text === '' || !balanced) issues.push(`chain ${i}: bad drawtext text ${text}`);
         if (options['enable'] == null) issues.push(`chain ${i}: drawtext without enable`);
       }
     }
@@ -148,7 +150,7 @@ export function verifyFilterGraph(
     }
   }
   for (const [label, n] of consumed) {
-    const input = /^(\d+):[av]$/.exec(label);
+    const input = /^(\d+):[av](?::\d+)?$/.exec(label);
     if (input != null) {
       if (Number(input[1]) >= inputs.length) issues.push(`input ${label} does not exist (${inputs.length} inputs)`);
       if (n !== 1) issues.push(`input ${label} consumed ${n} times`);

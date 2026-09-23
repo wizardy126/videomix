@@ -47,8 +47,9 @@ export const getClipsNeedingLoudness = (clips: MixClip[]) => clips.filter((clip)
  * (clips with the same file and range share one measurement).
  *
  * - `musicTracks` (T12b, per track since T24): when given, also measures the whole file of every music track (its own
- *   cache key, `getMusicLoudnessCacheKey`) and returns it under the track id, the input `buildAudioGraph` expects for
- *   the music normalization gain.
+ *   cache key, `getMusicLoudnessCacheKey`; looped if very short, T21b) and returns it under the track id, the input
+ *   `buildAudioGraph` expects for the music normalization gain and, with its `duration`, the playlist's crossfades
+ *   (T27). A cache entry without `duration` (from before T21) is re-measured.
  * - `sounds` (T21): when given, also measures the whole file of every sound overlay (same per-file cache key as the
  *   music) and returns each one under its overlay id. Its measurement carries `duration` (the file's length), which
  *   `getSoundDurations` turns into the `soundDurations` `resolveOverlayTimes` needs; a cache entry from before T21
@@ -105,13 +106,11 @@ export async function ensureLoudness({ project, musicTracks, sounds, onProgress,
   keyedClips.forEach(({ clip, filePath, key }) => {
     if (project.loudnessCache?.[key] == null && !toMeasure.has(key)) toMeasure.set(key, { filePath, start: clip.start, end: clip.end });
   });
-  keyedTracks.forEach(({ track, key }) => {
-    if (project.loudnessCache?.[key] == null && !toMeasure.has(key)) toMeasure.set(key, { filePath: track.absolutePath });
-  });
-  // Whole-file, so also re-measures a cache entry from before T21 (no `duration`)
-  keyedSounds.forEach(({ sound, key }) => {
+  // Whole files, so a cache entry from before T21 (no `duration`) is re-measured: the sounds' and the tracks' durations
+  // place them in the video (resolveOverlayTimes, the playlist's crossfades of T27)
+  [...keyedTracks.map(({ track, key }) => ({ key, filePath: track.absolutePath })), ...keyedSounds.map(({ sound, key }) => ({ key, filePath: sound.absolutePath }))].forEach(({ key, filePath }) => {
     const cached = project.loudnessCache?.[key];
-    if ((cached == null || cached.duration == null) && !toMeasure.has(key)) toMeasure.set(key, { filePath: sound.absolutePath });
+    if ((cached == null || cached.duration == null) && !toMeasure.has(key)) toMeasure.set(key, { filePath });
   });
 
   const newEntries: Record<string, LoudnessMeasurement> = {};

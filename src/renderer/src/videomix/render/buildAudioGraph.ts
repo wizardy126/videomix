@@ -1,7 +1,7 @@
 import invariant from 'tiny-invariant';
 
 import { formatFfmpegNumber, getFixChannelLayoutFilter } from '../../../../common/util';
-import type { LoudnessMeasurement, MixClip, MixSettings, SoundOverlay } from '../types';
+import type { LoudnessMeasurement, MixClip, MixMusicPlaylist, MixMusicTrack, MixSettings, SoundOverlay } from '../types';
 import type { ColumnPlacement, MixPlan } from '../planner/types';
 import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
 
@@ -24,11 +24,33 @@ export const DECLICK_DURATION = 0.01;
 /** The music fades out over max(this, D) at the end of the video (04-diseno §5.2). */
 export const MUSIC_FADE_OUT = 2;
 export const AUDIO_SAMPLE_RATE = 48000;
+/**
+ * Ducking (C1) attack and release (ms, as ffmpeg's `sidechaincompress` takes them): the music goes down smoothly when a
+ * clip starts sounding and comes back up gently in the silences, without pumping on every syllable.
+ */
+export const DUCKING_ATTACK = 50;
+export const DUCKING_RELEASE = 400;
+/**
+ * The ducking's control signal is the clips' sum boosted by this (dB) and hard-clipped at 0 dBFS: any clip sounding above
+ * ≈ -30 dBFS (the clips are normalized to -16 LUFS) saturates it, so the music always goes down by exactly the
+ * ducking amount, never more; room tone/noise below ≈ -40 dBFS barely moves it.
+ */
+export const DUCKING_SIDECHAIN_GAIN = 30;
+// Highest ratio of sidechaincompress: over the saturated control signal, (0 dB - threshold)·(1 - 1/ratio) = amount
+const DUCKING_RATIO = 20;
+/** More repetitions of a looped playlist than this are cut (a tiny jingle looped over a long video): one input each. */
+export const MAX_MUSIC_OCCURRENCES = 500;
+// Tracks shorter than this (s) are skipped: they can't be crossfaded, and an empty file would loop forever
+const MIN_MUSIC_TRACK_DURATION = 0.05;
 
 // Extra input duration read after the clip (s), trimmed exactly in the graph (ADR-001 §6)
 const INPUT_MARGIN = 0.1;
 // Times closer than this are the same instant (plan times are sums of floats)
 const EPS = 1e-6;
+// After every amix: it sometimes (a race between its inputs' threads) outputs frames without timestamps, and then the
+// compensation's `t` is NaN (volume 0), the fades misplace and the output can end at the first clip's end (T27, seen
+// with ffmpeg 8.0 in about 1 of 4 renders with music). The samples are right, so the timestamps are rebuilt from them.
+const AMIX_TIMESTAMPS = 'asetpts=N/SR/TB';
 
 const fmt = (n: number) => {
   const rounded = Math.round(n * 1e6) / 1e6;
@@ -150,15 +172,137 @@ export interface AudioPass {
   outLabel: string,
 }
 
+/** One play of a music track in the video (C2). */
+export interface MusicOccurrence {
+  track: MixMusicTrack,
+  /** In the video (s). */
+  start: number,
+  /** The whole track (s); `Infinity` if unknown (no measurement or no `duration`), then it plays to the end. */
+  duration: number,
+  /** Crossfade with the previous occurrence (s), 0 for the first one. */
+  crossfade: number,
+}
+
+/**
+ * Where each music track plays (C2, 04-diseno §5.2): the tracks in order, each one starting `crossfade` before the end
+ * of the previous one, and the whole list again (and again) if `loop`, until the end of the video. The crossfade is
+ * shortened to half of the shorter of both tracks. A track of unknown duration (see `MusicOccurrence.duration`) ends
+ * the schedule; tracks shorter than `MIN_MUSIC_TRACK_DURATION` are skipped.
+ *
+ * @param durations track id → duration of the whole file (s), `LoudnessMeasurement.duration`.
+ */
+export function getMusicSchedule({ playlist, durations, totalDuration }: {
+  playlist: Pick<MixMusicPlaylist, 'tracks' | 'crossfade' | 'loop'>,
+  durations: Record<string, number | undefined>,
+  totalDuration: number,
+}): MusicOccurrence[] {
+  const tracks = playlist.tracks.map((track) => ({ track, duration: durations[track.id] ?? Infinity }))
+    .filter(({ duration }) => duration >= MIN_MUSIC_TRACK_DURATION);
+  const occurrences: MusicOccurrence[] = [];
+  for (let i = 0; tracks.length > 0 && occurrences.length < MAX_MUSIC_OCCURRENCES; i += 1) {
+    if (i >= tracks.length && !playlist.loop) break;
+    const { track, duration } = tracks[i % tracks.length]!;
+    const previous = occurrences.at(-1);
+    const crossfade = previous != null ? Math.max(0, Math.min(playlist.crossfade, previous.duration / 2, duration / 2)) : 0;
+    const start = previous != null ? previous.start + previous.duration - crossfade : 0;
+    if (start >= totalDuration - EPS) break;
+    occurrences.push({ track, start, duration, crossfade });
+  }
+  return occurrences;
+}
+
+/**
+ * `sidechaincompress` for the ducking (C1), main input the music and sidechain the saturated clips' sum (see
+ * `DUCKING_SIDECHAIN_GAIN`), or undefined if disabled or with nothing to reduce. With the control signal at 0 dBFS
+ * while clips sound, the threshold is set so that the maximum ratio takes exactly `amountDb` off the music; hard knee.
+ */
+export function getDuckingFilter(ducking: MixMusicPlaylist['ducking']) {
+  const reduction = -ducking.amountDb;
+  if (!ducking.enabled || !(reduction > 0)) return undefined;
+  const thresholdDb = -reduction / (1 - 1 / DUCKING_RATIO);
+  // sidechaincompress's minimum threshold (-60 dB), i.e. at most ~57 dB of ducking
+  const threshold = Math.max(10 ** (thresholdDb / 20), 1 / 1024);
+  return `sidechaincompress=threshold=${fmt(threshold)}:ratio=${DUCKING_RATIO}:knee=1:attack=${DUCKING_ATTACK}:release=${DUCKING_RELEASE}:detection=rms:link=maximum`;
+}
+
+/**
+ * Music of the playlist (C2), as inputs and filters ending in `[music]` (stereo, `totalDuration` long or shorter if the
+ * list doesn't loop), or undefined without music. One input per occurrence (`getMusicSchedule`), each one normalized like
+ * a clip (T12b) plus its `volumeDb`, trimmed to the track's duration, with equal-power (`qsin`) fades for its crossfades
+ * (`DECLICK_DURATION` where there's none) and delayed to its start; all summed with `amix`, trimmed to the video and
+ * faded out at the end over max(`MUSIC_FADE_OUT`, D).
+ *
+ * Rather than a chain of `acrossfade`s, every occurrence is placed on its own (the clips' pattern): the graph does
+ * exactly what `getMusicSchedule` says, and a long looped list isn't a long chain of filters depending on each other.
+ *
+ * A track without a measurement only gets its `volumeDb`, and one of unknown duration is played to the end of the video,
+ * looped with `-stream_loop -1` (without crossfade) if the playlist loops; `ensureLoudness` normally gives both.
+ */
+function buildMusic({ playlist, loudness, totalDuration, fadeDuration, firstInputIndex }: {
+  playlist: MixMusicPlaylist,
+  loudness: Record<string, LoudnessMeasurement>,
+  totalDuration: number,
+  fadeDuration: number,
+  firstInputIndex: number,
+}) {
+  const durations = Object.fromEntries(playlist.tracks.map((track) => [track.id, loudness[track.id]?.duration]));
+  const occurrences = getMusicSchedule({ playlist, durations, totalDuration });
+  if (occurrences.length === 0) return undefined;
+
+  const inputs: string[][] = [];
+  const chains: { input: string, filters: string[] }[] = [];
+  occurrences.forEach(({ track, start, duration, crossfade }, i) => {
+    const inputIndex = firstInputIndex + inputs.length;
+    const next = occurrences[i + 1];
+    inputs.push([
+      ...(!Number.isFinite(duration) && playlist.loop ? ['-stream_loop', '-1'] : []),
+      '-vn',
+      // don't decode a long last track to the end
+      ...(next == null && totalDuration - start + INPUT_MARGIN < duration ? ['-t', formatFfmpegNumber(totalDuration - start + INPUT_MARGIN)] : []),
+      '-i', track.absolutePath,
+    ]);
+    // Normalized like the clips (T12b), so 0 dB means "as loud as the clips". A silent or unmeasured (T21b) track has
+    // no normalization gain; without any measurement (shouldn't happen once ensureLoudness is called with the tracks),
+    // only volumeDb applies too.
+    const measurement = loudness[track.id];
+    const gain = measurement?.hasAudio === true ? getNormalizationGain(measurement) + track.volumeDb : track.volumeDb;
+    const fadeIn = i > 0 ? Math.max(crossfade, DECLICK_DURATION) : 0;
+    const fadeOut = next != null ? Math.max(next.crossfade, DECLICK_DURATION) : 0;
+    chains.push({
+      input: `${inputIndex}:a:0`,
+      filters: [
+        measurement?.hasAudio === true ? getFixChannelLayoutFilter(measurement) : undefined,
+        `aresample=${AUDIO_SAMPLE_RATE}`,
+        'aformat=sample_fmts=fltp:channel_layouts=stereo',
+        // exact length (the next track starts from it), unknown: to the end of the video (trimmed below)
+        Number.isFinite(duration) ? `atrim=duration=${fmt(duration)}` : undefined,
+        `volume=${fmt(gain)}dB`,
+        fadeIn > 0 ? `afade=t=in:d=${fmt(fadeIn)}:curve=qsin` : undefined,
+        fadeOut > 0 ? `afade=t=out:st=${fmt(duration - fadeOut)}:d=${fmt(fadeOut)}:curve=qsin` : undefined,
+        start > 0 ? `adelay=${Math.round(start * AUDIO_SAMPLE_RATE)}S:all=1` : undefined,
+      ].filter((filter) => filter != null),
+    });
+  });
+
+  const fadeOut = Math.min(Math.max(MUSIC_FADE_OUT, fadeDuration), totalDuration);
+  const end = [`atrim=duration=${fmt(totalDuration)}`, `afade=t=out:st=${fmt(totalDuration - fadeOut)}:d=${fmt(fadeOut)}`];
+  const [single] = chains;
+  if (chains.length === 1 && single != null) return { inputs, filters: [`[${single.input}]${[...single.filters, ...end].join(',')}[music]`] };
+  const filters = chains.map(({ input, filters: chain }, i) => `[${input}]${chain.join(',')}[m${i}]`);
+  filters.push(`${chains.map((_chain, i) => `[m${i}]`).join('')}${[`amix=inputs=${chains.length}:normalize=0:duration=longest`, AMIX_TIMESTAMPS, ...end].join(',')}[music]`);
+  return { inputs, filters };
+}
+
 /**
  * Audio of the whole mix, rendered in one separate pass and muxed with the video chunks with `-c copy` (ADR-001).
  * Graph (04-diseno §5.2):
  * - per audible clip (not muted, with audio): `-vn -ss/-t` input → stereo 48 kHz → `volume` (normalization + gainDb)
  *   → equal-power `afade` in/out (see getPlacementFades) → `adelay` to its start;
  * - `amix` (normalize=0) → simultaneity compensation (getCompensationExpr) → pad to the video duration;
- * - optional music (the first track of `musicPlaylist`; the whole playlist is T27): looped with `-stream_loop -1` if
- *   the playlist loops, trimmed, normalized like a clip plus the track's `volumeDb` (T12b: 0 dB means as loud as the
- *   clips) and faded out;
+ * - optional music (C2, T27): the tracks of `musicPlaylist` in sequence with crossfades, the whole list repeated if it
+ *   loops (`getMusicSchedule`), each one normalized like a clip plus its `volumeDb` (T12b: 0 dB means as loud as the
+ *   clips), trimmed and faded out at the end; with `ducking` (C1) it goes down by `amountDb` while clips sound
+ *   (`getDuckingFilter`), then it's summed with the clips;
  * - `alimiter` at `LIMITER_CEILING`, then the global fade in/out if `fadeInOut`.
  *
  * Without any audible clip the clips' mix is silence, so the output always has an audio track of the video's duration.
@@ -170,7 +314,9 @@ export interface AudioPass {
  * @param sourcePaths `sourceId` → media path (the same paths the loudness was measured on, `MixSource.absolutePath`).
  * @param duration exact output duration (frames / fps); defaults to `plan.duration`.
  * @param loudness measurements by clip id, from `ensureLoudness`. Every audible clip of the plan must have one. The
- *   music track's measurement (T12b), if any, is under its track id; without one, only `volumeDb` applies. A sound
+ *   music tracks' measurements (T12b, T24) are under their track ids: they give the normalization gain and the
+ *   track's duration (to schedule the crossfades); without one, only `volumeDb` applies and the track plays to the end
+ *   of the video. A sound
  *   overlay's (T21) is under its own overlay id, like a clip's.
  * @param overlays sound overlays to mix in (T21), with `overlayTimes` (`resolveOverlayTimes`'s result): each one is
  *   normalized to `LOUDNESS_TARGET` plus its `gainDb`, delayed to its resolved start and trimmed to its resolved end
@@ -237,34 +383,30 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
   } else {
     const compensation = getCompensationExpr(audible, totalDuration);
     filters.push(`${clipLabels.join('')}${[
-      clipLabels.length > 1 ? `amix=inputs=${clipLabels.length}:normalize=0:duration=longest` : 'anull',
+      ...(clipLabels.length > 1 ? [`amix=inputs=${clipLabels.length}:normalize=0:duration=longest`, AMIX_TIMESTAMPS] : ['anull']),
       compensation != null ? `volume='${compensation}':eval=frame` : undefined,
       pad,
     ].filter((filter) => filter != null).join(',')}[clips]`);
   }
 
   let mix = 'clips';
-  const { musicPlaylist } = settings;
-  const [music] = musicPlaylist.tracks;
+  const music = buildMusic({ playlist: settings.musicPlaylist, loudness, totalDuration, fadeDuration: settings.transition.duration, firstInputIndex: inputs.length });
   if (music != null) {
-    const inputIndex = inputs.length;
-    inputs.push([...(musicPlaylist.loop ? ['-stream_loop', '-1'] : []), '-vn', '-i', music.absolutePath]);
-    const fadeOut = Math.min(Math.max(MUSIC_FADE_OUT, settings.transition.duration), totalDuration);
-    // Normalized like the clips (T12b), so 0 dB means "as loud as the clips"; without a measurement (shouldn't happen
-    // once ensureLoudness is called with the music), only volumeDb applies.
-    const musicMeasurement = loudness[music.id];
-    const musicGain = musicMeasurement?.hasAudio === true ? getNormalizationGain(musicMeasurement) + music.volumeDb : music.volumeDb;
-    filters.push(
-      `[${inputIndex}:a:0]${[
-        `aresample=${AUDIO_SAMPLE_RATE}`,
-        'aformat=sample_fmts=fltp:channel_layouts=stereo',
-        `atrim=duration=${fmt(totalDuration)}`,
-        `volume=${fmt(musicGain)}dB`,
-        `afade=t=out:st=${fmt(totalDuration - fadeOut)}:d=${fmt(fadeOut)}`,
-      ].join(',')}[music]`,
-      // duration=first: the clips' mix is padded to the video duration, a shorter (unlooped) music just ends
-      '[clips][music]amix=inputs=2:normalize=0:duration=first[mix]',
-    );
+    inputs.push(...music.inputs);
+    filters.push(...music.filters);
+    const ducking = clipLabels.length > 0 ? getDuckingFilter(settings.musicPlaylist.ducking) : undefined;
+    if (ducking != null) {
+      // Ducking (C1): the clips' sum (after the compensation) drives a compressor on the music, see getDuckingFilter
+      filters.push(
+        '[clips]asplit=2[clipsMix][clipsSidechain]',
+        `[clipsSidechain]volume=${DUCKING_SIDECHAIN_GAIN}dB,asoftclip=type=hard[duckingControl]`,
+        `[music][duckingControl]${ducking}[duckedMusic]`,
+        // duration=first: the clips' mix is padded to the video duration, a shorter (unlooped) music just ends
+        `[clipsMix][duckedMusic]amix=inputs=2:normalize=0:duration=first,${AMIX_TIMESTAMPS}[mix]`,
+      );
+    } else {
+      filters.push(`[clips][music]amix=inputs=2:normalize=0:duration=first,${AMIX_TIMESTAMPS}[mix]`);
+    }
     mix = 'mix';
   }
 
@@ -298,7 +440,7 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
   });
   if (soundLabels.length > 0) {
     // duration=first: the mix so far is already padded/trimmed to the video's duration
-    filters.push(`[${mix}]${soundLabels.join('')}amix=inputs=${soundLabels.length + 1}:normalize=0:duration=first[withSounds]`);
+    filters.push(`[${mix}]${soundLabels.join('')}amix=inputs=${soundLabels.length + 1}:normalize=0:duration=first,${AMIX_TIMESTAMPS}[withSounds]`);
     mix = 'withSounds';
   }
 

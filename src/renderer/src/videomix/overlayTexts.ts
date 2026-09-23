@@ -20,7 +20,7 @@ export function getOverlayTypeLabel(type: MixOverlayType) {
 export function getOverlayLaneLabel(lane: OverlayLaneId) {
   switch (lane) {
     case 'images': { return i18n.t('Images'); }
-    case 'countdownsAndBars': { return i18n.t('Countdowns and bars'); }
+    case 'countdownsAndBars': { return i18n.t('Texts, countdowns and bars'); }
     case 'sounds': { return i18n.t('Sounds'); }
     default: { return lane; }
   }

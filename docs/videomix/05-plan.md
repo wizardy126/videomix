@@ -53,9 +53,9 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T22 | Overlays: pistas en la vista Mix y panel de propiedades | M7 | Opus | T19 | hecha |
 | T23 | Overlays: i18n, manual y revisión final | M7 | Sonnet | T20, T21, T22 | hecha |
 | T24 | v2: modelo v3 y migración (todas las mejoras) | M8 | Opus | — | hecha |
-| T25 | v2: encoders por hardware y H.265 (D2) | M8 | Sonnet | T24 | pendiente |
-| T26 | v2: textos libres y presets globales (B1, B2) | M8 | Opus | T24 | pendiente |
-| T27 | v2: lista de música y ducking (C1, C2) | M8 | Opus | T24 | pendiente |
+| T25 | v2: encoders por hardware y H.265 (D2) | M8 | Sonnet | T24 | hecha |
+| T26 | v2: textos libres y presets globales (B1, B2) | M8 | Opus | T24 | hecha |
+| T27 | v2: lista de música y ducking (C1, C2) | M8 | Opus | T24 | hecha |
 | T28 | v2: render incremental con caché (D1) | M8 | Opus | T25 | pendiente |
 | T29 | v2: salida vertical 9:16 y 1:1 (B5) | M8 | Opus | T24 | pendiente |
 | T30 | v2: fijar clips a un momento y grupos (A4) | M8 | Opus | T29 | pendiente |

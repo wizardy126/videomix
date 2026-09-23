@@ -80,16 +80,11 @@ export function createMusicTrack({ id, filePath, volumeDb = DEFAULT_MUSIC_VOLUME
 }
 
 /**
- * The playlist with `filePath` as its only track, for the single-music flows that predate the playlist UI (T27): keeps
- * the volume of the first track it replaces, and `loop` if there was music (else `loopIfNew`).
+ * The playlist with `tracks` added at the end (C2, opened audio files). Music that is new (no tracks yet) doesn't loop,
+ * as a single opened music file didn't before the playlist (T24).
  */
-export function replaceMusic(playlist: MixMusicPlaylist, { id, filePath, loopIfNew }: { id: string, filePath: string, loopIfNew: boolean }): MixMusicPlaylist {
-  const [previous] = playlist.tracks;
-  return {
-    ...playlist,
-    tracks: [createMusicTrack({ id, filePath, volumeDb: previous?.volumeDb })],
-    loop: previous != null ? playlist.loop : loopIfNew,
-  };
+export function appendMusicTracks(playlist: MixMusicPlaylist, tracks: MixMusicTrack[]): MixMusicPlaylist {
+  return playlist.tracks.length > 0 ? { ...playlist, tracks: [...playlist.tracks, ...tracks] } : { ...playlist, tracks, loop: false };
 }
 
 /** Window title part for the project: file name without extension (or `untitledName`), plus `*` if there are unsaved changes. */

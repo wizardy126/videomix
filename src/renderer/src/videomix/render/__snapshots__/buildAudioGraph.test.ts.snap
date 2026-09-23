@@ -5,7 +5,7 @@ exports[`buildAudioGraph > clips without music 1`] = `
   "filterComplex": "[0:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=4dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=5.5:d=0.5:curve=qsin,adelay=0S:all=1[a0];
 [1:a:0]asetpts=PTS-STARTPTS,channelmap=0|1|2|3,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=8,volume=-6dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=7.5:d=0.5:curve=qsin,adelay=0S:all=1[a1];
 [2:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=11dB,afade=t=in:d=0.5:curve=qsin,afade=t=out:st=5.99:d=0.01:curve=qsin,adelay=264000S:all=1[a2];
-[a0][a1][a2]amix=inputs=3:normalize=0:duration=longest,volume='0.707107+0.292893*clip((t-7.5)/0.5,0,1)':eval=frame,apad=whole_dur=11.5[clips];
+[a0][a1][a2]amix=inputs=3:normalize=0:duration=longest,asetpts=N/SR/TB,volume='0.707107+0.292893*clip((t-7.5)/0.5,0,1)':eval=frame,apad=whole_dur=11.5[clips];
 [clips]atrim=duration=11.5,alimiter=limit=0.891251:level=disabled:latency=1,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]",
   "inputs": [
     [
@@ -63,12 +63,14 @@ exports[`buildAudioGraph > muted clips and clips without audio are left out 1`] 
 exports[`buildAudioGraph > no audible clip: silence of the video duration, with music 1`] = `
 {
   "filterComplex": "anullsrc=r=48000:cl=stereo,atrim=duration=11.5[clips];
-[0:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=11.5,volume=0dB,afade=t=out:st=9.5:d=2[music];
-[clips][music]amix=inputs=2:normalize=0:duration=first[mix];
+[0:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=0dB,atrim=duration=11.5,afade=t=out:st=9.5:d=2[music];
+[clips][music]amix=inputs=2:normalize=0:duration=first,asetpts=N/SR/TB[mix];
 [mix]atrim=duration=11.5,alimiter=limit=0.891251:level=disabled:latency=1,afade=t=in:d=0.5,afade=t=out:st=11:d=0.5,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]",
   "inputs": [
     [
       "-vn",
+      "-t",
+      "11.600000",
       "-i",
       "/media/m.mp3",
     ],
@@ -82,9 +84,9 @@ exports[`buildAudioGraph > with looped music, global fades and the exact video d
   "filterComplex": "[0:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=4dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=5.5:d=0.5:curve=qsin,adelay=0S:all=1[a0];
 [1:a:0]asetpts=PTS-STARTPTS,channelmap=0|1|2|3,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=8,volume=-6dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=7.5:d=0.5:curve=qsin,adelay=0S:all=1[a1];
 [2:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=11dB,afade=t=in:d=0.5:curve=qsin,afade=t=out:st=5.99:d=0.01:curve=qsin,adelay=264000S:all=1[a2];
-[a0][a1][a2]amix=inputs=3:normalize=0:duration=longest,volume='0.707107+0.292893*clip((t-7.5)/0.5,0,1)':eval=frame,apad=whole_dur=11.516667[clips];
-[3:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=11.516667,volume=-12dB,afade=t=out:st=9.516667:d=2[music];
-[clips][music]amix=inputs=2:normalize=0:duration=first[mix];
+[a0][a1][a2]amix=inputs=3:normalize=0:duration=longest,asetpts=N/SR/TB,volume='0.707107+0.292893*clip((t-7.5)/0.5,0,1)':eval=frame,apad=whole_dur=11.516667[clips];
+[3:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,volume=-12dB,atrim=duration=11.516667,afade=t=out:st=9.516667:d=2[music];
+[clips][music]amix=inputs=2:normalize=0:duration=first,asetpts=N/SR/TB[mix];
 [mix]atrim=duration=11.516667,alimiter=limit=0.891251:level=disabled:latency=1,afade=t=in:d=0.5,afade=t=out:st=11.016667:d=0.5,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]",
   "inputs": [
     [
@@ -118,6 +120,8 @@ exports[`buildAudioGraph > with looped music, global fades and the exact video d
       "-stream_loop",
       "-1",
       "-vn",
+      "-t",
+      "11.616667",
       "-i",
       "/media/m.mp3",
     ],
@@ -131,9 +135,9 @@ exports[`buildAudioGraph: sound overlays (T21) > mixed in after the compensation
   "filterComplex": "[0:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=4dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=5.5:d=0.5:curve=qsin,adelay=0S:all=1[a0];
 [1:a:0]asetpts=PTS-STARTPTS,channelmap=0|1|2|3,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=8,volume=-6dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=7.5:d=0.5:curve=qsin,adelay=0S:all=1[a1];
 [2:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=11dB,afade=t=in:d=0.5:curve=qsin,afade=t=out:st=5.99:d=0.01:curve=qsin,adelay=264000S:all=1[a2];
-[a0][a1][a2]amix=inputs=3:normalize=0:duration=longest,volume='0.707107+0.292893*clip((t-7.5)/0.5,0,1)':eval=frame,apad=whole_dur=11.5[clips];
+[a0][a1][a2]amix=inputs=3:normalize=0:duration=longest,asetpts=N/SR/TB,volume='0.707107+0.292893*clip((t-7.5)/0.5,0,1)':eval=frame,apad=whole_dur=11.5[clips];
 [3:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=1.5,volume=1dB,adelay=96000S:all=1[s3];
-[clips][s3]amix=inputs=2:normalize=0:duration=first[withSounds];
+[clips][s3]amix=inputs=2:normalize=0:duration=first,asetpts=N/SR/TB[withSounds];
 [withSounds]atrim=duration=11.5,alimiter=limit=0.891251:level=disabled:latency=1,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]",
   "inputs": [
     [
@@ -167,6 +171,127 @@ exports[`buildAudioGraph: sound overlays (T21) > mixed in after the compensation
       "-vn",
       "-i",
       "/media/beep.wav",
+    ],
+  ],
+  "outLabel": "aout",
+}
+`;
+
+exports[`ducking (C1, T27) > the clips drive the compressor on the music, before the sounds and the limiter 1`] = `
+{
+  "filterComplex": "[0:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=4dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=5.5:d=0.5:curve=qsin,adelay=0S:all=1[a0];
+[1:a:0]asetpts=PTS-STARTPTS,channelmap=0|1|2|3,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=8,volume=-6dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=7.5:d=0.5:curve=qsin,adelay=0S:all=1[a1];
+[2:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=11dB,afade=t=in:d=0.5:curve=qsin,afade=t=out:st=5.99:d=0.01:curve=qsin,adelay=264000S:all=1[a2];
+[a0][a1][a2]amix=inputs=3:normalize=0:duration=longest,asetpts=N/SR/TB,volume='0.707107+0.292893*clip((t-7.5)/0.5,0,1)':eval=frame,apad=whole_dur=11.5[clips];
+[3:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=30,volume=-14dB,atrim=duration=11.5,afade=t=out:st=9.5:d=2[music];
+[clips]asplit=2[clipsMix][clipsSidechain];
+[clipsSidechain]volume=30dB,asoftclip=type=hard[duckingControl];
+[music][duckingControl]sidechaincompress=threshold=0.297635:ratio=20:knee=1:attack=50:release=400:detection=rms:link=maximum[duckedMusic];
+[clipsMix][duckedMusic]amix=inputs=2:normalize=0:duration=first,asetpts=N/SR/TB[mix];
+[4:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=1,volume=0dB,adelay=48000S:all=1[s4];
+[mix][s4]amix=inputs=2:normalize=0:duration=first,asetpts=N/SR/TB[withSounds];
+[withSounds]atrim=duration=11.5,alimiter=limit=0.891251:level=disabled:latency=1,afade=t=in:d=0.5,afade=t=out:st=11:d=0.5,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]",
+  "inputs": [
+    [
+      "-vn",
+      "-ss",
+      "1.000000",
+      "-t",
+      "6.100000",
+      "-i",
+      "/media/h.mp4",
+    ],
+    [
+      "-vn",
+      "-ss",
+      "2.000000",
+      "-t",
+      "8.100000",
+      "-i",
+      "/media/h.mp4",
+    ],
+    [
+      "-vn",
+      "-ss",
+      "0.000000",
+      "-t",
+      "6.100000",
+      "-i",
+      "/media/v.mp4",
+    ],
+    [
+      "-vn",
+      "-t",
+      "11.600000",
+      "-i",
+      "/media/m.mp3",
+    ],
+    [
+      "-vn",
+      "-i",
+      "/media/beep.wav",
+    ],
+  ],
+  "outLabel": "aout",
+}
+`;
+
+exports[`music playlist (C2, T27) > graph: one input per occurrence, normalized per track, placed with equal-power fades 1`] = `
+{
+  "filterComplex": "[0:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=-6dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=5.5:d=0.5:curve=qsin,adelay=0S:all=1[a0];
+[1:a:0]asetpts=PTS-STARTPTS,channelmap=0|1|2|3,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=8,volume=-6dB,afade=t=in:d=0.01:curve=qsin,afade=t=out:st=7.5:d=0.5:curve=qsin,adelay=0S:all=1[a1];
+[2:a:0]asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=6,volume=1dB,afade=t=in:d=0.5:curve=qsin,afade=t=out:st=5.99:d=0.01:curve=qsin,adelay=264000S:all=1[a2];
+[a0][a1][a2]amix=inputs=3:normalize=0:duration=longest,asetpts=N/SR/TB,volume='0.707107+0.292893*clip((t-7.5)/0.5,0,1)':eval=frame,apad=whole_dur=11.5[clips];
+[3:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=7,volume=-18dB,afade=t=out:st=5:d=2:curve=qsin[m0];
+[4:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=5,volume=-2dB,afade=t=in:d=2:curve=qsin,afade=t=out:st=3:d=2:curve=qsin,adelay=240000S:all=1[m1];
+[5:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,atrim=duration=7,volume=-18dB,afade=t=in:d=2:curve=qsin,adelay=384000S:all=1[m2];
+[m0][m1][m2]amix=inputs=3:normalize=0:duration=longest,asetpts=N/SR/TB,atrim=duration=11.5,afade=t=out:st=9.5:d=2[music];
+[clips][music]amix=inputs=2:normalize=0:duration=first,asetpts=N/SR/TB[mix];
+[mix]atrim=duration=11.5,alimiter=limit=0.891251:level=disabled:latency=1,afade=t=in:d=0.5,afade=t=out:st=11:d=0.5,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[aout]",
+  "inputs": [
+    [
+      "-vn",
+      "-ss",
+      "1.000000",
+      "-t",
+      "6.100000",
+      "-i",
+      "/media/h.mp4",
+    ],
+    [
+      "-vn",
+      "-ss",
+      "2.000000",
+      "-t",
+      "8.100000",
+      "-i",
+      "/media/h.mp4",
+    ],
+    [
+      "-vn",
+      "-ss",
+      "0.000000",
+      "-t",
+      "6.100000",
+      "-i",
+      "/media/v.mp4",
+    ],
+    [
+      "-vn",
+      "-i",
+      "/media/a.mp3",
+    ],
+    [
+      "-vn",
+      "-i",
+      "/media/b.mp3",
+    ],
+    [
+      "-vn",
+      "-t",
+      "3.600000",
+      "-i",
+      "/media/a.mp3",
     ],
   ],
   "outLabel": "aout",

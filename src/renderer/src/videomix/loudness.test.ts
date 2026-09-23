@@ -89,12 +89,14 @@ describe('ensureLoudness', () => {
 
   test('measures the music tracks too, whole file, under their track ids (T12b, T24)', async () => {
     const deps = makeDeps();
+    // whole file (no start): with its duration, like src/main's measureLoudness
+    deps.measureLoudness.mockImplementation(async ({ start }) => (start == null ? { ...measurement(-20), duration: 180 } : measurement(-20 - start)));
     const onCacheEntries = vi.fn();
     const project = makeProject([clip('c1', 's1', 0, 5)]);
     const musicTracks = [{ id: 'm1', absolutePath: '/media/m.mp3' }];
     const result = await ensureLoudness({ project, musicTracks, deps, onCacheEntries });
 
-    expect(result['m1']).toEqual(measurement(-20)); // start defaults to 0 in the mock
+    expect(result['m1']).toEqual({ ...measurement(-20), duration: 180 });
     expect(deps.measureLoudness).toHaveBeenCalledTimes(2);
     expect(deps.measureLoudness).toHaveBeenCalledWith({ filePath: '/media/m.mp3', abortSignal: undefined });
     expect(deps.stat).toHaveBeenCalledTimes(2); // one clip's file, one music file
@@ -105,6 +107,18 @@ describe('ensureLoudness', () => {
     const result2 = await ensureLoudness({ project: { ...project, loudnessCache: entries }, musicTracks, deps: deps2 });
     expect(result2).toEqual(result);
     expect(deps2.measureLoudness).not.toHaveBeenCalled();
+  });
+
+  test('re-measures a music track cached without its duration (T27 needs it for the crossfades)', async () => {
+    const deps = makeDeps();
+    const onCacheEntries = vi.fn();
+    const project = makeProject([]);
+    const musicTracks = [{ id: 'm1', absolutePath: '/media/m.mp3' }];
+    await ensureLoudness({ project, musicTracks, deps, onCacheEntries }); // the mock gives no duration
+    const entries = onCacheEntries.mock.calls[0]![0] as Record<string, LoudnessMeasurement>;
+    const deps2 = makeDeps();
+    await ensureLoudness({ project: { ...project, loudnessCache: entries }, musicTracks, deps: deps2 });
+    expect(deps2.measureLoudness).toHaveBeenCalledTimes(1);
   });
 
   test('measures sound overlays too, whole file, under their overlay id (T21)', async () => {
