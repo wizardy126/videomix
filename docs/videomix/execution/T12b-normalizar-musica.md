@@ -21,7 +21,7 @@ Normalizar la música a −16 LUFS igual que los clips, con `volumeDb` relativo 
 3. **Valor por defecto** del volumen de música: **−12 dB**. Hay que cambiarlo en `defaultMixSettings` y en el valor inicial al elegir un fichero en `MixSettingsDialog` y `useMixWorkspace`.
 4. **UI**: texto de ayuda del volumen ("0 dB = as loud as the clips"), con traducción al español.
 5. **Tests**: snapshots actualizados y un test de la ganancia de la música.
-6. **Demo**: `script/videomix/audioDemo.ts --music` debe mostrar la música a unos −28 LUFS por debajo de los clips con −12 dB. Mide solo la música si se puede aislar.
+6. **Demo**: `script/videomix/audioDemo.ts --music` con −12 dB debe dejar la música en torno a −28 LUFS (12 LU por debajo de los clips). Mide solo la música si se puede aislar.
 
 ## Criterios de aceptación
 
