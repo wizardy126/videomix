@@ -226,33 +226,59 @@ Escala orientativa: 1 % de relleno durante 5 s ≈ un re-layout ≈ 3 posiciones
 
 `random.ts`: PRNG mulberry32 con semilla y barajado Fisher-Yates determinista (`getBaseOrder`). No se usa `Math.random`.
 
-## 4. Render de vídeo con ffmpeg (provisional → ADR-001)
+## 4. Render de vídeo con ffmpeg
 
-El **spike T09** decidirá la estrategia concreta y la documentará en `decisiones/ADR-001-render.md`. Las restricciones y la propuesta de partida son estas.
+Decidido en el spike T09: **[ADR-001](decisiones/ADR-001-render.md)**, con las medidas, los comandos reproducibles y un ejemplo comentado (`script/videomix/spike/example-anim-chunk.sh`).
 
-### 4.1 Restricciones
+### 4.1 Estrategia
 
-- Salida `libx264` + AAC en MP4, `yuv420p`, `-r fps`, resolución `W×H`.
-- Cada clip se lee con `-ss start -t dur -i path`, o bien con el filtro `trim`.
-- La cadena de cada clip: `fps` → `crop` → `scale` → `setsar=1` → `format`.
-- **Sustitución en columna**: `xfade` con el tipo global. Requiere que ambas entradas tengan el mismo tamaño, algo que se cumple cuando no hay re-layout simultáneo.
-- **Re-layout animado**: los anchos varían durante `D` segundos. `crop` y `scale` no cambian de tamaño de salida por frame de forma fiable. Alternativas a evaluar en el spike:
-  - (a) Capas del ancho máximo durante la animación, `overlay` con `x` en función de `t` y ocultación por orden de apilado o máscara (`alphamerge` / `geq`).
-  - (b) `crop` con expresiones `x(t)` sobre capas más anchas + `overlay`.
-  - (c) Render por tramos: los tramos estables con layout fijo y el tramo de animación a frames interpolados.
-  - (d) Si nada es viable o es demasiado lento: **fallback** a la transición global de fotograma completo entre layout viejo y nuevo. Habría que consultarlo con el usuario, porque eligió la animación.
-- **Relleno con desenfoque**: la copia del clip adyacente se escala para cubrir, pasa por `boxblur`/`gblur` y se recorta al hueco. En letterbox, la copia es del propio clip.
-- **Separación** (gap): lienzo `color=c=<gap.color>:s=WxH` de fondo y columnas con `overlay` en su `x`.
-- **Fade inicio/fin**: `fade=t=in` / `fade=t=out` sobre el resultado final (y `afade` en el audio).
-- **Rendimiento**: un solo `filter_complex` con decenas de entradas puede ser lento o consumir mucha memoria. Hay que evaluar el **render por bloques** (cortes en instantes sin transiciones activas), con los bloques concatenados mediante el concat demuxer sin recodificar. Esto además da progreso por bloque y permite reanudar.
+- **Salida**: `libx264` + AAC en MP4, `yuv420p`, `-r fps`, `W×H`.
+- **Render por bloques**:
+  - Se corta siempre al principio y al final de cada re-layout animado, y en los tramos estables largos (> 15 s) en fotogramas sin transición activa.
+  - Cada bloque es un proceso ffmpeg con su grafo. Se ejecutan **2 en paralelo**; 1 a 2160p o con menos de 4 núcleos.
+  - Los bloques se unen con el **concat demuxer `-c copy`**.
+  - El audio va en **una pasada aparte** para toda la duración, y se mezcla al unir.
+  - Límites en fotogramas: `round(t·fps)`.
+- **Grafo por fichero** siempre: `-/filter_complex <ruta>`. El grafo único de 2 min ya ocupa ~23k caracteres, y Windows admite 32 767.
+- **Entrada por clip**: `-ss <s−p> -t <dur+0,5+p> -i`, con un margen previo `p = min(0,1 s, s)`.
+  - Cabecera: `setpts=PTS-p/TB,fps=F:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=N,setpts=PTS-STARTPTS`.
+  - Nunca `setpts=PTS-STARTPTS` antes de `fps`: desincroniza hasta un fotograma.
+- **Columna de ancho constante en el bloque**: `crop` (de `geometry.ts`) → `scale=w:H` → `setsar=1`. En pillarbox/letterbox, sobre el fondo desenfocado del propio clip.
+- **Columna de ancho variable** (re-layout animado): técnica **"capa de columna"**.
+  1. Por fotograma se calcula `w(t)` (`smoothstep` entre `LayoutKeyframe`), `C(t) = getCropForAspect(max, min, w/H)` y la escala `H/C.h`.
+  2. Se aplica `crop` fijo de la unión de los `C(t)`.
+  3. `scale=…:eval=frame` (tamaño variable).
+  4. `overlay=x=…:y=…:eval=frame` sobre una base fija del ancho máximo de la columna en el bloque.
+
+  La ventana visible es `[0, w(t))` de la capa.
+- **Sustitución en columna**: `xfade` entre capas del mismo tamaño, encadenadas con su `offset`.
+  - En bloques estables es exacto con cualquier tipo.
+  - Durante un re-layout, los tipos con geometría (`wipe*`, `slide*`, `smooth*`, `circleopen`) se calculan sobre el ancho máximo de la capa: una pequeña desviación aceptada.
+- **Composición**:
+  1. Lienzo `color=<gap.color>`.
+  2. Columnas con `overlay` **de izquierda a derecha**: cada capa tapa el sobrante de la anterior.
+  3. Barras de separación en `x(t)` si hay animación.
+  4. Rellenos encima.
+  5. `fade` in/out global en el primer y el último bloque.
+- **Relleno desenfocado**: la copia de la columna adyacente (o del propio clip en pillarbox/letterbox) se escala a 1/8 para cubrir, pasa por `boxblur` y se reescala al tamaño del hueco. Es 2,5× más rápido que `gblur` a resolución completa. El relleno final aparece con un fundido alfa de `D`.
+- **Expresiones por fotograma**: se escriben como suma plana de escalones `v0+Δ1*gte(t,T1)+…`, **nunca `if()` anidado**, porque ffmpeg falla a partir de ~98 niveles.
+- **Progreso**: fotogramas de los bloques terminados más `frame=` de los bloques en curso (`-progress`), dividido entre los fotogramas totales. El audio y la unión son < 2 %.
+- **Invariantes que necesita el render** (a cargo del planificador):
+  - las columnas conservan su orden durante una animación;
+  - una columna que aparece o desaparece lo hace con ancho 0 junto a su vecina derecha;
+  - las transiciones que coinciden con una animación caen dentro de su intervalo.
 
 ### 4.2 Módulos
 
-- **`render/buildVideoGraph.ts`** (puro): recibe `MixPlan`, clips y fuentes y devuelve `{ inputs: string[][], filterComplex: string, maps: string[] }`, o un array de bloques.
+- **`render/renderChunks.ts`** (puro): `getRenderChunks(plan, settings)` devuelve los bloques `[f0, f1)` en fotogramas.
+- **`render/buildVideoGraph.ts`** (puro): recibe `MixPlan`, clips, fuentes, ajustes y un bloque, y devuelve `{ inputs: string[][], filterComplex: string, frames: number }`.
 - **`render/buildAudioGraph.ts`** (puro): ver §5.
-- **`render/buildRenderArgs.ts`** (puro): compone los argumentos finales de ffmpeg.
-- **Ejecución**: `runFfmpegWithProgress` (main) con la duración total, o por bloques, más `concat`.
-- **Tests**: snapshots de argumentos para planes de ejemplo e invariantes, como que las etiquetas del grafo están todas conectadas y que ningún `crop` se sale del frame. Además, un test opcional con ffmpeg real si está disponible, que se omite si no.
+- **`render/buildRenderArgs.ts`** (puro): compone los argumentos finales de ffmpeg de cada bloque, del audio y del concat + mux.
+- **Ejecución**: `runFfmpegWithProgress` (main) por bloque con concurrencia 2, pasada de audio y `concat`.
+- **Tests**:
+  - snapshots de argumentos para planes de ejemplo;
+  - invariantes: etiquetas conectadas, ningún `crop` fuera del fotograma, suma de fotogramas de los bloques igual al total, ningún bloque que corte un `xfade`;
+  - un test opcional con ffmpeg real si está disponible, que se omite si no.
 
 ## 5. Audio
 
@@ -318,7 +344,11 @@ La vista **Timeline del montaje** (plan) es una pestaña o panel alternativo al 
 - **Recuperación**: autoguardado con debounce en `userData/videomix-recovery/<sessionId>.vmx-recovery` (ver T04). Al arrancar, si existe uno más reciente que el guardado, se ofrece recuperarlo.
 - **Fuentes que faltan**: se prueba la ruta relativa, luego la absoluta y, si ninguna existe, se pide al usuario que la localice.
 
-### 6.3 Clips ↔ segmentos (recomendación; lo concreta T07)
+### 6.3 Clips ↔ segmentos (concretado en T07 → [ADR-002](decisiones/ADR-002-clips-segmentos.md))
+
+Se implementa la sincronización bidireccional recomendada. Los detalles (todo segmento con fin es un clip, marcadores fuera del proyecto, agrupación de pasos de undo, clip seleccionado = segmento actual) están en el ADR.
+
+Recomendación original:
 
 - **Fuente de verdad**: `MixProject.clips`.
 - **Al activar una fuente**: `loadCutSegments` con los clips de esa fuente, usando `segId = clip.id`.

@@ -1023,6 +1023,9 @@ function useSegments({ filePath, workingRef, setWorking, setProgress, videoStrea
     findSegmentsAtCursor,
     currentCutSegOrWholeTimeline,
     segColorCounter,
+    // VideoMix: the timeline shows the clips of the active source exactly as they are in the project (ids, times,
+    // colors), so it needs the raw setter (safeSetCutSegments would turn an invalid clip into a marker)
+    setCutSegments,
   };
 }
 

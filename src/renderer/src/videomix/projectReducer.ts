@@ -26,7 +26,9 @@ export type MixProjectAction =
   /** New list order. Ids not listed keep their relative order at the end; unknown ids are ignored. */
   | { type: 'reorderClips', ids: string[] }
   | { type: 'updateSettings', patch: Partial<MixSettings> }
-  | { type: 'setLoudnessCache', loudnessCache: Record<string, LoudnessMeasurement> | undefined };
+  | { type: 'setLoudnessCache', loudnessCache: Record<string, LoudnessMeasurement> | undefined }
+  /** Several edits applied in order as one undo step (e.g. the changes made in the timeline, or splitting a clip). */
+  | { type: 'batch', actions: MixProjectAction[] };
 
 // Optional keys are removed instead of being stored as `undefined`, so saved files and deep comparisons stay clean.
 function withoutUndefined<T extends object>(obj: T, keys: (keyof T & string)[]): T {
@@ -121,6 +123,10 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
     case 'setLoudnessCache': {
       if (project.loudnessCache === action.loudnessCache) return project;
       return withoutUndefined({ ...project, loudnessCache: action.loudnessCache }, ['loudnessCache']);
+    }
+
+    case 'batch': {
+      return action.actions.reduce((acc, a) => mixProjectReducer(acc, a), project);
     }
 
     default: {

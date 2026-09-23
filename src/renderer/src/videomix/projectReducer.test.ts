@@ -128,4 +128,20 @@ describe('mixProjectReducer', () => {
     expect(next.loudnessCache).toBe(loudnessCache);
     expect('loudnessCache' in mixProjectReducer(next, { type: 'setLoudnessCache', loudnessCache: undefined })).toBe(false);
   });
+
+  test('batch applies the actions in order and keeps the object if nothing changes', () => {
+    const project = makeProject();
+    const next = mixProjectReducer(project, {
+      type: 'batch',
+      actions: [
+        { type: 'updateClip', clipId: 'c1', patch: { end: 3 } },
+        { type: 'duplicateClip', clipId: 'c1', newId: 'c4' },
+        { type: 'removeClip', clipId: 'c2' },
+      ],
+    });
+    expect(ids(next)).toEqual(['c1', 'c4', 'c3']);
+    expect(next.clips[1]!.end).toBe(3);
+    expect(mixProjectReducer(project, { type: 'batch', actions: [] })).toBe(project);
+    expect(mixProjectReducer(project, { type: 'batch', actions: [{ type: 'removeClip', clipId: 'nope' }] })).toBe(project);
+  });
 });

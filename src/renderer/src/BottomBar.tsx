@@ -30,6 +30,7 @@ import type { FormatTimecode, GetFrameCount, ParseTimecode, PlaybackMode, Segmen
 import type { WaveformMode } from '../../common/types';
 import type { Frame } from './ffmpeg';
 import mainApi from './mainApi';
+import { videoMixMode } from './videomix/workspace';
 
 
 const zoomOptions = Array.from({ length: 13 }).fill(undefined).map((_unused, z) => 2 ** z);
@@ -582,7 +583,8 @@ function BottomBar({
           </>
         )}
 
-        {isFileOpened && !simpleMode && hasVideo && (
+        {/* VideoMix: manual rotation is disabled (see increaseRotation in App.tsx) */}
+        {isFileOpened && !simpleMode && hasVideo && !videoMixMode && (
           <div onClick={increaseRotation} role="button" style={{ whiteSpace: 'nowrap' }}>
             <MdRotate90DegreesCcw
               style={{ fontSize: '1.3em', verticalAlign: 'middle', color: isRotationSet ? primaryTextColor : undefined }}

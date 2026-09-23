@@ -31,10 +31,12 @@ import { UserSettingsContext, SegColorsContext, AppContext } from './contexts';
 
 import NoFileLoaded from './NoFileLoaded';
 import MediaSourcePlayer from './MediaSourcePlayer';
-import RectOverlayDemo from './videomix/components/RectOverlayDemo';
+import ClipRectEditor from './videomix/components/ClipRectEditor';
+import ClipList from './videomix/components/ClipList';
 import SourceList from './videomix/components/SourceList';
 import useMixProject from './videomix/hooks/useMixProject';
 import useMixWorkspace from './videomix/hooks/useMixWorkspace';
+import useMixClips from './videomix/hooks/useMixClips';
 import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
 import TopMenu from './TopMenu';
 import LastCommands from './LastCommands';
@@ -362,7 +364,7 @@ function App() {
   }, [isFileOpened]);
 
   const {
-    cutSegments, cutSegmentsHistory, createSegmentsFromKeyframes, shuffleSegments, detectBlackScenes, detectSilentScenes, detectSceneChanges, removeSegment, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, modifySelectedSegmentTimes, alignSegmentTimesToKeyframes, updateSegOrder, updateSegOrders, reorderSegsByStartTime, addSegment, setCutStart, setCutEnd, labelSegment, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, createNumSegments, createFixedDurationSegments, createFixedByteSizedSegments, createRandomSegments, getSegEstimatedSize, haveInvalidSegs, currentSegIndexSafe, currentCutSeg, inverseCutSegments, clearSegments, clearSegColorCounter, loadCutSegments, setCutTime, setCurrentSegIndex, labelSelectedSegments, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, selectSegmentsByLabel, selectSegmentsByExpr, selectAllMarkers, mutateSegmentsByExpr, toggleSegmentSelected, selectOnlySegment, selectedSegments, segmentsOrInverse, segmentsToExport, duplicateCurrentSegment, duplicateSegment, updateSegAtIndex, findSegmentsAtCursor, maybeCreateFullLengthSegment, currentCutSegOrWholeTimeline, segColorCounter,
+    cutSegments, cutSegmentsHistory, createSegmentsFromKeyframes, shuffleSegments, detectBlackScenes, detectSilentScenes, detectSceneChanges, removeSegment, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, modifySelectedSegmentTimes, alignSegmentTimesToKeyframes, updateSegOrder, updateSegOrders, reorderSegsByStartTime, addSegment, setCutStart, setCutEnd, labelSegment, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, createNumSegments, createFixedDurationSegments, createFixedByteSizedSegments, createRandomSegments, getSegEstimatedSize, haveInvalidSegs, currentSegIndexSafe, currentCutSeg, inverseCutSegments, clearSegments, clearSegColorCounter, loadCutSegments, setCutTime, setCurrentSegIndex, labelSelectedSegments, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, selectSegmentsByLabel, selectSegmentsByExpr, selectAllMarkers, mutateSegmentsByExpr, toggleSegmentSelected, selectOnlySegment, selectedSegments, segmentsOrInverse, segmentsToExport, duplicateCurrentSegment, duplicateSegment, updateSegAtIndex, findSegmentsAtCursor, maybeCreateFullLengthSegment, currentCutSegOrWholeTimeline, segColorCounter, setCutSegments,
   } = useSegments({ filePath, workingRef, setWorking, setProgress, videoStream: activeVideoStream, fileDuration, getRelevantTime, maxLabelLength, checkFileOpened, invertCutSegments, segmentsToChaptersOnly, timecodePlaceholder, parseTimecode, appendFfmpegCommandLog, fileDurationNonZero, mainFileMeta: mainFileMeta?.ffprobeMeta, seekAbs, activeVideoStreamIndex, activeAudioStreamIndexes, handleError, showGenericDialog, simpleMode, ffmpegHwaccel });
 
   const { getEdlFilePath, projectFileSavePath, getProjectFileSavePath } = useSegmentsAutoSave({ autoSaveProjectFile: autoSaveProjectFile && !videoMixMode /* VideoMix: no *-proj.llc files, the project is the .vmx */, storeProjectInWorkingDir, filePath, customOutDir, cutSegments });
@@ -376,7 +378,8 @@ function App() {
     console.log('onDurationChange', durationNew);
     if (isDurationValid(durationNew)) {
       setFileDuration(durationNew);
-      maybeCreateFullLengthSegment(durationNew);
+      // VideoMix: every segment with an end is a clip, so no whole-file placeholder segment (ADR-002)
+      if (!videoMixMode) maybeCreateFullLengthSegment(durationNew);
     }
   }, [maybeCreateFullLengthSegment]);
 
@@ -424,6 +427,9 @@ function App() {
   const outputDir = getOutDir(customOutDir, filePath);
 
   const increaseRotation = useCallback(() => {
+    // VideoMix: the rects are in the oriented source frame that the render decodes; a manual preview rotation would
+    // make them not match the output, so it's disabled (keyboard, menu and the hidden BottomBar button)
+    if (videoMixMode) return;
     setRotation((r) => (r + 90) % 450);
     setHideCompatPlayer(false);
     // Matroska is known not to work, so we warn user. See https://github.com/mifi/lossless-cut/discussions/661
@@ -1583,6 +1589,9 @@ function App() {
   // VideoMix: active source, project menu flows and startup recovery (loads sources with loadMedia, keeps the project)
   const mixWorkspace = useMixWorkspace({ mixProject, filePath, ffprobeMeta: mainFileMeta?.ffprobeMeta, loadMedia, closeMedia, workingRef, setWorking, withErrorHandling, confirmDialog });
 
+  // VideoMix: clips of the project <-> segments of the active source's timeline, selected clip and clip actions (ADR-002)
+  const mixClips = useMixClips({ mixProject, currentSourceId: mixWorkspace.currentSourceId, activateSource: mixWorkspace.userActivateSource, cutSegments, setCutSegments, currentCutSeg, setCurrentSegIndex, fileDuration, getRelevantTime, seekAbs });
+
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);
 
@@ -2105,7 +2114,8 @@ function App() {
       setCutStart,
       setCutEnd,
       cleanupFilesDialog,
-      splitCurrentSegment,
+      // VideoMix: split the clip keeping its rects/audio settings in both parts (LosslessCut's split makes new segments)
+      splitCurrentSegment: videoMixMode ? mixClips.userSplitClip : splitCurrentSegment,
       focusSegmentAtCursor,
       selectSegmentsAtCursor,
       increaseRotation,
@@ -2144,8 +2154,9 @@ function App() {
       closeBatch,
       removeCurrentSegment: () => removeSegment(currentSegIndexSafe, true),
       removeCurrentCutpoint: () => removeSegment(currentSegIndexSafe),
-      undo: () => cutSegmentsHistory.back(),
-      redo: () => cutSegmentsHistory.forward(),
+      // VideoMix: the project history (clips, sources, settings) replaces the segments history (ADR-002)
+      undo: videoMixMode ? mixClips.undo : () => cutSegmentsHistory.back(),
+      redo: videoMixMode ? mixClips.redo : () => cutSegmentsHistory.forward(),
       labelCurrentSegment: () => labelSegment(currentSegIndexSafe),
       addSegment,
       duplicateCurrentSegment,
@@ -2232,10 +2243,13 @@ function App() {
       saveProject: () => { mixWorkspace.userSaveProject(); },
       saveProjectAs: () => { mixWorkspace.userSaveProject({ saveAs: true }); },
       addSourcesDialog: () => { mixWorkspace.userAddSourcesDialog(); },
+      addClip: mixClips.userAddClip,
+      duplicateCurrentClip: () => mixClips.userDuplicateClip(mixClips.selectedClipId),
+      removeCurrentClip: () => mixClips.userRemoveClip(mixClips.selectedClipId),
     };
 
     return ret;
-  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState]);
+  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState]);
 
   const getKeyboardAction = useCallback((action: MainKeyboardAction) => mainActions[action], [mainActions]);
 
@@ -2648,8 +2662,22 @@ function App() {
 
                       {filePath != null && compatPlayerEnabled && <MediaSourcePlayer rotate={effectiveRotation} filePath={filePath} videoStream={activeVideoStream} audioStreams={activeAudioStreams} masterVideoRef={videoRef} mediaSourceQuality={mediaSourceQuality} ffmpegHwaccel={ffmpegHwaccel} />}
 
-                      {/* VideoMix T06: rect overlay harness (opt-in via localStorage), T07 wires the clip data */}
-                      {filePath != null && <RectOverlayDemo videoRef={videoRef} compatPlayerEnabled={compatPlayerEnabled} cssRotation={compatPlayerEnabled ? effectiveRotation : undefined} videoStream={activeVideoStream} manualRotation={isRotationSet} />}
+                      {/* VideoMix: max/min rects of the selected clip over the video */}
+                      {filePath != null && mixClips.selectedClip != null && (
+                        <ClipRectEditor
+                          videoRef={videoRef}
+                          compatPlayerEnabled={compatPlayerEnabled}
+                          cssRotation={compatPlayerEnabled ? effectiveRotation : undefined}
+                          videoStream={activeVideoStream}
+                          clip={mixClips.selectedClip}
+                          color={segColorsContext.getSegColor({ segColorIndex: mixClips.selectedClip.color }).hex()}
+                          aspectLock={mixClips.aspectLock}
+                          onAspectLockChange={mixClips.setAspectLock}
+                          onChange={mixClips.handleRectsChange}
+                          onCommit={mixClips.handleRectsCommit}
+                          onEdit={mixClips.handleRectsEdit}
+                        />
+                      )}
                     </div>
 
                     {bigWaveformEnabled && <BigWaveform waveforms={waveforms} relevantTime={relevantTime} playing={playing} fileDurationNonZero={fileDurationNonZero} zoom={zoomUnrounded} seekRel={seekRel} darkMode={darkMode} />}
@@ -2698,8 +2726,25 @@ function App() {
                     )}
                   </div>
 
+                  {/* VideoMix: all the clips of the project (any source) replace the segments of the current file */}
+                  {videoMixMode && showRightBar && (
+                    <ClipList
+                      width={rightBarWidth}
+                      clips={mixProject.project.clips}
+                      sources={mixProject.project.sources}
+                      settings={mixProject.project.settings}
+                      selectedClipId={mixClips.selectedClipId}
+                      onSelect={mixClips.userSelectClip}
+                      onUpdate={mixClips.userUpdateClip}
+                      onReorder={mixClips.userReorderClips}
+                      onAdd={mixClips.userAddClip}
+                      onDuplicate={mixClips.userDuplicateClip}
+                      onRemove={mixClips.userRemoveClip}
+                      onGoToSource={mixClips.userSelectClip}
+                    />
+                  )}
                   <AnimatePresence>
-                    {showRightBar && isFileOpened && filePath != null && (
+                    {!videoMixMode && showRightBar && isFileOpened && filePath != null && (
                       <SegmentList
                         width={rightBarWidth}
                         currentSegIndex={currentSegIndexSafe}

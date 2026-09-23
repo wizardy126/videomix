@@ -776,6 +776,18 @@ const KeyboardShortcuts = memo(({
         name: t('Add videos'),
         category: mixProjectCategory,
       },
+      addClip: {
+        name: t('Add clip'),
+        category: mixProjectCategory,
+      },
+      duplicateCurrentClip: {
+        name: t('Duplicate clip'),
+        category: mixProjectCategory,
+      },
+      removeCurrentClip: {
+        name: t('Remove clip'),
+        category: mixProjectCategory,
+      },
     };
 
     // eslint-disable-next-line no-shadow

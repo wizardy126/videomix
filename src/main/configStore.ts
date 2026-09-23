@@ -100,6 +100,13 @@ const defaultKeyBindings: KeyBinding[] = [
   { keys: 'MetaLeft+KeyS', action: 'saveProject' },
   { keys: 'ControlLeft+ShiftLeft+KeyS', action: 'saveProjectAs' },
   { keys: 'MetaLeft+ShiftLeft+KeyS', action: 'saveProjectAs' },
+
+  // VideoMix clips. KeyN, Delete, Ctrl/Cmd+D and Cmd+Backspace are not used by any other binding or menu accelerator.
+  { keys: 'KeyN', action: 'addClip' },
+  { keys: 'ControlLeft+KeyD', action: 'duplicateCurrentClip' },
+  { keys: 'MetaLeft+KeyD', action: 'duplicateCurrentClip' },
+  { keys: 'Delete', action: 'removeCurrentClip' },
+  { keys: 'MetaLeft+Backspace', action: 'removeCurrentClip' },
 ];
 
 const defaults: Config = {

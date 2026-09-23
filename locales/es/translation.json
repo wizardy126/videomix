@@ -1014,5 +1014,22 @@
   "Wipe down": "Barrido hacia abajo",
   "Wipe left": "Barrido a la izquierda",
   "Wipe right": "Barrido a la derecha",
-  "Wipe up": "Barrido hacia arriba"
+  "Wipe up": "Barrido hacia arriba",
+  "Add clip": "Añadir clip",
+  "Change color": "Cambiar color",
+  "Clip gain (dB)": "Ganancia del clip (dB)",
+  "Clip name": "Nombre del clip",
+  "Clips": "Clips",
+  "Duplicate clip": "Duplicar clip",
+  "Go to source": "Ir a la fuente",
+  "Mute clip": "Silenciar clip",
+  "No clip to split. Please move cursor over the clip you want to split": "No hay ningún clip que dividir. Mueve el cursor sobre el clip que quieras dividir",
+  "No clips yet. Mark a start and an end in the timeline of a source, or click + to add a clip at the playhead.": "Aún no hay clips. Marca un inicio y un fin en la línea de tiempo de una fuente, o pulsa + para añadir un clip en el cabezal.",
+  "No min rectangle: the clip can only be shown with its max rectangle, it will not be cropped any further": "Sin rectángulo mínimo: el clip solo se puede mostrar con su rectángulo máximo, no se recortará más",
+  "Remove clip": "Eliminar clip",
+  "Select a source first": "Primero selecciona una fuente",
+  "The clip is not longer than two transitions ({{duration}} s), its transitions will be shortened": "El clip no dura más que dos transiciones ({{duration}} s); sus transiciones se acortarán",
+  "This source has no video": "Esta fuente no tiene vídeo",
+  "Total duration of the clips": "Duración total de los clips",
+  "Unmute clip": "Activar el sonido del clip"
 }

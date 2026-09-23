@@ -64,7 +64,8 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
   /** CSS rotation applied to the video by the compat player, see getVideoContentBox. */
   cssRotation?: number | undefined,
   onChange: (rects: ClipRects) => void,
-  onCommit: (rects: ClipRects) => void,
+  /** `keyboard`: an arrow key nudge, the parent may merge repeated nudges into one undo step. */
+  onCommit: (rects: ClipRects, info?: { keyboard: boolean }) => void,
 }) {
   const { t } = useTranslation();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -147,7 +148,7 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
     if (dragRef.current != null) return;
     const step = e.shiftKey ? ARROW_STEP_SHIFT : ARROW_STEP;
     const next = applyRectDrag({ start: rects, target: activeTarget, handle: 'move', dx: delta[0] * step, dy: delta[1] * step, videoSize });
-    if (!sameRects(next, rects)) onCommit(next);
+    if (!sameRects(next, rects)) onCommit(next, { keyboard: true });
   }, [activeTarget, onCommit, rects, videoSize]);
 
   const handleFocus = useCallback(() => setFocused(true), []);

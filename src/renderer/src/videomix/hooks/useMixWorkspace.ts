@@ -60,6 +60,12 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     if (isSourceMetaChanged(currentSource, meta)) setSourceMeta(currentSource.id, meta);
   }, [currentSource, ffprobeMeta, setSourceMeta]);
 
+  // The file in the player is no longer a source (e.g. undo of "Add videos", or a relink): unload it, so the timeline
+  // doesn't show a file whose clips can't be edited
+  useEffect(() => {
+    if (filePath != null && currentSource == null) closeMedia();
+  }, [closeMedia, currentSource, filePath]);
+
   // loadMedia doesn't clear `working` itself (callers do, see batchOpenSingleFile in App.tsx)
   const loadSourceFile = useCallback(async (path: string) => {
     if (workingRef.current) return;
@@ -209,11 +215,11 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     const [firstAudioPath] = audioPaths;
     if (firstAudioPath != null) await askToUseAsMusic(firstAudioPath);
 
-    // Only switch the player if nothing is active: until T07 syncs clips, switching would drop the current timeline.
+    // Show the first new video (switching sources loses nothing, the clips are in the project).
     // Opening a single file that is already a source switches to it, like clicking it in the list.
     const [firstNewPath] = newPaths;
     const [singleMediaPath] = mediaPaths;
-    if (firstNewPath != null && filePath == null) {
+    if (firstNewPath != null) {
       await loadSourceFile(firstNewPath);
     } else if (newPaths.length === 0 && mediaPaths.length === 1 && singleMediaPath != null && singleMediaPath !== filePath) {
       const existing = project.sources.find((s) => s.absolutePath === singleMediaPath);
