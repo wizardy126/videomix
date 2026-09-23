@@ -56,6 +56,12 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   const currentSource = useMemo(() => (filePath != null ? project.sources.find((s) => s.path === filePath) : undefined), [filePath, project.sources]);
   const currentSourceId = currentSource?.id;
 
+  // T22: the list isn't pruned when an overlay is removed (T19), so only report the files of overlays that still exist
+  const existingMissingOverlayFiles = useMemo(() => {
+    const ids = new Set(project.overlays.map((o) => o.id));
+    return missingOverlayFiles.filter((m) => ids.has(m.overlayId));
+  }, [missingOverlayFiles, project.overlays]);
+
   const clipCountBySource = useMemo(() => countClipsBySource(project.clips), [project.clips]);
 
   // Keep the informative cache (size, duration) of the active source up to date with what loadMedia probed
@@ -181,6 +187,10 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     if (missing.size > 0) {
       getSwal().toast.fire({ icon: 'warning', timer: 10000, title: i18n.t('{{numMissing}} source file(s) not found. Use "Locate..." in the sources list.', { numMissing: missing.size }) });
     }
+    // (one toast at a time: the missing sources matter more)
+    if (missing.size === 0 && loaded.missingOverlayFiles.length > 0) {
+      getSwal().toast.fire({ icon: 'warning', timer: 10000, title: i18n.t('{{numMissing}} overlay file(s) not found. Select the overlay in the Mix view and use "Locate...".', { numMissing: loaded.missingOverlayFiles.length }) });
+    }
     await askToLocateMusic(loaded);
     const firstFound = loaded.project.sources.find((s) => !missing.has(s.id));
     if (firstFound != null) await activateSourceFile(firstFound);
@@ -297,7 +307,7 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   return {
     currentSourceId,
     missingSourceIds,
-    missingOverlayFiles,
+    missingOverlayFiles: existingMissingOverlayFiles,
     clipCountBySource,
     openFiles,
     userActivateSource,

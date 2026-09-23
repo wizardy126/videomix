@@ -15,6 +15,9 @@ import type { LoadedMixProject, NodeDeps, OverlayFileKind } from '../projectFile
 import { deleteRecoveryFile, deleteRecoveryFilePath, findRecoverableProjects, getRecoveryDir, resolveRecoveredProject, writeRecoveryFile } from '../projectRecovery';
 import type { RecoverableProject } from '../projectRecovery';
 import { askForUnsavedChanges } from '../dialogs';
+import { prepareOverlayRemoval } from '../overlayRemoval';
+import { getKnownSoundDurations } from './useOverlaySoundDurations';
+import getSwal from '../../swal';
 
 const remote = window.require('@electron/remote');
 
@@ -73,7 +76,13 @@ export default function useMixProject() {
   const isDirty = useCallback(() => historyRef.current.present !== savedProjectRef.current, []);
 
   const dispatch = useCallback((action: MixProjectAction, { transient }: EditOptions = {}) => {
-    setHistory((h) => history.applyEdit(h, (p) => mixProjectReducer(p, action), { transient }));
+    // T22: every removal (clip, source, overlay; also inside batches from the timeline sync) gets the overlay times
+    // resolved before it, so the overlays anchored to what's removed become absolute at their current start (01-requisitos §9.2)
+    const { action: prepared, detached } = prepareOverlayRemoval(historyRef.current.present, action, getKnownSoundDurations(historyRef.current.present.overlays));
+    setHistory((h) => history.applyEdit(h, (p) => mixProjectReducer(p, prepared), { transient }));
+    if (detached.length > 0) {
+      getSwal().toast.fire({ icon: 'info', timer: 6000, title: i18n.t('{{count}} overlay(s) anchored to what was removed now start at a fixed time', { count: detached.length }) });
+    }
   }, [setHistory]);
 
   const commitTransient = useCallback(() => setHistory((h) => history.commitTransient(h)), [setHistory]);

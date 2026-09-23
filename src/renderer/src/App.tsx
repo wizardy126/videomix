@@ -41,6 +41,8 @@ import useMixRender from './videomix/hooks/useMixRender';
 import MixSettingsDialog from './videomix/components/MixSettingsDialog';
 import MixRenderButtons from './videomix/components/MixRenderButtons';
 import MixPlanView from './videomix/components/MixPlanView';
+import OverlayPanel from './videomix/components/OverlayPanel';
+import useMixOverlays from './videomix/hooks/useMixOverlays';
 import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
 import { isKeyboardActionRetired } from '../../common/videomix/legacyUi';
 import TopMenu from './TopMenu';
@@ -1604,6 +1606,9 @@ function App() {
   // VideoMix: Source/Mix tabs above the bottom timeline area (T15). "Mix" shows the plan instead of the active source.
   const [showMixPlan, setShowMixPlan] = useState(false);
 
+  // VideoMix: overlays edited in the Mix view (T22): plan + resolved overlay times, selection, cursor and overlay actions
+  const mixOverlays = useMixOverlays({ mixProject, enabled: videoMixMode && showMixPlan, withErrorHandling });
+
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);
 
@@ -2752,7 +2757,20 @@ function App() {
                   </div>
 
                   {/* VideoMix: all the clips of the project (any source) replace the segments of the current file */}
-                  {videoMixMode && showRightBar && (
+                  {/* VideoMix: the properties of the overlay selected in the Mix view take the place of the clip list (T22) */}
+                  {videoMixMode && showRightBar && showMixPlan && mixOverlays.selectedOverlay != null && (
+                    <OverlayPanel
+                      width={rightBarWidth}
+                      overlay={mixOverlays.selectedOverlay}
+                      overlays={mixProject.project.overlays}
+                      clips={mixProject.project.clips}
+                      resolved={mixOverlays.resolved}
+                      missingKinds={mixWorkspace.missingOverlayFiles.filter((m) => m.overlayId === mixOverlays.selectedOverlayId).map((m) => m.kind)}
+                      mixOverlays={mixOverlays}
+                      onLocate={mixWorkspace.userLocateOverlayFile}
+                    />
+                  )}
+                  {videoMixMode && showRightBar && !(showMixPlan && mixOverlays.selectedOverlay != null) && (
                     <ClipList
                       width={rightBarWidth}
                       clips={mixProject.project.clips}
@@ -2848,6 +2866,9 @@ function App() {
                       settings={mixProject.project.settings}
                       selectedClipId={mixClips.selectedClipId}
                       onSelect={mixClips.userSelectClip}
+                      mixOverlays={mixOverlays}
+                      overlays={mixProject.project.overlays}
+                      missingOverlayFiles={mixWorkspace.missingOverlayFiles}
                     />
                   ) : (
                     <Timeline

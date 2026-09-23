@@ -48,7 +48,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T19 | Overlays: modelo, migración v2 y anclajes | M7 | Opus | — | hecha |
 | T20 | Overlays: render de vídeo (PNG, contador, barra) | M7 | Opus | T19 | hecha |
 | T21 | Overlays: efectos de sonido en la mezcla | M7 | Sonnet | T19 | hecha |
-| T22 | Overlays: pistas en la vista Mix y panel de propiedades | M7 | Opus | T19 | pendiente |
+| T22 | Overlays: pistas en la vista Mix y panel de propiedades | M7 | Opus | T19 | hecha |
 | T23 | Overlays: i18n, manual y revisión final | M7 | Sonnet | T20, T21, T22 | pendiente |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.

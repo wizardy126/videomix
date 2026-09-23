@@ -533,3 +533,6 @@ Implementado en `render/overlayFilters.ts` (grafo) y `overlays/overlayFrames.ts`
 - Carriles nuevos en `MixPlanView` y un panel de propiedades.
 - Edición de posición y tamaño sobre la mini vista del fotograma (reutiliza la lógica de arrastre de `overlayMath`).
 - Undo/redo mediante el reducer del proyecto.
+- Estado de la UI en `hooks/useMixOverlays.ts` (plan, tiempos resueltos, selección, cursor de la vista "Mix"); lógica pura en `overlayTimeline.ts` (carriles, arrastres, cajas) y `overlayRemoval.ts`. El panel (`components/OverlayPanel.tsx`) ocupa la barra derecha mientras hay un elemento seleccionado en la vista "Mix".
+- **Borrados**: `useMixProject.dispatch` añade `resolved` a toda acción que borre algo de lo que dependan elementos (también dentro de `batch`) y avisa con un toast; así ningún punto de llamada puede olvidarlo.
+- **Duración de los sonidos en la UI**: se obtiene con ffprobe (`getDuration`) la primera vez que aparece cada fichero y se guarda en memoria durante la sesión (`hooks/useOverlaySoundDurations.ts`). El render usa la de T21.

@@ -13,7 +13,8 @@ Cerrar el hito de overlays.
 3. **Proyecto de ejemplo** en `script/videomix/` (o una ampliación de `renderPlan.ts`) que use los cuatro tipos con `test-media`. Renderízalo y revisa fotogramas y audio.
 4. **Formato del contador** (decisión tras T20): si la duración es ≥ 60 s, `M:SS` durante toda la cuenta. Hay que ajustar `overlayFrames.getCountdownTextAt` y `overlayFilters` (una sola `drawtext`), con sus tests.
 5. Añadir los avisos de tiempo de los overlays (recortado, fuera del vídeo) a la confirmación previa al render, si T22 no lo ha hecho.
-6. Revisión de los atajos, si se añadieron.
+6. **Pendientes de T22**: pasar `overlayName` a `getIssueText` desde `useMixRender`; unificar el texto del contador de la mini vista con `overlayFrames.getCountdownTextAt`; que "Replace…" limpie el aviso de fichero no encontrado.
+7. Revisión de los atajos, si se añadieron.
 
 ## Criterios de aceptación
 
