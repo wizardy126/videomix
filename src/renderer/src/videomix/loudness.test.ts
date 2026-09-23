@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import { ensureLoudness, getLoudnessCacheKey } from './loudness';
 import type { LoudnessDeps } from './loudness';
+import { MUSIC_LOUDNESS_KEY } from './render/buildAudioGraph';
 import { createEmptyMixProject } from './types';
 import type { LoudnessMeasurement, MixClip, MixProject } from './types';
 
@@ -27,7 +28,7 @@ const measurement = (inputI: number): LoudnessMeasurement => ({ hasAudio: true, 
 
 function makeDeps() {
   const stat = vi.fn(async (path: string) => ({ mtimeMs: 1000, size: path.length }));
-  const measureLoudness = vi.fn<LoudnessDeps['measureLoudness']>(async ({ start }) => measurement(-20 - start));
+  const measureLoudness = vi.fn<LoudnessDeps['measureLoudness']>(async ({ start = 0 }) => measurement(-20 - start));
   return { stat, measureLoudness };
 }
 
@@ -85,6 +86,26 @@ describe('ensureLoudness', () => {
     deps2.stat.mockResolvedValue({ mtimeMs: 2000, size: 1 });
     await ensureLoudness({ project: { ...project, loudnessCache: entries }, deps: deps2 });
     expect(deps2.measureLoudness).toHaveBeenCalledTimes(1);
+  });
+
+  test('measures the music too, whole file, when asked (T12b)', async () => {
+    const deps = makeDeps();
+    const onCacheEntries = vi.fn();
+    const project = makeProject([clip('c1', 's1', 0, 5)]);
+    const music = { absolutePath: '/media/m.mp3' };
+    const result = await ensureLoudness({ project, music, deps, onCacheEntries });
+
+    expect(result[MUSIC_LOUDNESS_KEY]).toEqual(measurement(-20)); // start defaults to 0 in the mock
+    expect(deps.measureLoudness).toHaveBeenCalledTimes(2);
+    expect(deps.measureLoudness).toHaveBeenCalledWith({ filePath: '/media/m.mp3', abortSignal: undefined });
+    expect(deps.stat).toHaveBeenCalledTimes(2); // one clip's file, one music file
+
+    // cached the second time
+    const entries = onCacheEntries.mock.calls[0]![0] as Record<string, LoudnessMeasurement>;
+    const deps2 = makeDeps();
+    const result2 = await ensureLoudness({ project: { ...project, loudnessCache: entries }, music, deps: deps2 });
+    expect(result2).toEqual(result);
+    expect(deps2.measureLoudness).not.toHaveBeenCalled();
   });
 
   test('keeps what was measured when aborted', async () => {

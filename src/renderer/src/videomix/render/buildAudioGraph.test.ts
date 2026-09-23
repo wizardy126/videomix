@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { buildAudioGraph, getCompensationExpr, getNormalizationGain, getPlacementFades } from './buildAudioGraph';
+import { MUSIC_LOUDNESS_KEY, buildAudioGraph, getCompensationExpr, getNormalizationGain, getPlacementFades } from './buildAudioGraph';
 import { createEmptyMixProject } from '../types';
 import type { LoudnessMeasurement, MixClip, MixSettings } from '../types';
 import type { LayoutKeyframe, MixPlan } from '../planner/types';
@@ -144,6 +144,20 @@ describe('buildAudioGraph', () => {
     const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips, sourcePaths, settings, loudness: { a: { hasAudio: false }, c: { hasAudio: false } } });
     expect(audioPass.inputs).toEqual([['-vn', '-i', '/media/m.mp3']]);
     expect(audioPass).toMatchSnapshot();
+  });
+
+  test('music is normalized like a clip, plus volumeDb (T12b)', () => {
+    const settings = makeSettings({ music: { path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb: -12, loop: true } });
+    const loudness = { ...twoColumnLoudness, [MUSIC_LOUDNESS_KEY]: measured(-9, -1) };
+    const { filterComplex } = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness });
+    // getNormalizationGain(-9, -1) = min(-16 - -9, 24, 5 - -1) = -7, plus volumeDb -12 = -19
+    expect(filterComplex).toContain('volume=-19dB');
+  });
+
+  test('music without a loudness measurement only applies volumeDb (T12b)', () => {
+    const settings = makeSettings({ music: { path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb: -12, loop: true } });
+    const { filterComplex } = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness: twoColumnLoudness });
+    expect(filterComplex).toContain('volume=-12dB');
   });
 
   test('missing loudness of an audible clip throws', () => {

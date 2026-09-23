@@ -86,6 +86,12 @@ export const mixMusicSchema = z.object({
 
 export type MixMusic = z.infer<typeof mixMusicSchema>;
 
+/**
+ * Initial `volumeDb` when a music file is picked (T12b): the music is normalized like the clips (buildAudioGraph), so
+ * 0 dB would be as loud as them; this gives a background level instead.
+ */
+export const DEFAULT_MUSIC_VOLUME_DB = -12;
+
 export const mixSettingsSchema = z.object({
   resolution: mixResolutionSchema,
   fps: z.literal(mixFpsValues),

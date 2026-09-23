@@ -70,7 +70,7 @@ describe('isSourceMetaChanged', () => {
 
 describe('createMusic', () => {
   test('keeps volume and loop of the replaced music', () => {
-    expect(createMusic('/m.mp3', undefined)).toEqual({ path: '/m.mp3', absolutePath: '/m.mp3', volumeDb: 0, loop: false });
+    expect(createMusic('/m.mp3', undefined)).toEqual({ path: '/m.mp3', absolutePath: '/m.mp3', volumeDb: -12, loop: false }); // T12b default
     expect(createMusic('/n.mp3', { path: '/m.mp3', absolutePath: '/m.mp3', volumeDb: -6, loop: true })).toEqual({ path: '/n.mp3', absolutePath: '/n.mp3', volumeDb: -6, loop: true });
   });
 });

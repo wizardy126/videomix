@@ -3,6 +3,7 @@ import { parseFfprobeDuration } from '../../../common/util';
 import { getRealVideoStreams } from '../util/streams';
 import { getOrientedSize, getStreamRotation } from './overlayMath';
 import { mixProjectExtension } from './projectFile';
+import { DEFAULT_MUSIC_VOLUME_DB } from './types';
 import type { MixMusic, MixSource } from './types';
 
 // Pure helpers for the multi-source workspace in App.tsx (T05). No React/Electron here, so they can be tested with vitest.
@@ -76,7 +77,7 @@ export const isSourceMetaChanged = (source: MixSource, meta: SourceMeta) => (['w
 
 /** Music settings for a new music file, keeping the volume/loop of the music it replaces. */
 export function createMusic(filePath: string, previous: MixMusic | undefined): MixMusic {
-  return { path: filePath, absolutePath: filePath, volumeDb: previous?.volumeDb ?? 0, loop: previous?.loop ?? false };
+  return { path: filePath, absolutePath: filePath, volumeDb: previous?.volumeDb ?? DEFAULT_MUSIC_VOLUME_DB, loop: previous?.loop ?? false };
 }
 
 /** Window title part for the project: file name without extension (or `untitledName`), plus `*` if there are unsaved changes. */

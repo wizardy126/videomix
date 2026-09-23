@@ -10,7 +10,7 @@ import Switch from '../../components/Switch';
 import Truncated from '../../components/Truncated';
 import { showOpenDialog } from '../../dialogs';
 import type { EditOptions } from '../hooks/useMixProject';
-import { mixFpsValues, mixPresets, mixResolutions, transitionTypes } from '../types';
+import { DEFAULT_MUSIC_VOLUME_DB, mixFpsValues, mixPresets, mixResolutions, transitionTypes } from '../types';
 import type { MixResolution, MixSettings, TransitionType } from '../types';
 
 const { basename } = window.require('node:path');
@@ -167,7 +167,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
     const filePath = await pickMusicFile();
     if (filePath == null) return;
     // Same absolute path for both fields at pick time; saving the project relativizes `path` (projectFile.ts)
-    onChange({ music: { path: filePath, absolutePath: filePath, volumeDb: 0, loop: true } });
+    onChange({ music: { path: filePath, absolutePath: filePath, volumeDb: DEFAULT_MUSIC_VOLUME_DB, loop: true } });
   }, [onChange, pickMusicFile]);
 
   const handleRemoveMusicClick = useCallback(() => {
@@ -336,6 +336,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
                 <label style={rowStyle}>
                   {t('Music volume')}: {t('{{db}} dB', { db: settings.music.volumeDb.toFixed(1) })}<br />
                   <input type="range" min={-30} max={6} step={0.5} style={{ width: '100%' }} value={settings.music.volumeDb} onInput={handleMusicVolumeInput} onChange={handleMusicVolumeCommit} />
+                  <div style={detailsStyle}>{t('0 dB = as loud as the clips')}</div>
                 </label>
 
                 <div style={inlineRowStyle}>

@@ -34,12 +34,14 @@ const { getPlannerInput } = await import(`${rendererDir}/planner/plannerInput.ts
 const { ensureLoudness } = await import(`${rendererDir}/loudness.ts`) as {
   ensureLoudness: (params: {
     project: unknown,
-    deps: { stat: (path: string) => Promise<{ mtimeMs: number, size: number }>, measureLoudness: (range: { filePath: string, start: number, end: number }) => Promise<LoudnessAnalysis> },
+    music?: { absolutePath: string } | undefined,
+    deps: { stat: (path: string) => Promise<{ mtimeMs: number, size: number }>, measureLoudness: (range: { filePath: string, start?: number | undefined, end?: number | undefined }) => Promise<LoudnessAnalysis> },
     onCacheEntries: (entries: Record<string, LoudnessAnalysis>) => void,
   }) => Promise<Record<string, LoudnessAnalysis>>,
 };
 const audioGraph = await import(`${rendererDir}/render/buildAudioGraph.ts`) as {
   LOUDNESS_TARGET: number,
+  MUSIC_LOUDNESS_KEY: string,
   buildAudioGraph: (params: { plan: Plan, clips: Clip[], sourcePaths: Record<string, string>, settings: unknown, loudness: Record<string, LoudnessAnalysis> }) => AudioPass,
   getPlacementFades: (plan: Plan, placement: Placement) => { fadeIn: number, fadeOut: number },
   getNormalizationGain: (measurement: LoudnessAnalysis) => number,
@@ -57,14 +59,17 @@ const maxColumns = columnsArg !== -1 ? Number(process.argv[columnsArg + 1]) : 2;
 
 const runFfmpeg = async (args: string[]) => execa(ffmpegPath, args, { env: ffEnv });
 
-// Same commands as src/main/videomix/loudness.ts (which can't run outside Electron)
-async function measureLoudness({ filePath, start, end }: { filePath: string, start: number, end: number }) {
+// Same commands as src/main/videomix/loudness.ts (which can't run outside Electron). start/end omitted: whole file (music, T12b).
+async function measureLoudness({ filePath, start, end }: { filePath: string, start?: number | undefined, end?: number | undefined }) {
   const probe = await execa(ffprobePath, ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=index,channels,channel_layout', '-of', 'json', '-i', filePath], { env: ffEnv });
   const stream = parseFfprobeAudioStream(probe.stdout);
   if (stream == null) return { hasAudio: false } as const;
   const { stderr } = await runFfmpeg([
-    '-hide_banner', '-nostats', '-ss', start.toFixed(6), '-t', (end - start).toFixed(6), '-i', filePath, '-map', '0:a:0',
-    '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json', '-f', 'null', '-',
+    '-hide_banner', '-nostats', '-i', filePath,
+    // -ss/-t as output options (after -i): exact (decodes from the start), unlike input seeking, which occasionally
+    // misjudges the frame boundary on these freshly-encoded, very short sections and reads back silence.
+    ...(start != null && end != null ? ['-ss', start.toFixed(6), '-t', (end - start).toFixed(6)] : []),
+    '-map', '0:a:0', '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json', '-f', 'null', '-',
   ]);
   const values = parseLoudnormOutput(stderr);
   if (values == null) throw new Error(`No loudnorm output for ${filePath}`);
@@ -126,10 +131,15 @@ async function main() {
   let cache: Record<string, LoudnessAnalysis> = {};
   const loudness = await ensureLoudness({
     project,
+    music: withMusic ? { absolutePath: media('music-20s.m4a') } : undefined,
     deps: { stat: async (path) => stat(path), measureLoudness },
     onCacheEntries: (entries) => { cache = { ...cache, ...entries }; },
   });
-  console.log(`Measured ${Object.keys(cache).length} clip ranges (cache keys: ${Object.keys(cache).map((key) => key.slice(0, 8)).join(', ')})`);
+  console.log(`Measured ${Object.keys(cache).length} clip/music ranges (cache keys: ${Object.keys(cache).map((key) => key.slice(0, 8)).join(', ')})`);
+  if (withMusic) {
+    const m = loudness[audioGraph.MUSIC_LOUDNESS_KEY]!;
+    console.log(`Music (whole file): ${m.hasAudio ? `${m.inputI.toFixed(1)} LUFS, gain ${audioGraph.getNormalizationGain(m).toFixed(1)} dB` : '(no audio)'}`);
+  }
 
   const clipsById = new Map(project.clips.map((clip) => [clip.id, clip]));
   console.log('\nClip   Source          In→out (s)      Column  input_i   gain');
@@ -163,6 +173,22 @@ async function main() {
   const balancedPath = await render('balanced', loudness);
   const flatPath = await render('unbalanced', flatLoudness);
 
+  // Isolates the music (T12b): same music settings, but an empty plan (no clips), so the result is just the
+  // normalized music + its own fade-out/global fade. Measured away from both fades.
+  let musicAlonePath: string | undefined;
+  if (withMusic) {
+    const sourcePaths = Object.fromEntries(project.sources.map((source) => [source.id, source.absolutePath]));
+    const isolatedPlan: Plan = { duration: plan.duration, placements: [], layouts: [] };
+    const audioPass = audioGraph.buildAudioGraph({ plan: isolatedPlan, clips: [], sourcePaths, settings: project.settings, loudness });
+    const filterComplexPath = join(outDir, 'music-only.graph.txt');
+    musicAlonePath = join(outDir, 'music-only.m4a');
+    await writeFile(filterComplexPath, audioPass.filterComplex);
+    await runFfmpeg([
+      '-hide_banner', '-nostdin', '-y', ...audioPass.inputs.flat(), '-/filter_complex', filterComplexPath,
+      '-map', `[${audioPass.outLabel}]`, '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', musicAlonePath,
+    ]);
+  }
+
   // sections where the set of sounding clips is constant: cut at every clip start/end and fade boundary
   const audible = plan.placements.filter((p) => loudness[p.clipId]?.hasAudio === true).map((p) => ({ ...p, ...audioGraph.getPlacementFades(plan, p) }));
   const D = project.settings.transition.duration;
@@ -177,7 +203,7 @@ async function main() {
     return m.hasAudio ? m.inputI : -Infinity;
   };
 
-  console.log(`\nIntegrated loudness per section (target ${audioGraph.LOUDNESS_TARGET} LUFS${withMusic ? ', music at -12 dB on top' : ''}):`);
+  console.log(`\nIntegrated loudness per section (target ${audioGraph.LOUDNESS_TARGET} LUFS${withMusic ? ', music normalized then volumeDb on top (T12b)' : ''}):`);
   console.log('Section (s)       Sounding clips        Unbalanced   Balanced   Δ target');
   let failures = 0;
   for (const { start, end, clips } of sections) {
@@ -194,6 +220,17 @@ async function main() {
   whole.forEach((m, i) => {
     if (m.hasAudio) console.log(`${i === 0 ? 'Unbalanced' : 'Balanced'} whole mix: ${m.inputI.toFixed(1)} LUFS, true peak ${m.inputTp.toFixed(1)} dBTP, LRA ${m.inputLra.toFixed(1)} LU`);
   });
+
+  if (musicAlonePath != null) {
+    // away from the global fade-in and the music's own fade-out at the end
+    const start = 1;
+    const end = plan.duration - 3;
+    const m = await measureLoudness({ filePath: musicAlonePath, start, end });
+    const volumeDb = project.settings.music?.volumeDb ?? 0;
+    if (m.hasAudio) {
+      console.log(`\nMusic alone (isolated render, ${start.toFixed(1)}–${end.toFixed(1)} s, volumeDb ${volumeDb} dB): ${m.inputI.toFixed(1)} LUFS (target ${(audioGraph.LOUDNESS_TARGET + volumeDb).toFixed(1)} LUFS)`);
+    }
+  }
 
   if (failures > 0) {
     console.error(`\n${failures} section(s) outside ±2 LU of the target`);

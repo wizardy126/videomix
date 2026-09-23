@@ -22,6 +22,12 @@ export const LIMITER_CEILING = -1;
 export const DECLICK_DURATION = 0.01;
 /** The music fades out over max(this, D) at the end of the video (04-diseno §5.2). */
 export const MUSIC_FADE_OUT = 2;
+/**
+ * Key of the music's loudness measurement in the `loudness` map (T12b): a clip id can never be this, so it's a safe
+ * sentinel to piggyback the music's measurement on `buildAudioGraph`'s existing `loudness` parameter (additive: no new
+ * parameter). Set by `ensureLoudness` when called with `music`.
+ */
+export const MUSIC_LOUDNESS_KEY = '__music__';
 export const AUDIO_SAMPLE_RATE = 48000;
 
 // Extra input duration read after the clip (s), trimmed exactly in the graph (ADR-001 §6)
@@ -155,7 +161,8 @@ export interface AudioPass {
  * - per audible clip (not muted, with audio): `-vn -ss/-t` input → stereo 48 kHz → `volume` (normalization + gainDb)
  *   → equal-power `afade` in/out (see getPlacementFades) → `adelay` to its start;
  * - `amix` (normalize=0) → simultaneity compensation (getCompensationExpr) → pad to the video duration;
- * - optional music: looped with `-stream_loop -1`, trimmed, `volume=volumeDb` (not normalized) and faded out;
+ * - optional music: looped with `-stream_loop -1`, trimmed, normalized like a clip plus `volumeDb` (T12b: 0 dB means
+ *   as loud as the clips) and faded out;
  * - `alimiter` at `LIMITER_CEILING`, then the global fade in/out if `fadeInOut`.
  *
  * Without any audible clip the clips' mix is silence, so the output always has an audio track of the video's duration.
@@ -166,7 +173,8 @@ export interface AudioPass {
  *
  * @param sourcePaths `sourceId` → media path (the same paths the loudness was measured on, `MixSource.absolutePath`).
  * @param duration exact output duration (frames / fps); defaults to `plan.duration`.
- * @param loudness measurements by clip id, from `ensureLoudness`. Every audible clip of the plan must have one.
+ * @param loudness measurements by clip id, from `ensureLoudness`. Every audible clip of the plan must have one. The
+ *   music's measurement (T12b), if any, is under `MUSIC_LOUDNESS_KEY`; without one, only `volumeDb` applies.
  */
 export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, loudness }: {
   plan: Pick<MixPlan, 'duration' | 'placements' | 'layouts'>,
@@ -234,12 +242,16 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
     const inputIndex = inputs.length;
     inputs.push([...(music.loop ? ['-stream_loop', '-1'] : []), '-vn', '-i', music.absolutePath]);
     const fadeOut = Math.min(Math.max(MUSIC_FADE_OUT, settings.transition.duration), totalDuration);
+    // Normalized like the clips (T12b), so 0 dB means "as loud as the clips"; without a measurement (shouldn't happen
+    // once ensureLoudness is called with the music), only volumeDb applies.
+    const musicMeasurement = loudness[MUSIC_LOUDNESS_KEY];
+    const musicGain = musicMeasurement?.hasAudio === true ? getNormalizationGain(musicMeasurement) + music.volumeDb : music.volumeDb;
     filters.push(
       `[${inputIndex}:a:0]${[
         `aresample=${AUDIO_SAMPLE_RATE}`,
         'aformat=sample_fmts=fltp:channel_layouts=stereo',
         `atrim=duration=${fmt(totalDuration)}`,
-        `volume=${fmt(music.volumeDb)}dB`,
+        `volume=${fmt(musicGain)}dB`,
         `afade=t=out:st=${fmt(totalDuration - fadeOut)}:d=${fmt(fadeOut)}`,
       ].join(',')}[music]`,
       // duration=first: the clips' mix is padded to the video duration, a shorter (unlooped) music just ends
