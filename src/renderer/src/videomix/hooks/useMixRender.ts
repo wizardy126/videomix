@@ -11,9 +11,12 @@ import type { WithErrorHandling } from '../../hooks/useErrorHandling';
 import type { ShowGenericDialog } from '../../components/GenericDialog';
 import type { UseMixProject } from './useMixProject';
 import { validateMixProject } from '../project';
+import type { MixProjectIssue } from '../project';
 import { getOverlayFiles } from '../projectFile';
 import { ensureLoudness, getSoundDurations } from '../loudness';
 import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
+import { getOverlayTimeWarningText } from '../overlayTexts';
+import { getKnownSoundDurations } from './useOverlaySoundDurations';
 import { buildRenderJob, getChunkConcurrency } from '../render/buildRenderJob';
 import { buildAudioGraph } from '../render/buildAudioGraph';
 import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
@@ -106,6 +109,12 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     if (project.clips.length === 0) throw new UserFacingError(i18n.t('The project has no clips yet. Add clips before rendering.'));
 
     const clipNameById = new Map(project.clips.map((clip) => [clip.id, clip.name]));
+    const overlayNameById = new Map(project.overlays.map((overlay) => [overlay.id, overlay.name]));
+    const issueText = (issue: MixProjectIssue) => getIssueText(
+      issue,
+      issue.clipId != null ? clipNameById.get(issue.clipId) : undefined,
+      issue.overlayId != null ? overlayNameById.get(issue.overlayId) : undefined,
+    );
     const issues = validateMixProject(project);
     const errors = issues.filter((issue) => issue.level === 'error');
 
@@ -126,16 +135,25 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
         title: i18n.t('The mix can\'t be rendered'),
         lines: [
           ...missing.map((file) => i18n.t('File not found: {{path}}', { path: file.filePath })),
-          ...errors.map((issue) => getIssueText(issue, issue.clipId != null ? clipNameById.get(issue.clipId) : undefined)),
+          ...errors.map((issue) => issueText(issue)),
         ],
       });
       return undefined;
     }
 
     const renderPlan = planRender(project, { preview });
+    // Overlay time warnings (clipped, outside the video, cycles, broken references…), from a resolution with the
+    // sound durations already known to the UI (T22's useOverlaySoundDurations): the render itself re-resolves them
+    // with the exact durations from the loudness analysis (T21), so this is only for the confirmation's wording.
+    const overlayTimes = resolveOverlayTimes(project, renderPlan.plan, { soundDurations: getKnownSoundDurations(project.overlays) });
+    const overlayTimeWarningLines = project.overlays.flatMap((overlay) => {
+      const warnings = overlayTimes.get(overlay.id)?.warnings ?? [];
+      return warnings.map((warning) => i18n.t('Overlay "{{overlay}}": {{warning}}', { overlay: overlay.name, warning: getOverlayTimeWarningText(warning) }));
+    });
     const warningLines = [
-      ...issues.filter((issue) => issue.level === 'warning').map((issue) => getIssueText(issue, issue.clipId != null ? clipNameById.get(issue.clipId) : undefined)),
+      ...issues.filter((issue) => issue.level === 'warning').map((issue) => issueText(issue)),
       ...getRenderWarnings(renderPlan.plan, project.clips).map((warning) => getRenderWarningText(warning)),
+      ...overlayTimeWarningLines,
     ];
     if (warningLines.length > 0 && !(await askForRenderWarnings({ lines: warningLines, preview }))) return undefined;
     return renderPlan;

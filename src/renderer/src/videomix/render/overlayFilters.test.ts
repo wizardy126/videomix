@@ -105,17 +105,22 @@ describe('overlay filters', () => {
     expect(mid.filterComplex).toMatch(/overlay=x='1':y='\d+-round\(\d+\*\(30-round\(t\*30\)\)\/60\)':eval=frame/);
   });
 
-  test('countdown switches from M:SS to SS where the shown value drops below 60 s', () => {
+  test('a single drawtext: M:SS throughout when the (uncut) duration is ≥ 60 s, SS below', () => {
     const countdown = { ...createCountdownOverlay({ id: 'cd', name: 'C', start: 0 }), duration: 61, leadingZeros: true };
     const plan = { ...testPlans.static, duration: 70 };
     const longTl = getRenderTimeline({ ...plan, placements: plan.placements.map((p) => ({ ...p, endTime: 70 })) }, { fps: 30, gap: 8, transitionDuration: 0.5 });
     const graph = buildVideoGraph({ timeline: longTl, clips: testClips, sourcePaths: testSourcePaths('/m'), settings, chunk: { f0: 0, f1: 90 }, overlays: overlaysFor([countdown], plan) });
     const texts = parseFilterGraph(graph.filterComplex).flatMap((c) => c.filters).filter((f) => f.startsWith('drawtext=')).map((f) => parseFilterOptions(f));
-    // 61 s = 1830 frames: values ≥ 60 s while more than 59 s remain (1770 frames), i.e. local frames [0, 60)
+    // 61 s = 1830 frames, always shown as M:SS (single drawtext, no switch)
     expect(texts.map((t) => [t['text'], t['enable']])).toEqual([
-      ['%{eif:floor(ceil((1830-round(t*30))*1/30)/60):d:2}:%{eif:mod(floor(ceil((1830-round(t*30))*1/30)/1),60):d:2}', 'between(t,-0.016667,1.983333)'],
-      ['%{eif:ceil((1830-round(t*30))*1/30):d:2}', 'between(t,1.983333,2.983333)'],
+      ['%{eif:floor(ceil((1830-round(t*30))*1/30)/60):d:2}:%{eif:mod(floor(ceil((1830-round(t*30))*1/30)/1),60):d:2}', 'between(t,-0.016667,2.983333)'],
     ]);
+
+    // below 60 s of (uncut) duration: always SS, even at its very first frame
+    const short = { ...createCountdownOverlay({ id: 'cd2', name: 'C2', start: 0 }), duration: 59 };
+    const shortGraph = buildVideoGraph({ timeline: tl, clips: testClips, sourcePaths: testSourcePaths('/m'), settings, chunk: { f0: 0, f1: 90 }, overlays: overlaysFor([short], testPlans.static) });
+    const shortText = parseFilterGraph(shortGraph.filterComplex).flatMap((c) => c.filters).find((f) => f.startsWith('drawtext='))!;
+    expect(parseFilterOptions(shortText)['text']).not.toContain('}:%{eif'); // no minutes:seconds separator
   });
 
   test('render job passes the overlays to every chunk', () => {

@@ -41,22 +41,22 @@ export function getOverlayPixelBox(box: OverlayBox, width: number, height: numbe
  */
 export const getCountdownUnits = (remainingFrames: number, fps: number, decimals: number) => Math.ceil((remainingFrames * 10 ** decimals) / fps);
 
-/** Countdowns switch from `M:SS` to `SS` below 60 s, per shown value. */
-export const getCountdownMinutesThreshold = (decimals: number) => 60 * 10 ** decimals;
-
 /**
- * Remaining frames at and below which the countdown shows less than 60 s (the `SS` format):
- * `getCountdownUnits(r) < 60·10^d ⇔ r ≤ this`.
+ * Whether a countdown shows `M:SS` for its whole run (decided once, by its total duration, not by the shown value):
+ * ≥ 60 s of (uncut) duration keeps `M:SS` throughout (`1:00` → `0:59` → … → `0:01`); below that it's always `SS`
+ * (01-requisitos §9.1).
  */
-export const getCountdownSecondsFormatFrames = (fps: number, decimals: number) => Math.floor(((getCountdownMinutesThreshold(decimals) - 1) * fps) / 10 ** decimals);
+export function getCountdownMinutesFormat(frames: Pick<OverlayFrames, 'rawStart' | 'rawEnd'>, fps: number) {
+  return frames.rawEnd - frames.rawStart >= 60 * fps;
+}
 
-/** Text of a countdown value (from {@link getCountdownUnits}): `S[.ddd]` below 60 s, `M:SS[.ddd]` from 60 s on. */
-export function formatCountdown(units: number, decimals: number, leadingZeros: boolean) {
+/** Text of a countdown value (from {@link getCountdownUnits}): `S[.ddd]` or `M:SS[.ddd]` per {@link getCountdownMinutesFormat}. */
+export function formatCountdown(units: number, decimals: number, leadingZeros: boolean, minutesFormat: boolean) {
   const p = 10 ** decimals;
   const seconds = Math.floor(units / p);
   const pad = (v: number, n: number) => String(v).padStart(n, '0');
   const fraction = decimals > 0 ? `.${pad(units % p, decimals)}` : '';
-  if (units < getCountdownMinutesThreshold(decimals)) return `${leadingZeros ? pad(seconds, 2) : seconds}${fraction}`;
+  if (!minutesFormat) return `${leadingZeros ? pad(seconds, 2) : seconds}${fraction}`;
   const minutes = Math.floor(seconds / 60);
   return `${leadingZeros ? pad(minutes, 2) : minutes}:${pad(seconds % 60, 2)}${fraction}`;
 }
@@ -64,7 +64,7 @@ export function formatCountdown(units: number, decimals: number, leadingZeros: b
 /** Countdown text at output frame `frame` (undefined if not visible), as the render draws it. */
 export function getCountdownTextAt(overlay: { decimals: number, leadingZeros: boolean }, frames: OverlayFrames, frame: number, fps: number) {
   if (frame < frames.start || frame >= frames.end) return undefined;
-  return formatCountdown(getCountdownUnits(frames.rawEnd - frame, fps, overlay.decimals), overlay.decimals, overlay.leadingZeros);
+  return formatCountdown(getCountdownUnits(frames.rawEnd - frame, fps, overlay.decimals), overlay.decimals, overlay.leadingZeros, getCountdownMinutesFormat(frames, fps));
 }
 
 /**

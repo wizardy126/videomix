@@ -123,6 +123,11 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     }, i18n.t('Failed to open file'));
   }, [activateSourceFile, project.sources, relinkSource, withErrorHandling]);
 
+  /** Clears a pending "file not found" warning for one overlay file, e.g. once it's relinked ("Locate...", "Replace…"). */
+  const clearMissingOverlayFile = useCallback((overlayId: string, kind: OverlayFileKind) => {
+    setMissingOverlayFiles((existing) => existing.filter((m) => m.overlayId !== overlayId || m.kind !== kind));
+  }, []);
+
   const userLocateOverlayFile = useCallback(async (overlayId: string, kind: OverlayFileKind) => {
     const overlay = project.overlays.find((o) => o.id === overlayId);
     const file = overlay != null ? getOverlayFiles(overlay).find((f) => f.kind === kind)?.file : undefined;
@@ -132,9 +137,9 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
       const [newPath] = filePaths;
       if (canceled || newPath == null) return;
       relinkOverlayFile(overlayId, kind, newPath);
-      setMissingOverlayFiles((existing) => existing.filter((m) => m.overlayId !== overlayId || m.kind !== kind));
+      clearMissingOverlayFile(overlayId, kind);
     }, i18n.t('Failed to open file'));
-  }, [project.overlays, relinkOverlayFile, withErrorHandling]);
+  }, [clearMissingOverlayFile, project.overlays, relinkOverlayFile, withErrorHandling]);
 
   const userRemoveSource = useCallback(async (sourceId: string) => {
     const source = project.sources.find((s) => s.id === sourceId);
@@ -313,6 +318,7 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     userActivateSource,
     userLocateSource,
     userLocateOverlayFile,
+    clearMissingOverlayFile,
     userRemoveSource,
     userAddSourcesDialog,
     userNewProject,

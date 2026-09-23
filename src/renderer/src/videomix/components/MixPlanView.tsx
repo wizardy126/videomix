@@ -16,10 +16,11 @@ import type { UseMixOverlays } from '../hooks/useMixOverlays';
 import type { MissingOverlayFile } from '../projectFile';
 import type { DragHandle } from '../overlayMath';
 import { resizeHandles } from '../overlayMath';
-import { applyOverlayBoxDrag, formatCountdownText, getOverlayFrameBoxes, getOverlayMovePatch, getOverlayResizePatch, layoutOverlayLanes, pixelsToSeconds } from '../overlayTimeline';
+import { applyOverlayBoxDrag, getOverlayFrameBoxes, getOverlayMovePatch, getOverlayResizePatch, layoutOverlayLanes, pixelsToSeconds } from '../overlayTimeline';
 import type { OverlayFrameBox, OverlayLaneItem } from '../overlayTimeline';
 import { getOverlayLaneLabel, getOverlayTimeWarningText } from '../overlayTexts';
 import { getLinkedCountdown } from '../overlays/anchors';
+import { getCountdownTextAt, getOverlayFrames } from '../overlays/overlayFrames';
 
 const { pathToFileURL } = window.require('@electron/remote').require('./index.js');
 
@@ -173,15 +174,22 @@ const OverlayBlock = memo(({ overlay, item, duration, isSelected, canMove, canRe
 
 /** Content of an overlay's box on the mini frame: roughly what the render draws (image, countdown text, bar fill). */
 // eslint-disable-next-line react/display-name
-const OverlayBoxContent = memo(({ frameBox }: { frameBox: OverlayFrameBox }) => {
-  const { overlay, progress, elapsed } = frameBox;
+const OverlayBoxContent = memo(({ frameBox, fps }: { frameBox: OverlayFrameBox, fps: number }) => {
+  const { overlay, progress, elapsed, times } = frameBox;
   if (overlay.type === 'image') {
     return <img src={pathToFileURL(overlay.path).href} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'fill', display: 'block' }} />;
   }
   if (overlay.type === 'countdown') {
+    // Same text as the render (overlayFrames.getCountdownTextAt): clamped to the visible range, so the selected
+    // overlay still shows a value when it's placed outside the time it's on screen.
+    const frames = times != null ? getOverlayFrames(times, fps) : undefined;
+    const frame = frames != null && frames.end > frames.start
+      ? Math.min(Math.max(Math.round(elapsed * fps) + frames.start, frames.start), frames.end - 1)
+      : 0;
+    const text = frames != null ? (getCountdownTextAt(overlay, frames, frame, fps) ?? '') : '';
     return (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: { left: 'flex-start', center: 'center', right: 'flex-end' }[overlay.align], color: overlay.color, fontSize: `${overlay.box.height * 100}cqh`, lineHeight: 1, whiteSpace: 'nowrap', fontWeight: 600, textShadow: overlay.border.width > 0 ? `0 0 1px ${overlay.border.color}, 0 0 1px ${overlay.border.color}` : undefined }}>
-        {formatCountdownText(overlay.duration - elapsed, overlay.decimals, overlay.leadingZeros)}
+        {text}
       </div>
     );
   }
@@ -430,7 +438,7 @@ function MixPlanView({ clips, settings, selectedClipId, onSelect, mixOverlays, o
                 onPointerCancel={handleBoxPointerCancel}
                 style={{ ...boxPercentStyle(frameBox.overlay.box), opacity: frameBox.visible ? 1 : 0.4, cursor: 'move', touchAction: 'none', outline: frameBox.visible ? undefined : '1px dashed var(--gray-12)' }}
               >
-                <OverlayBoxContent frameBox={frameBox} />
+                <OverlayBoxContent frameBox={frameBox} fps={settings.fps} />
               </div>
             ))}
             {selectedFrameBox != null && (

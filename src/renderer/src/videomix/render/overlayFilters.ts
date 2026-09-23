@@ -1,5 +1,5 @@
 import { overlayPxToOutput } from '../overlays/factories';
-import { getCountdownSecondsFormatFrames, getOverlayFrames, getOverlayPixelBox } from '../overlays/overlayFrames';
+import { getCountdownMinutesFormat, getOverlayFrames, getOverlayPixelBox } from '../overlays/overlayFrames';
 import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
 import type { CountdownOverlay, ImageOverlay, MixOverlay, ProgressBarOverlay } from '../types';
 import { escapeFilterValue, formatNumber, toFfmpegColor as toColor } from './ffmpegArgs';
@@ -77,9 +77,11 @@ export function buildOverlayFilters({ overlays, times, defaultFontPath }: VideoG
     const units = `ceil(${remaining}*${p}/${fps})`;
     const pad = overlay.leadingZeros ? ':d:2' : ':d';
     const fraction = decimals > 0 ? `.%{eif:mod(${units},${p}):d:${decimals}}` : '';
-    const secondsValue = decimals > 0 ? `floor(${units}/${p})` : units;
-    const secondsText = `%{eif:${secondsValue}${pad}}${fraction}`;
-    const minutesText = `%{eif:floor(${units}/${60 * p})${pad}}:%{eif:mod(floor(${units}/${p}),60):d:2}${fraction}`;
+    // Format decided once, by the countdown's (uncut) duration, not by the shown value (01-requisitos §9.1): a single
+    // drawtext, no if().
+    const text = getCountdownMinutesFormat({ rawStart: raw.start, rawEnd: raw.end }, fps)
+      ? `%{eif:floor(${units}/${60 * p})${pad}}:%{eif:mod(floor(${units}/${p}),60):d:2}${fraction}`
+      : `%{eif:${decimals > 0 ? `floor(${units}/${p})` : units}${pad}}${fraction}`;
 
     const borderWidth = lengthPx(overlay.border.width, H);
     const alignFactor = { left: '0', center: '0.5', right: '1' }[overlay.align];
@@ -100,14 +102,8 @@ export function buildOverlayFilters({ overlays, times, defaultFontPath }: VideoG
       ...(overlay.fadeOut > 0 ? [`alpha='min(1,${remaining}/${formatNumber(overlay.fadeOut * fps)})'`] : []),
     ].join(':');
 
-    // One drawtext per format: `M:SS` while the value is ≥ 60 s, `SS` below (switch frame computed here, no if())
-    const switchFrame = raw.end - f0 - getCountdownSecondsFormatFrames(fps, decimals);
-    const phases = [
-      { text: minutesText, lo, hi: Math.min(hi, switchFrame) },
-      { text: secondsText, lo: Math.max(lo, switchFrame), hi },
-    ].filter((phase) => phase.hi > phase.lo);
     const next = newLabel('cv');
-    filters.push(`[${out}]${phases.map((phase) => `drawtext=${options}:text=${escapeFilterValue(phase.text)}:${enable(phase.lo, phase.hi)}`).join(',')}[${next}]`);
+    filters.push(`[${out}]drawtext=${options}:text=${escapeFilterValue(text)}:${enable(lo, hi)}[${next}]`);
     out = next;
   };
 

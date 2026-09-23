@@ -1607,7 +1607,7 @@ function App() {
   const [showMixPlan, setShowMixPlan] = useState(false);
 
   // VideoMix: overlays edited in the Mix view (T22): plan + resolved overlay times, selection, cursor and overlay actions
-  const mixOverlays = useMixOverlays({ mixProject, enabled: videoMixMode && showMixPlan, withErrorHandling });
+  const mixOverlays = useMixOverlays({ mixProject, enabled: videoMixMode && showMixPlan, withErrorHandling, onFileReplaced: mixWorkspace.clearMissingOverlayFile });
 
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);

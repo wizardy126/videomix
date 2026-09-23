@@ -201,4 +201,19 @@ await generate('v-720x1280-silent-7s.mp4', [
 await generateMusic('music-20s.m4a', 20, ['-c:a', 'aac', '-b:a', '128k']);
 await generateMusic('music-60s.mp3', 60, ['-c:a', 'libmp3lame', '-b:a', '128k']);
 
+// T23: a transparent PNG (a plain circular "logo") and a short beep, for the overlays example project
+// (script/videomix/renderOverlaysExample.ts) and manual testing of the image and sound overlay types.
+await generate('overlay-logo.png', [
+  '-f', 'lavfi', '-i', 'color=c=0x2266ff:s=400x400',
+  '-vf', String.raw`format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte(pow(X-200\,2)+pow(Y-200\,2)\,200*200)\,255\,0)'`,
+  '-frames:v', '1',
+]);
+// 0.5 s: short enough to read as a "beep", but long enough for ffmpeg's loudnorm gating to measure it (it reports
+// -inf for very short clips, e.g. 0.3 s, which the loudness normalization then treats as silence).
+await generate('overlay-beep.wav', [
+  '-f', 'lavfi', '-i', 'sine=frequency=880:duration=0.5',
+  '-af', 'afade=t=out:st=0.35:d=0.15',
+  '-c:a', 'pcm_s16le',
+]);
+
 console.log(`Done. Files are in ${outDir}/`);

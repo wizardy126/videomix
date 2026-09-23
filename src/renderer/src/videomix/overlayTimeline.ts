@@ -136,10 +136,12 @@ export interface OverlayFrameBox {
   overlay: Exclude<MixOverlay, { type: 'sound' }>,
   /** False for the selected overlay when it isn't on screen at that time (it's still shown, to place it). */
   visible: boolean,
-  /** 0..1 progress through its duration at that time (for the bar fill and the countdown text). */
+  /** 0..1 progress through its duration at that time (for the bar fill). */
   progress: number,
   /** Seconds since its start (clamped to its duration). */
   elapsed: number,
+  /** Resolved times (T19), for the countdown text (overlayFrames.getCountdownTextAt): undefined if unresolved. */
+  times: Pick<ResolvedOverlayTime, 'start' | 'end' | 'rawStart' | 'rawEnd'> | undefined,
 }
 
 /**
@@ -160,7 +162,7 @@ export function getOverlayFrameBoxes(
     if (!visible && overlay.id !== selectedId) return;
     const duration = times != null ? times.rawEnd - times.rawStart : 0;
     const elapsed = times != null ? Math.min(Math.max(0, time - times.rawStart), Math.max(0, duration)) : 0;
-    ret.push({ overlay, visible, elapsed, progress: duration > 0 ? elapsed / duration : 0 });
+    ret.push({ overlay, visible, elapsed, progress: duration > 0 ? elapsed / duration : 0, times });
   });
   return ret;
 }
@@ -196,19 +198,6 @@ export function getImageBox(imageSize: Size, frame: Size, width = 0.3): OverlayB
     h = 1;
   }
   return { x: (1 - w) / 2, y: (1 - h) / 2, width: w, height: h };
-}
-
-/** Countdown text at `remaining` s, as the render formats it (01-requisitos §9.1): rounded up, `SS` or `MM:SS`. For the mini frame. */
-export function formatCountdownText(remaining: number, decimals: 0 | 1 | 2 | 3, leadingZeros: boolean) {
-  const factor = 10 ** decimals;
-  // round up at the chosen precision (the tiny epsilon avoids 3.0000000001 showing as 3.1)
-  const value = Math.max(0, Math.ceil(remaining * factor - 1e-9) / factor);
-  const minutes = Math.floor(value / 60);
-  const seconds = value - minutes * 60;
-  const secondsText = seconds.toFixed(decimals);
-  if (value < 60) return leadingZeros ? secondsText.padStart(decimals > 0 ? 3 + decimals : 2, '0') : secondsText;
-  const paddedSeconds = secondsText.padStart(decimals > 0 ? 3 + decimals : 2, '0');
-  return `${leadingZeros ? String(minutes).padStart(2, '0') : minutes}:${paddedSeconds}`;
 }
 
 /** `#rrggbb` + alpha (0..1) → `#rrggbb` or `#rrggbbaa` (opaque colors stay short). */

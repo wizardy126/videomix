@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 
 import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay } from './factories';
 import {
-  formatCountdown, getCountdownSecondsFormatFrames, getCountdownTextAt, getCountdownUnits, getOverlayFrames, getOverlayPixelBox, getProgressBarFraction, getVisibleOverlayBoxes,
+  formatCountdown, getCountdownMinutesFormat, getCountdownTextAt, getCountdownUnits, getOverlayFrames, getOverlayPixelBox, getProgressBarFraction, getVisibleOverlayBoxes,
 } from './overlayFrames';
 import { resolveOverlayTimes } from './resolveOverlayTimes';
 
@@ -17,37 +17,41 @@ describe('countdown', () => {
     expect(getCountdownUnits(1, 25, 2)).toBe(4);
   });
 
-  test('format: SS below 60 s, M:SS from 60 s, decimals and leading zeros', () => {
-    expect(formatCountdown(5, 0, false)).toBe('5');
-    expect(formatCountdown(5, 0, true)).toBe('05');
-    expect(formatCountdown(59, 0, false)).toBe('59');
-    expect(formatCountdown(60, 0, false)).toBe('1:00');
-    expect(formatCountdown(65, 0, true)).toBe('01:05');
-    expect(formatCountdown(6005, 0, false)).toBe('100:05');
-    expect(formatCountdown(34, 3, false)).toBe('0.034');
-    expect(formatCountdown(34, 3, true)).toBe('00.034');
-    expect(formatCountdown(5999, 2, false)).toBe('59.99');
-    expect(formatCountdown(6000, 2, false)).toBe('1:00.00');
-    expect(formatCountdown(7234, 1, false)).toBe('12:03.4');
+  test('format: SS or M:SS (per the minutesFormat flag), decimals and leading zeros', () => {
+    expect(formatCountdown(5, 0, false, false)).toBe('5');
+    expect(formatCountdown(5, 0, true, false)).toBe('05');
+    expect(formatCountdown(59, 0, false, false)).toBe('59');
+    expect(formatCountdown(60, 0, false, true)).toBe('1:00');
+    expect(formatCountdown(65, 0, true, true)).toBe('01:05');
+    expect(formatCountdown(6005, 0, false, true)).toBe('100:05');
+    expect(formatCountdown(34, 3, false, false)).toBe('0.034');
+    expect(formatCountdown(34, 3, true, false)).toBe('00.034');
+    expect(formatCountdown(5999, 2, false, false)).toBe('59.99');
+    expect(formatCountdown(6000, 2, false, true)).toBe('1:00.00');
+    expect(formatCountdown(7234, 1, false, true)).toBe('12:03.4');
+    // below 60 s of shown value but the format stays M:SS because the whole countdown does (01-requisitos §9.1)
+    expect(formatCountdown(59, 0, false, true)).toBe('0:59');
   });
 
-  test('the M:SS → SS switch frame agrees with the formatted value', () => {
-    for (const fps of [24, 25, 30, 50, 60]) {
-      for (const decimals of [0, 1, 2, 3]) {
-        const r = getCountdownSecondsFormatFrames(fps, decimals);
-        expect(formatCountdown(getCountdownUnits(r, fps, decimals), decimals, false)).not.toContain(':');
-        expect(formatCountdown(getCountdownUnits(r + 1, fps, decimals), decimals, false)).toContain(':');
-      }
-    }
+  test('minutes format: decided once by the (uncut) duration, not by the shown value', () => {
+    expect(getCountdownMinutesFormat({ rawStart: 0, rawEnd: 59 * 30 }, 30)).toBe(false);
+    expect(getCountdownMinutesFormat({ rawStart: 0, rawEnd: 60 * 30 }, 30)).toBe(true);
+    expect(getCountdownMinutesFormat({ rawStart: 10 * 30, rawEnd: 10 * 30 + 60 * 30 }, 30)).toBe(true);
   });
 
-  test('text at a frame: visible frames only, disappears at 0', () => {
+  test('text at a frame: visible frames only, disappears at 0, M:SS throughout a ≥ 60 s countdown', () => {
     const countdown = { ...createCountdownOverlay({ id: 'c', name: 'c' }), decimals: 1 as const };
     const frames = getOverlayFrames({ start: 1, end: 3, rawStart: 1, rawEnd: 3 }, 30);
     expect(getCountdownTextAt(countdown, frames, 29, 30)).toBeUndefined();
     expect(getCountdownTextAt(countdown, frames, 30, 30)).toBe('2.0');
     expect(getCountdownTextAt(countdown, frames, 89, 30)).toBe('0.1');
     expect(getCountdownTextAt(countdown, frames, 90, 30)).toBeUndefined();
+
+    const longFrames = getOverlayFrames({ start: 0, end: 61, rawStart: 0, rawEnd: 61 }, 1);
+    const long = { ...createCountdownOverlay({ id: 'c2', name: 'c2' }), decimals: 0 as const };
+    expect(getCountdownTextAt(long, longFrames, 0, 1)).toBe('1:01');
+    expect(getCountdownTextAt(long, longFrames, 1, 1)).toBe('1:00');
+    expect(getCountdownTextAt(long, longFrames, 2, 1)).toBe('0:59');
   });
 });
 

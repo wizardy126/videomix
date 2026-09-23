@@ -1167,6 +1167,7 @@
   "Opacity (%)": "Opacidad (%)",
   "Outside the video: it won't be seen or heard": "Fuera del vídeo: no se verá ni se oirá",
   "Overlay": "Elemento",
+  "Overlay \"{{overlay}}\": {{warning}}": "Elemento \"{{overlay}}\": {{warning}}",
   "Overlay \"{{overlay}}\": invalid color": "Elemento \"{{overlay}}\": color no válido",
   "Overlay \"{{overlay}}\": its anchors form a cycle": "Elemento \"{{overlay}}\": sus anclajes forman un ciclo",
   "Overlay \"{{overlay}}\": its box is outside the video frame": "Elemento \"{{overlay}}\": su caja se sale del fotograma",

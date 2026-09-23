@@ -707,6 +707,7 @@
   "Output video frame rate (frames per second)": "Output video frame rate (frames per second)",
   "Outside the video: it won't be seen or heard": "Outside the video: it won't be seen or heard",
   "Overlay": "Overlay",
+  "Overlay \"{{overlay}}\": {{warning}}": "Overlay \"{{overlay}}\": {{warning}}",
   "Overlay \"{{overlay}}\": invalid color": "Overlay \"{{overlay}}\": invalid color",
   "Overlay \"{{overlay}}\": its anchors form a cycle": "Overlay \"{{overlay}}\": its anchors form a cycle",
   "Overlay \"{{overlay}}\": its box is outside the video frame": "Overlay \"{{overlay}}\": its box is outside the video frame",

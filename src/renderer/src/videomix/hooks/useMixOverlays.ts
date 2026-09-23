@@ -38,11 +38,13 @@ export const overlayFileExtensions = {
  * cursor (where new overlays go), and the overlay actions of the lanes, the mini frame and the properties panel.
  * Edits go through useMixProject, so they are undoable; drags use transient edits (one undo step per drag).
  */
-export default function useMixOverlays({ mixProject, enabled, withErrorHandling }: {
+export default function useMixOverlays({ mixProject, enabled, withErrorHandling, onFileReplaced }: {
   mixProject: UseMixProject,
   /** The plan is only computed while the Mix view is shown. */
   enabled: boolean,
   withErrorHandling: WithErrorHandling,
+  /** Called after "Replace…"/"Choose a font" relinks a file, so a pending "file not found" warning is cleared too (T23). */
+  onFileReplaced?: ((overlayId: string, kind: OverlayFileKind) => void) | undefined,
 }) {
   const { project, addOverlay, updateOverlay, removeOverlay, duplicateOverlay, moveOverlayLayer, relinkOverlayFile, commitTransient, cancelTransient } = mixProject;
   const { clips, settings, overlays } = project;
@@ -136,8 +138,9 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling 
       const filePath = await askForFile(fileKind, current != null ? dirname(current) : undefined);
       if (filePath == null) return;
       relinkOverlayFile(overlayId, kind, filePath);
+      onFileReplaced?.(overlayId, kind);
     }, i18n.t('Failed to open file'));
-  }, [askForFile, overlays, relinkOverlayFile, withErrorHandling]);
+  }, [askForFile, onFileReplaced, overlays, relinkOverlayFile, withErrorHandling]);
 
   const update = useCallback((overlayId: string, patch: MixOverlayPatch, options?: EditOptions) => updateOverlay(overlayId, patch, options), [updateOverlay]);
 

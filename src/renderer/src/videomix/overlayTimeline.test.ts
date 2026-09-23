@@ -2,7 +2,6 @@ import { describe, expect, test } from 'vitest';
 
 import {
   applyOverlayBoxDrag,
-  formatCountdownText,
   getAnchorOfKind,
   getImageBox,
   getOverlayFrameBoxes,
@@ -158,18 +157,6 @@ describe('mini frame', () => {
 });
 
 describe('texts and colors', () => {
-  test('countdown text, rounded up', () => {
-    expect(formatCountdownText(9.2, 0, false)).toBe('10');
-    expect(formatCountdownText(5, 0, false)).toBe('5');
-    expect(formatCountdownText(5, 0, true)).toBe('05');
-    expect(formatCountdownText(4.21, 1, false)).toBe('4.3');
-    expect(formatCountdownText(4.21, 1, true)).toBe('04.3');
-    expect(formatCountdownText(65, 0, false)).toBe('1:05');
-    expect(formatCountdownText(65, 0, true)).toBe('01:05');
-    expect(formatCountdownText(59.5, 0, false)).toBe('1:00');
-    expect(formatCountdownText(-1, 2, false)).toBe('0.00');
-  });
-
   test('colors with alpha', () => {
     expect(splitOverlayColor('#ff0000')).toEqual({ rgb: '#ff0000', alpha: 1 });
     expect(splitOverlayColor('#00000080')).toEqual({ rgb: '#000000', alpha: 128 / 255 });
