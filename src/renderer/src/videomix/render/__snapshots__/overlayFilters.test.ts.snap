@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`overlay filters > snapshot of a chunk with every overlay type 1`] = `
+"[0:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=90,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=202:360:flags=bicubic,setsar=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=90,setpts=PTS-STARTPTS,crop=1290:1080:316:0,scale=430:360:flags=bicubic,setsar=1[clip1];
+color=c=0x303030:s=640x360:r=30:d=3.033333,trim=end_frame=90,format=yuv420p[cv2];
+[cv2][clip0]overlay=x=0:y=0:eof_action=pass[cv3];
+[cv3][clip1]overlay=x=210:y=0:eof_action=pass[cv4];
+[2:v]trim=end_frame=1,scale=192:108:flags=bicubic,setsar=1,format=rgba,loop=loop=59:size=1,settb=1/30,setpts=N+0,fade=t=in:st=0:d=0.4:alpha=1,fade=t=out:st=1.5:d=0.5:alpha=1,setpts=N+15[ovimg5];
+[cv4][ovimg5]overlay=x=224:y=126:eof_action=pass:enable='between(t,0.483333,2.483333)'[cv6];
+[cv6]drawtext=fontfile=\\'/fonts/OpenSans-Bold.ttf\\':fontsize=36:fontcolor=0xffffff:borderw=1:bordercolor=0x000000:shadowx=1:shadowy=1:shadowcolor=0x00000080:x=492+(128-text_w)*1:y=10+(36-text_h)/2:alpha='min(1,(75-round(t*30))/15)':text=\\'%{eif:floor(ceil((75-round(t*30))*10/30)/10):d}.%{eif:mod(ceil((75-round(t*30))*10/30)\\,10):d:1}\\':enable='between(t,0.483333,2.483333)'[cv7];
+color=c=0x00000080:s=602x10:r=30:d=2.033333,trim=end_frame=60,format=rgba[ovbg9];
+color=c=0xffffff:s=600x8:r=30:d=2.033333,trim=end_frame=60,format=rgba[ovfill10];
+[ovbg9][ovfill10]overlay=x='1':y='9-round(8*(60-round(t*30))/60)':eval=frame:format=rgb,drawbox=x=0:y=0:w=602:h=10:color=0x000000:t=1:replace=1,setpts=N+15[ovbar8];
+[cv7][ovbar8]overlay=x=20:y=338:eof_action=pass:enable='between(t,0.483333,2.483333)'[cv11];
+[cv11]format=yuv420p[vout]"
+`;

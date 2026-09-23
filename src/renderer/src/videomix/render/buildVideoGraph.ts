@@ -5,11 +5,16 @@ import type { MixClip, MixSettings, Rect } from '../types';
 import type { RenderChunk } from './renderChunks';
 import { getColumnsAtFrame, getFillSpansAtFrame, getPlacementsInRange } from './renderTimeline';
 import type { ColumnGeometry, PlacementFrames, RenderTimeline } from './renderTimeline';
+import { formatNumber, toFfmpegColor } from './ffmpegArgs';
+import { buildOverlayFilters } from './overlayFilters';
+import type { VideoGraphOverlays } from './overlayFilters';
 
 // Filter graph of one render chunk (ADR-001 "Grafo de un bloque"). Columns are composed left to right with overlay
 // on a canvas of the gap colour; a column whose width changes inside the chunk uses the "column layer" technique
 // (fixed crop of the union of the per-frame crops → scale eval=frame → overlay at per-frame offsets on a fixed-size
 // base), anchored left: its visible window is [0, w(t)) and the next element to its right hides the rest.
+
+export { formatNumber, toFfmpegColor } from './ffmpegArgs';
 
 export type VideoGraphSettings = Pick<MixSettings, 'fps' | 'gap' | 'transition' | 'fadeInOut' | 'fill'>;
 
@@ -34,15 +39,6 @@ const MIN_BLUR_FILL_WIDTH = 16;
 const roundEven = (v: number) => 2 * Math.round(v / 2) + 0;
 const ceilEven = (v: number) => 2 * Math.ceil(v / 2 - 1e-6) + 0;
 const floorEven = (v: number) => 2 * Math.floor(v / 2 + 1e-6) + 0;
-
-/** Number for ffmpeg args/expressions: at most 6 decimals, never exponent notation. */
-export const formatNumber = (v: number) => {
-  const rounded = Math.round(v * 1e6) / 1e6 + 0;
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(6).replace(/0+$/, '');
-};
-
-/** `#rrggbb` (project format) → `0xrrggbb` (unambiguous in filter graphs). */
-export const toFfmpegColor = (color: string) => (/^#[\da-f]{6}$/i.test(color) ? `0x${color.slice(1)}` : color);
 
 /**
  * Piecewise-constant expression of the frame values `values[m]` (frame m shown at t = m / fps), written as a flat sum
@@ -91,12 +87,14 @@ interface Segment { label: string, start: number, end: number }
  * Filter graph for the frames [chunk.f0, chunk.f1) of the plan.
  * `sourcePaths` maps `sourceId` → media path. Clip rects are in oriented source pixels (ffmpeg autorotates).
  */
-export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, chunk }: {
+export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, chunk, overlays }: {
   timeline: RenderTimeline,
   clips: RenderClip[],
   sourcePaths: Record<string, string>,
   settings: VideoGraphSettings,
   chunk: Pick<RenderChunk, 'f0' | 'f1'>,
+  /** Images, countdowns and progress bars drawn over the composition (T20). */
+  overlays?: VideoGraphOverlays | undefined,
 }): VideoGraph {
   const { plan } = tl;
   const { fps } = settings;
@@ -385,6 +383,14 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
       filters.push(`${colorSource(gapColor, settings.gap.width, N)}[${bar}]`);
       overlayAt(bar, e.xs.map((x, n) => roundEven(Math.max(x + e.ws[n]!, next.xs[n]! - settings.gap.width))), '');
     }
+  }
+
+  // Overlays over the composed frame and under the global fade, which also fades them (T20)
+  if (overlays != null) {
+    const res = buildOverlayFilters(overlays, { width: W, height: H, fps, f0, f1, firstInput: inputs.length, newLabel }, cv);
+    inputs.push(...res.inputs);
+    filters.push(...res.filters);
+    cv = res.cv;
   }
 
   // Global fade from/to black: a black layer whose alpha ramps over the first/last D seconds of the video. Built in

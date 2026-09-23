@@ -2,22 +2,57 @@
 // produced once and consumed once, input streams exist and are used once, crops of the inputs stay inside the source
 // frame, split counts match and no expression nests if() (ffmpeg's parser limit, ADR-001).
 
-/** Split `text` on `separator` outside single quotes (expressions are quoted and contain commas). */
+/**
+ * Split `text` on `separator` outside single quotes (expressions are quoted and contain commas), keeping quotes and
+ * escapes. Like ffmpeg's av_get_token, a backslash outside quotes escapes the next character (drawtext texts, font paths).
+ */
 function splitOutsideQuotes(text: string, separator: string) {
   const parts: string[] = [];
   let current = '';
   let quoted = false;
-  for (const ch of text) {
-    if (ch === "'") quoted = !quoted;
-    if (ch === separator && !quoted) {
-      parts.push(current);
-      current = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    if (ch === '\\' && !quoted && i + 1 < text.length) {
+      current += ch + text[i + 1]!;
+      i += 1;
     } else {
-      current += ch;
+      if (ch === "'") quoted = !quoted;
+      if (ch === separator && !quoted) {
+        parts.push(current);
+        current = '';
+      } else {
+        current += ch;
+      }
     }
   }
   parts.push(current);
   return parts;
+}
+
+/** One level of ffmpeg's unescaping (av_get_token without terminators): quotes removed, `\x` → `x` outside quotes. */
+export function unescapeFilterToken(text: string) {
+  let out = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i]!;
+    if (ch === "'") quoted = !quoted;
+    else if (ch === '\\' && !quoted && i + 1 < text.length) {
+      out += text[i + 1]!;
+      i += 1;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Options of a filter as ffmpeg sees them after both levels of unescaping (graph, then `key=value:…`). */
+export function parseFilterOptions(filter: string): Record<string, string> {
+  const args = unescapeFilterToken(filter.slice(filter.indexOf('=') + 1));
+  return Object.fromEntries(splitOutsideQuotes(args, ':').map((option) => {
+    const eq = option.indexOf('=');
+    return [option.slice(0, eq), unescapeFilterToken(option.slice(eq + 1))];
+  }));
 }
 
 export interface ParsedChain {
@@ -66,6 +101,20 @@ export function verifyFilterGraph(
     if (chain.outputs.length === 0) issues.push(`chain ${i} has no output label`);
     if (chain.filters.some((f) => f.trim() === '')) issues.push(`chain ${i} has an empty filter`);
     if (chain.filters.some((f) => /\bif\(/.test(f))) issues.push(`chain ${i} uses if() (nesting limit)`);
+
+    // overlays (T20): a timed filter only where it's shown, drawtext with its font and a balanced %{…} text
+    for (const filter of chain.filters.filter((f) => filterName(f) === 'drawtext' || filterName(f) === 'overlay')) {
+      const name = filterName(filter);
+      const options = parseFilterOptions(filter);
+      const between = options['enable'] != null ? /^between\(t,(-?[\d.]+),(-?[\d.]+)\)$/.exec(options['enable']) : undefined;
+      if (between === null || (between != null && !(Number(between[1]) < Number(between[2])))) issues.push(`chain ${i}: bad enable in ${filter}`);
+      if (name === 'drawtext') {
+        if (!options['fontfile']) issues.push(`chain ${i}: drawtext without fontfile`);
+        const text = options['text'] ?? '';
+        if (text === '' || text.split('%{').length !== text.split('}').length) issues.push(`chain ${i}: bad drawtext text ${text}`);
+        if (options['enable'] == null) issues.push(`chain ${i}: drawtext without enable`);
+      }
+    }
 
     const last = chain.filters.at(-1)!;
     if (filterName(last) === 'split') {

@@ -186,6 +186,10 @@
       {
         "from": "locales",
         "to": "locales"
+      },
+      {
+        "from": "resources/fonts",
+        "to": "fonts"
       }
     ],
     "win": {

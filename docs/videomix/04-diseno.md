@@ -514,11 +514,14 @@ type MixOverlay = ImageOverlay | CountdownOverlay | ProgressBarOverlay | SoundOv
 
 ### 8.2 Render de vídeo (T20)
 
-- Se aplica **sobre la salida compuesta de cada bloque** (después de columnas, rellenos y separaciones, antes del *fade* global), con el tiempo absoluto del vídeo (`t + inicioDelBloque`) para que un elemento partido entre bloques salga continuo.
-- **PNG**: entrada `-loop 1 -i` (o `-i` con `-t`), `scale` a la caja, `fade` con alfa y `overlay=enable='between(...)'`.
-- **Contador**: `drawtext` con `fontfile` y el texto por expresión de tiempo (`%{eif:…}` con los decimales). Borde (`borderw`/`bordercolor`) y sombra (`shadowx`/`shadowy`/`shadowcolor`), y `alpha` para el *fade*. Una fuente libre (OFL) se incluye en `extraResources`.
-- **Barra**: `drawbox` (o `color` + `overlay`) con el ancho o alto en función de `t`, respetando el borde y el fondo.
-- La mini vista del fotograma (T15) dibuja las cajas de los elementos visibles en ese instante.
+Implementado en `render/overlayFilters.ts` (grafo) y `overlays/overlayFrames.ts` (valores por fotograma compartidos con la UI). Detalles en [T20](execution/T20-overlays-render.md).
+
+- Se aplica **sobre la salida compuesta de cada bloque** (después de columnas, rellenos y separaciones, antes del *fade* global), en orden de capas. Solo entran en el grafo de un bloque los elementos visibles en él.
+- **Todo en fotogramas absolutos** (`round(t·fps)`, como el resto del render): el fotograma local `n` del bloque es el `f0 + n` del vídeo, así que las expresiones son aritmética entera y exactas en los cortes. `enable='between(t,(lo−½)/fps,(hi−½)/fps)'`.
+- **PNG**: entrada `-f image2 -pattern_type none -i`, `scale` a la caja (px pares) una sola vez y `loop` del fotograma; `fade` con alfa sobre una base de tiempos que empieza en el inicio del elemento, y `overlay` con `enable`.
+- **Contador**: `drawtext` con `fontfile` y el texto por expresión (`%{eif:…}`), valor `ceil(restantes·10^d/fps)` en fotogramas. Dos `drawtext` si hace falta (`M:SS` mientras el valor es ≥ 60 s y `SS` después; el fotograma del cambio se calcula en JS), sin `if()`. Borde, sombra y `alpha` para el *fade*. Texto y ruta de la fuente con doble escapado (opción y grafo). Fuente por defecto: Open Sans Bold (OFL) en `resources/fonts`, `extraResources` → `fonts`, localizada con `getDefaultOverlayFontPath()` (`src/main/ffmpeg.ts`).
+- **Barra**: capa RGBA del tamaño de la caja con el fondo, una capa de relleno del tamaño interior que entra desde el lado que crece (`overlay` con `x`/`y` por fotograma, recortada por la capa) y el borde encima (`drawbox … replace=1`); después `overlay` sobre el lienzo.
+- La mini vista del fotograma (T15/T22) dibuja las cajas de los elementos visibles con `getVisibleOverlayBoxes` (mismo redondeo a fotogramas que el render).
 
 ### 8.3 Audio (T21)
 

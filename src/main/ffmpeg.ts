@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { access } from 'node:fs/promises';
 import readline from 'node:readline';
 import stringToStream from 'string-to-stream';
@@ -65,6 +65,16 @@ function getFfPath(cmd: FfCommand) {
     ...(isWindows || isLinux ? ['lib'] : []),
     exeName,
   );
+}
+
+/**
+ * Bundled font of the VideoMix countdowns (T20): Open Sans Bold (SIL OFL 1.1, license next to it). `resources/fonts` in
+ * development, the `fonts` extraResources dir when packaged. Absolute, as ffmpeg's drawtext gets it as `fontfile`.
+ */
+export function getDefaultOverlayFontPath() {
+  const fileName = 'OpenSans-Bold.ttf';
+  if (app.isPackaged) return join(process.resourcesPath, 'fonts', fileName);
+  return resolve('resources', 'fonts', fileName);
 }
 
 // Used by the startup check to fail fast with a proper ENOENT if the executable doesn't exist.

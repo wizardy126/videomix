@@ -5,12 +5,13 @@ import { nanoid } from 'nanoid';
 
 import mainApi from '../../mainApi';
 import { UserFacingError } from '../../../errors';
-import { abortFfmpegs, runFfmpegWithProgress } from '../../ffmpeg';
+import { abortFfmpegs, getDefaultOverlayFontPath, runFfmpegWithProgress } from '../../ffmpeg';
 import type { SetWorking } from '../../hooks/useLoading';
 import type { WithErrorHandling } from '../../hooks/useErrorHandling';
 import type { ShowGenericDialog } from '../../components/GenericDialog';
 import type { UseMixProject } from './useMixProject';
 import { validateMixProject } from '../project';
+import { getOverlayFiles } from '../projectFile';
 import { ensureLoudness, getSoundDurations } from '../loudness';
 import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
 import { buildRenderJob, getChunkConcurrency } from '../render/buildRenderJob';
@@ -108,11 +109,15 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     const issues = validateMixProject(project);
     const errors = issues.filter((issue) => issue.level === 'error');
 
-    // Only the sources that are used (a source without clips doesn't matter) and the music
+    // Only the sources that are used (a source without clips doesn't matter), the music and the overlay files
     const usedSourceIds = new Set(project.clips.map((clip) => clip.sourceId));
     const filesToCheck = [
       ...project.sources.filter((source) => usedSourceIds.has(source.id)).map((source) => ({ name: source.name, filePath: source.absolutePath })),
       ...(project.settings.music != null ? [{ name: path.basename(project.settings.music.absolutePath), filePath: project.settings.music.absolutePath }] : []),
+      // overlay images, sounds and countdown fonts (T20)
+      ...project.overlays.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => ({ name: overlay.name, filePath: file.absolutePath }))),
+      // the bundled font, if used (a broken install would otherwise fail inside ffmpeg)
+      ...(project.overlays.some((overlay) => overlay.type === 'countdown' && overlay.font == null) ? [{ name: 'OpenSans-Bold.ttf', filePath: getDefaultOverlayFontPath() }] : []),
     ];
     const missing = (await Promise.all(filesToCheck.map(async (file) => ((await mainApi.pathExists(file.filePath)) ? undefined : file)))).filter((file) => file != null);
 
@@ -168,6 +173,8 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
         // RenderClip has no muted/gainDb: close over the full clips (T12)
         buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness, overlays: soundOverlays, overlayTimes }),
         join: path.join,
+        // images, countdowns and progress bars (T20)
+        overlays: { overlays: project.overlays, times: overlayTimes, defaultFontPath: getDefaultOverlayFontPath() },
       });
       await runRenderJob({
         job,

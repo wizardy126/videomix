@@ -23,6 +23,8 @@ export default function registerRendererImports() {
         return nextResolve(specifier, context);
       } catch (err) {
         const isRelative = specifier.startsWith('./') || specifier.startsWith('../');
+        // CommonJS package subpaths without exports map (`lodash/omit`, used by the overlay modules)
+        if (!isRelative && /^[\w@][^:]*\/[^.]+$/.test(specifier)) return nextResolve(`${specifier}.js`, context);
         if (!isRelative || /\.[cm]?[jt]sx?$/.test(specifier)) throw err;
         for (const suffix of candidateSuffixes) {
           try {

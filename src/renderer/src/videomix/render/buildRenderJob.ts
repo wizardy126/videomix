@@ -2,6 +2,7 @@ import type { MixPlan } from '../planner/types';
 import type { MixSettings, mixPresets } from '../types';
 import { buildVideoGraph, formatNumber } from './buildVideoGraph';
 import type { RenderClip, VideoGraphSettings } from './buildVideoGraph';
+import type { VideoGraphOverlays } from './overlayFilters';
 import { MAX_CHUNK_SECONDS, getRenderChunks } from './renderChunks';
 import type { RenderChunk } from './renderChunks';
 import { getRenderTimeline } from './renderTimeline';
@@ -111,6 +112,7 @@ export function buildRenderJob({
   maxChunkSeconds = MAX_CHUNK_SECONDS,
   buildAudioGraph = buildSilentAudioGraph,
   join = defaultJoin,
+  overlays,
 }: {
   plan: MixPlan,
   clips: RenderClip[],
@@ -122,6 +124,8 @@ export function buildRenderJob({
   maxChunkSeconds?: number | undefined,
   buildAudioGraph?: BuildAudioGraph | undefined,
   join?: ((dir: string, name: string) => string) | undefined,
+  /** Visual overlays with their times resolved for `plan` (T20). */
+  overlays?: VideoGraphOverlays | undefined,
 }): RenderJob {
   const { fps } = settings;
   const timeline: RenderTimeline = getRenderTimeline(plan, { fps, gap: settings.gap.width, transitionDuration: settings.transition.duration });
@@ -133,7 +137,7 @@ export function buildRenderJob({
 
   const files: RenderJob['files'] = [];
   const chunks = getRenderChunks(timeline, { maxChunkSeconds }).map((chunk): RenderChunkStep => {
-    const graph = buildVideoGraph({ timeline, clips, sourcePaths, settings: graphSettings, chunk });
+    const graph = buildVideoGraph({ timeline, clips, sourcePaths, settings: graphSettings, chunk, overlays });
     const name = `chunk-${String(chunk.index).padStart(4, '0')}`;
     const graphPath = join(workDir, `${name}.graph.txt`);
     const fileName = `${name}.mp4`;
