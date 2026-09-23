@@ -40,7 +40,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T12b | Normalización de la pista de música | M3 | Sonnet | T12 | hecha |
 | T13 | Orquestación del render y la previsualización | M4 | Opus | T07, T11, T12 | hecha |
 | T14 | Diálogo de ajustes de montaje | M4 | Sonnet | T04 | hecha |
-| T15 | Timeline del montaje (vista del plan) | M5 | Sonnet | T10, T13 | pendiente |
+| T15 | Timeline del montaje (vista del plan) | M5 | Sonnet | T10, T13 | hecha |
 | T16 | Limpieza de la UI heredada de LosslessCut | M5 | Sonnet | T13 | pendiente |
 | T17 | i18n (es), atajos y manual de usuario | M5 | Sonnet | T16 | pendiente |
 | T18 | Empaquetado de VideoMix | M6 | Sonnet | T17 | pendiente |

@@ -40,6 +40,7 @@ import useMixClips from './videomix/hooks/useMixClips';
 import useMixRender from './videomix/hooks/useMixRender';
 import MixSettingsDialog from './videomix/components/MixSettingsDialog';
 import MixRenderButtons from './videomix/components/MixRenderButtons';
+import MixPlanView from './videomix/components/MixPlanView';
 import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
 import TopMenu from './TopMenu';
 import LastCommands from './LastCommands';
@@ -1598,6 +1599,8 @@ function App() {
   // VideoMix: preview and render of the mix (T13), and the mix settings dialog (T14). They replace LosslessCut's export
   const mixRender = useMixRender({ mixProject, workingRef, setWorking, setProgress, withErrorHandling, showGenericDialog, openExportFinishedDialog, appendFfmpegCommandLog, enableOverwriteOutput });
   const [mixSettingsOpen, setMixSettingsOpen] = useState(false);
+  // VideoMix: Source/Mix tabs above the bottom timeline area (T15). "Mix" shows the plan instead of the active source.
+  const [showMixPlan, setShowMixPlan] = useState(false);
 
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);
@@ -2803,42 +2806,76 @@ function App() {
                 </div>
 
                 <div style={bottomStyle}>
-                  <Timeline
-                    shouldShowKeyframes={shouldShowKeyframes}
-                    waveforms={waveforms}
-                    overviewWaveform={overviewWaveform}
-                    shouldShowWaveform={shouldShowWaveform}
-                    waveformEnabled={waveformEnabled}
-                    waveformHeight={waveformHeight}
-                    showThumbnails={showThumbnails}
-                    neighbouringKeyFrames={neighbouringKeyFrames}
-                    thumbnails={thumbnailsSorted}
-                    playerTime={playerTime}
-                    commandedTime={commandedTime}
-                    relevantTime={relevantTime}
-                    commandedTimeRef={commandedTimeRef}
-                    startTimeOffset={startTimeOffset}
-                    zoom={zoom}
-                    seekAbs={seekAbs}
-                    fileDurationNonZero={fileDurationNonZero}
-                    cutSegments={cutSegments}
-                    setCurrentSegIndex={setCurrentSegIndex}
-                    currentSegIndexSafe={currentSegIndexSafe}
-                    currentCutSeg={currentCutSeg}
-                    inverseCutSegments={inverseCutSegments}
-                    formatTimecode={formatTimecode}
-                    zoomWindowStartTime={zoomWindowStartTime}
-                    zoomWindowEndTime={zoomWindowEndTime}
-                    onZoomWindowStartTimeChange={setZoomWindowStartTime}
-                    onGenerateOverviewWaveformClick={generateOverviewWaveform}
-                    playing={playing}
-                    isFileOpened={isFileOpened}
-                    onWheel={onTimelineWheel}
-                    goToTimecode={goToTimecode}
-                    darkMode={darkMode}
-                    setCutTime={setCutTime}
-                    setHoveringTime={setHoveringTime}
-                  />
+                  {/* VideoMix: Source/Mix tabs (T15) swap the source Timeline for the mix plan view; the player above keeps showing the active source either way */}
+                  {videoMixMode && (
+                    <div className="no-user-select" style={{ display: 'flex', gap: 2, padding: '.3em .5em 0' }}>
+                      {([['source', t('Source')], ['mix', t('Mix')]] as const).map(([tab, label]) => (
+                        <button
+                          key={tab}
+                          type="button"
+                          onClick={() => setShowMixPlan(tab === 'mix')}
+                          style={{
+                            font: 'inherit',
+                            fontSize: '.75em',
+                            padding: '.2em .8em',
+                            border: 'none',
+                            borderRadius: '.3em .3em 0 0',
+                            cursor: 'pointer',
+                            color: (tab === 'mix') === showMixPlan ? 'var(--gray-12)' : 'var(--gray-11)',
+                            background: (tab === 'mix') === showMixPlan ? 'var(--gray-2)' : 'transparent',
+                          }}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {videoMixMode && showMixPlan ? (
+                    <MixPlanView
+                      clips={mixProject.project.clips}
+                      settings={mixProject.project.settings}
+                      selectedClipId={mixClips.selectedClipId}
+                      onSelect={mixClips.userSelectClip}
+                    />
+                  ) : (
+                    <Timeline
+                      shouldShowKeyframes={shouldShowKeyframes}
+                      waveforms={waveforms}
+                      overviewWaveform={overviewWaveform}
+                      shouldShowWaveform={shouldShowWaveform}
+                      waveformEnabled={waveformEnabled}
+                      waveformHeight={waveformHeight}
+                      showThumbnails={showThumbnails}
+                      neighbouringKeyFrames={neighbouringKeyFrames}
+                      thumbnails={thumbnailsSorted}
+                      playerTime={playerTime}
+                      commandedTime={commandedTime}
+                      relevantTime={relevantTime}
+                      commandedTimeRef={commandedTimeRef}
+                      startTimeOffset={startTimeOffset}
+                      zoom={zoom}
+                      seekAbs={seekAbs}
+                      fileDurationNonZero={fileDurationNonZero}
+                      cutSegments={cutSegments}
+                      setCurrentSegIndex={setCurrentSegIndex}
+                      currentSegIndexSafe={currentSegIndexSafe}
+                      currentCutSeg={currentCutSeg}
+                      inverseCutSegments={inverseCutSegments}
+                      formatTimecode={formatTimecode}
+                      zoomWindowStartTime={zoomWindowStartTime}
+                      zoomWindowEndTime={zoomWindowEndTime}
+                      onZoomWindowStartTimeChange={setZoomWindowStartTime}
+                      onGenerateOverviewWaveformClick={generateOverviewWaveform}
+                      playing={playing}
+                      isFileOpened={isFileOpened}
+                      onWheel={onTimelineWheel}
+                      goToTimecode={goToTimecode}
+                      darkMode={darkMode}
+                      setCutTime={setCutTime}
+                      setHoveringTime={setHoveringTime}
+                    />
+                  )}
 
                   <BottomBar
                     zoom={zoom}

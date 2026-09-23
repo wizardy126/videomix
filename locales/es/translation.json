@@ -1067,5 +1067,11 @@
   "The mix has been rendered to: {{path}}": "El montaje se ha renderizado en: {{path}}",
   "The project has duplicate clip ids": "El proyecto tiene ids de clip duplicados",
   "The project has duplicate source ids": "El proyecto tiene ids de fuente duplicados",
-  "The project has no clips yet. Add clips before rendering.": "El proyecto aún no tiene clips. Añade clips antes de renderizar."
+  "The project has no clips yet. Add clips before rendering.": "El proyecto aún no tiene clips. Añade clips antes de renderizar.",
+  "Add clips to see the mix plan here.": "Añade clips para ver aquí el plan del montaje.",
+  "Enlarged more than the recommended limit": "Ampliado más del límite recomendado",
+  "Gets fill around it in this column": "Tiene relleno alrededor en esta columna",
+  "Its transition is shortened": "Su transición se acorta",
+  "Mix": "Montaje",
+  "Source": "Fuente"
 }
