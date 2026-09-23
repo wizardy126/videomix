@@ -35,11 +35,15 @@ const formatTime = (seconds: number) => formatDuration({ seconds, shorten: true 
 
 const stopPropagation: MouseEventHandler = (e) => e.stopPropagation();
 
+const thumbnailStyle: CSSProperties = { width: 30, height: 30, flexShrink: 0, objectFit: 'cover', borderRadius: 3 };
+
 // eslint-disable-next-line react/display-name
-const ClipRow = memo(({ clip, index, source, isSelected, dragging, settings, onSelect, onUpdate, onDuplicate, onRemove, onGoToSource }: {
+const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, dragging, settings, onSelect, onUpdate, onDuplicate, onRemove, onGoToSource }: {
   clip: MixClip,
   index: number,
   source: MixSource | undefined,
+  /** Start frame cropped to the clip's max rect (A2, T31), from `useClipThumbnails`. Undefined while it's generating. */
+  thumbnailUrl: string | undefined,
   isSelected: boolean,
   dragging?: boolean | undefined,
   settings: Pick<MixSettings, 'transition'>,
@@ -153,6 +157,8 @@ const ClipRow = memo(({ clip, index, source, isSelected, dragging, settings, onS
           <FaGripVertical style={{ fontSize: '.8em' }} />
         </div>
 
+        {thumbnailUrl != null ? <img src={thumbnailUrl} alt="" draggable={false} style={thumbnailStyle} /> : <div style={thumbnailStyle} />}
+
         <b
           role="button"
           title={t('Change color')}
@@ -208,10 +214,12 @@ const ClipRow = memo(({ clip, index, source, isSelected, dragging, settings, onS
 });
 
 /** Right panel: all the clips of the project, of any source, in list (= mix) order. Replaces SegmentList in VideoMix. */
-function ClipList({ width, clips, sources, settings, selectedClipId, onSelect, onUpdate, onReorder, onAdd, onDuplicate, onRemove, onGoToSource }: {
+function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClipId, onSelect, onUpdate, onReorder, onAdd, onDuplicate, onRemove, onGoToSource }: {
   width: number,
   clips: MixClip[],
   sources: MixSource[],
+  /** From `useClipThumbnails` (A2, T31), shared with `MixPlanView`. */
+  thumbnailUrls: ReadonlyMap<string, string>,
   settings: Pick<MixSettings, 'transition'>,
   selectedClipId: string | undefined,
   onSelect: (id: string) => void,
@@ -267,6 +275,7 @@ function ClipList({ width, clips, sources, settings, selectedClipId, onSelect, o
       clip={clip}
       index={index}
       source={sourcesById.get(clip.sourceId)}
+      thumbnailUrl={thumbnailUrls.get(clip.id)}
       isSelected={clip.id === selectedClipId}
       dragging={dragging}
       settings={settings}

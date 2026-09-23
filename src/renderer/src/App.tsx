@@ -43,6 +43,7 @@ import MixRenderButtons from './videomix/components/MixRenderButtons';
 import MixPlanView from './videomix/components/MixPlanView';
 import OverlayPanel from './videomix/components/OverlayPanel';
 import useMixOverlays from './videomix/hooks/useMixOverlays';
+import useClipThumbnails from './videomix/hooks/useClipThumbnails';
 import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
 import { isKeyboardActionRetired } from '../../common/videomix/legacyUi';
 import TopMenu from './TopMenu';
@@ -1609,6 +1610,9 @@ function App() {
   // VideoMix: overlays edited in the Mix view (T22): plan + resolved overlay times, selection, cursor and overlay actions
   const mixOverlays = useMixOverlays({ mixProject, enabled: videoMixMode && showMixPlan, withErrorHandling, onFileReplaced: mixWorkspace.clearMissingOverlayFile });
 
+  // VideoMix: clip thumbnails (A2, T31), shared by ClipList and MixPlanView so each clip is only generated once
+  const mixThumbnails = useClipThumbnails({ clips: mixProject.project.clips, sources: mixProject.project.sources, enabled: videoMixMode });
+
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);
 
@@ -2776,6 +2780,7 @@ function App() {
                       width={rightBarWidth}
                       clips={mixProject.project.clips}
                       sources={mixProject.project.sources}
+                      thumbnailUrls={mixThumbnails.thumbnailUrls}
                       settings={mixProject.project.settings}
                       selectedClipId={mixClips.selectedClipId}
                       onSelect={mixClips.userSelectClip}
@@ -2867,6 +2872,7 @@ function App() {
                       settings={mixProject.project.settings}
                       selectedClipId={mixClips.selectedClipId}
                       onSelect={mixClips.userSelectClip}
+                      thumbnailUrls={mixThumbnails.thumbnailUrls}
                       mixOverlays={mixOverlays}
                       overlays={mixProject.project.overlays}
                       missingOverlayFiles={mixWorkspace.missingOverlayFiles}

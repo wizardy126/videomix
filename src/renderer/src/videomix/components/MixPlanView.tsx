@@ -24,6 +24,7 @@ import { getOverlayLaneLabel, getOverlayTimeWarningText } from '../overlayTexts'
 import { getLinkedCountdown } from '../overlays/anchors';
 import { getCountdownTextAt, getOverlayFrames } from '../overlays/overlayFrames';
 import { getSlideOffset, getTextEntryFrames, getTextFontSizeForBox, getTextOpacity, getTextOverlayFontSize, getTypewriterCount, splitGraphemes, splitTextLines } from '../overlays/textLayout';
+import styles from './MixPlanView.module.css';
 
 const { pathToFileURL } = window.require('@electron/remote').require('./index.js');
 
@@ -72,11 +73,13 @@ function warningTooltip(t: (key: string) => string, warnings: PlanWarning[], row
 }
 
 // eslint-disable-next-line react/display-name
-const Block = memo(({ placement, laneWidthPercent, color, name, warnings, isSelected, rows }: {
+const Block = memo(({ placement, laneWidthPercent, color, name, thumbnailUrl, warnings, isSelected, rows }: {
   placement: ColumnPlacement,
   laneWidthPercent: { left: number, width: number },
   color: string,
   name: string,
+  /** From `useClipThumbnails` (A2, T31), shown only if the block is wide enough (MixPlanView.module.css). */
+  thumbnailUrl: string | undefined,
   warnings: PlanWarning[],
   isSelected: boolean,
   rows: boolean,
@@ -99,10 +102,17 @@ const Block = memo(({ placement, laneWidthPercent, color, name, warnings, isSele
     border: `1px solid ${isSelected ? 'var(--gray-12)' : 'transparent'}`,
     boxSizing: 'border-box',
     cursor: 'pointer',
+    containerType: 'inline-size',
   }), [color, isSelected, laneWidthPercent.left, laneWidthPercent.width]);
 
   return (
     <div style={style} title={`${name}${warnings.length > 0 ? ` — ${warningTooltip(t, warnings, rows)}` : ''}`}>
+      {thumbnailUrl != null && (
+        <div className={styles['thumbWrap']}>
+          <img src={thumbnailUrl} alt="" draggable={false} className={styles['thumbImg']} />
+          <div className={styles['thumbTint']} style={{ background: color, opacity: 0.55 }} />
+        </div>
+      )}
       {inFrac > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${inFrac * 100}%`, background: 'linear-gradient(90deg, rgba(255,255,255,.4), transparent)', pointerEvents: 'none' }} />}
       {outFrac > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: `${outFrac * 100}%`, background: 'linear-gradient(90deg, transparent, rgba(0,0,0,.4))', pointerEvents: 'none' }} />}
       <div className="no-user-select" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: '.2em', padding: '0 .3em', fontSize: '.75em', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', pointerEvents: 'none' }}>
@@ -309,11 +319,13 @@ const FramePreview = memo(({ plan, tl, time, clipsById, getColor, children }: {
 interface BlockDrag { pointerId: number, mode: BlockDragMode, startX: number, axisWidth: number, start: MixOverlay, rawStart: number, moved: boolean }
 interface BoxDrag { pointerId: number, handle: DragHandle, startX: number, startY: number, scale: number, start: Exclude<MixOverlay, { type: 'sound' }>, moved: boolean }
 
-function MixPlanView({ clips, settings, selectedClipId, onSelect, mixOverlays, overlays, missingOverlayFiles }: {
+function MixPlanView({ clips, settings, selectedClipId, onSelect, thumbnailUrls, mixOverlays, overlays, missingOverlayFiles }: {
   clips: MixClip[],
   settings: MixSettings,
   selectedClipId: string | undefined,
   onSelect: (clipId: string) => void,
+  /** From `useClipThumbnails` (A2, T31), shared with `ClipList`. */
+  thumbnailUrls: ReadonlyMap<string, string>,
   mixOverlays: UseMixOverlays,
   overlays: MixOverlay[],
   missingOverlayFiles: readonly MissingOverlayFile[],
@@ -568,6 +580,7 @@ function MixPlanView({ clips, settings, selectedClipId, onSelect, mixOverlays, o
                       laneWidthPercent={{ left, width }}
                       color={clip != null ? getColor(clip) : 'var(--gray-8)'}
                       name={clip?.name ?? placement.clipId}
+                      thumbnailUrl={thumbnailUrls.get(placement.clipId)}
                       warnings={getPlacementWarnings(plan, placement)}
                       isSelected={placement.clipId === selectedClipId}
                       rows={getPlanAxis(plan) === 'rows'}

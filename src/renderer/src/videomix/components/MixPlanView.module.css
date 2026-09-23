@@ -1,0 +1,25 @@
+/* Clip thumbnail on a Mix view block (A2, T31): shown only once the block is wide enough to be worth it. Needs a
+   container query (inline styles can't express one), so `containerType: 'inline-size'` on the block itself. */
+.thumbWrap {
+  display: none;
+  position: absolute;
+  inset: 0;
+}
+
+@container (min-width: 40px) {
+  .thumbWrap {
+    display: block;
+  }
+}
+
+.thumbImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumbTint {
+  position: absolute;
+  inset: 0;
+}
