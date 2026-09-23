@@ -53,6 +53,7 @@
 | T07 | [T07-clips.md](T07-clips.md) |
 | T09 | [T09-spike-render.md](T09-spike-render.md) |
 | T10 | [T10-planificador.md](T10-planificador.md) |
+| T10b | [T10b-ajuste-planificador.md](T10b-ajuste-planificador.md) |
 | T11 | [T11-grafo-video.md](T11-grafo-video.md) |
 | T12 | [T12-audio.md](T12-audio.md) |
 | T13 | [T13-render.md](T13-render.md) |

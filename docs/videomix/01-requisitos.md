@@ -62,6 +62,10 @@ Crear proyectos de vídeo a partir de trozos de vídeos. El usuario define *clip
 - **Final**: según van terminando los clips y no quedan más, los huecos se rellenan con fondo (no se re-expande).
 - Clip entrante: el algoritmo elige, dentro de la ventana de reorden, un clip que **encaje en el ancho del hueco** liberado. Si ninguno encaja, hace un **re-layout** de toda la fila: los clips en curso siguen reproduciéndose y solo cambia su recorte/ancho.
 - El re-layout se ve como una **animación suave** de los anchos, con la misma duración que la transición global.
+- **Prioridad del relleno** (decidido tras T10): si la fila tiene relleno y un re-layout con otro clip lo elimina, se prefiere el re-layout aunque haya un clip que encaje exactamente en el hueco liberado.
+- **Columnas frente a pantalla completa** (decidido tras T10), criterio **equilibrado**: se prefieren 2–3 columnas, recortando los horizontales flexibles hacia su mín., pero se acepta un clip a pantalla completa si para meter más columnas habría que perder mucho de su máx.
+- **Columna nueva en un re-layout**: aparece creciendo desde ancho 0 y su clip entra con esa animación, sin transición adicional.
+- **Final del vídeo**: cuando un clip termina y ya no quedan clips, hace un **fundido** con la transición global hacia el relleno.
 
 ### 4.4 Orden
 

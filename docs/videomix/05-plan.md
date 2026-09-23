@@ -16,7 +16,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M0 · Fundaciones** | App renombrada, CI ajustado, entorno de desarrollo y medios de prueba | T01, T02 |
 | **M1 · Modelo y proyecto** | Tipos, esquema `.vmx`, geometría, store del proyecto con undo/redo y persistencia | T03, T04 |
 | **M2 · Edición** | Multi-fuente, overlay de rectángulos, clips y lista de clips | T05, T06, T07 |
-| **M3 · Motor de montaje** | Spike de render, planificador, grafo de vídeo, audio | T09, T10, T11, T12 |
+| **M3 · Motor de montaje** | Spike de render, planificador, grafo de vídeo, audio | T09, T10, T10b, T11, T12 |
 | **M4 · Render** | Orquestación del render y la preview, ajustes de montaje | T13, T14 |
 | **M5 · Previsualización y pulido** | Timeline del montaje, limpieza de la UI heredada, i18n y manual | T15, T16, T17 |
 | **M6 · Empaquetado** | Builds de VideoMix | T18 |
@@ -34,6 +34,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T07 | Clips: creación, sincronización y lista | M2 | Opus | T05, T06 | hecha |
 | T09 | Spike: estrategia de render ffmpeg (ADR-001) | M3 | Opus | T02 | hecha |
 | T10 | Planificador de montaje | M3 | Opus | T03 | hecha |
+| T10b | Ajuste del planificador (decisiones del usuario) | M3 | Opus | T10, T09 | pendiente |
 | T11 | Generador del grafo de vídeo | M3 | Opus | T09, T10 | pendiente |
 | T12 | Audio: análisis de sonoridad y grafo de audio | M3 | Opus | T03, T09 | pendiente |
 | T13 | Orquestación del render y la previsualización | M4 | Opus | T07, T11, T12 | pendiente |
