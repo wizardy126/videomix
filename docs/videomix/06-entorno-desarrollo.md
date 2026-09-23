@@ -76,6 +76,39 @@ temporal al terminar.
 
 **Definición de hecho de cada tarea**: `yarn tsc && yarn lint && yarn test run` en verde.
 
+## Empaquetado (T18)
+
+VideoMix solo empaqueta para **Linux** (AppImage + tar.bz2) y **Windows** (zip/7z); no hay
+objetivos de macOS, Mac App Store, Microsoft Store (appx) ni snap. La configuración vive en la
+clave `build` de `package.json` (electron-builder 26).
+
+```bash
+# Linux (necesita ffmpeg en ffmpeg/linux-x64/, ver más arriba)
+yarn pack-linux           # todos los objetivos de build.linux.target (tar.bz2 + AppImage, x64/arm64/armv7l)
+# o, para un objetivo/arquitectura concretos, sin pasar por el script:
+yarn build && node_modules/.bin/electron-builder --linux AppImage tar.gz --x64 --publish never
+
+# Windows (necesita ffmpeg en ffmpeg/win32-x64/lib, o win32-arm64/lib)
+yarn pack-win              # zip + 7z, x64 y arm64
+```
+
+Los artefactos se generan en `dist/` (ignorado por git; nunca se comitea). El icono provisional
+(`src/renderer/src/icon.svg`, tres columnas de vídeo en un marco 16:9) se renderiza a
+`icon-build/app-512.png` (Linux) y `icon-build/app.ico` (Windows) con `yarn generate-icon`
+(`script/generateIcon.ts`, usa `sharp`); `yarn build` ya lo invoca.
+
+Para comprobar un AppImage sin necesidad de FUSE/sandbox:
+
+```bash
+dist/VideoMix-linux-x64.AppImage --appimage-extract
+ls squashfs-root                                   # AppRun, videomix.desktop, resources/, ffmpeg, ffprobe…
+```
+
+Los ficheros de escritorio de Linux (`net.wizardy.videomix.desktop`,
+`net.wizardy.videomix.appdata.xml`, en la raíz del repo) no los usa electron-builder para generar
+el AppImage (que crea su propio `.desktop` a partir de `build.linux`); son metadatos para
+integraciones de escritorio/AppStream y quedan sincronizados a mano con la identidad del `appId`.
+
 ## Notas
 
 - `yarn lint` imprime avisos `TSSatisfiesExpression could not be resolved` que vienen del as-built. Son inofensivos.

@@ -1,6 +1,7 @@
 {
   "name": "videomix",
   "productName": "VideoMix",
+  "desktopName": "net.wizardy.videomix.desktop",
   "description": "Compose videos from clips of multiple videos",
   "copyright": "Copyright © 2026 ${author}",
   "version": "0.1.0",
@@ -21,14 +22,12 @@
     "test": "vitest",
     "lint": "eslint --ext .js,.ts,.jsx,.tsx,.mjs,.mts .",
     "check": "yarn tsc && yarn lint && yarn test run && yarn build && yarn check-licenses && yarn scan-i18n && yarn dedupe --check && yarn generate-docs",
-    "pack-mac": "yarn build && electron-builder --mac dmg",
-    "pack-mas-dev": "yarn build && electron-builder --mac mas-dev -c.mas.provisioningProfile=LosslessCut_Dev.provisionprofile -c.mas.identity='Mikael Finstad (JH4PH8B3C8)'",
-    "pack-win": "yarn build && electron-builder --win zip --x64",
+    "pack-win": "yarn build && electron-builder --win zip 7z --x64",
     "postinstall": "electron-builder install-app-deps",
-    "version": "node script/postversion.ts && git add no.mifi.losslesscut.appdata.xml",
+    "version": "node script/postversion.ts && git add net.wizardy.videomix.appdata.xml",
     "pack-linux": "yarn build && electron-builder --linux",
     "scan-i18n": "i18next-cli -c i18next.config.scan.ts extract",
-    "generate-icon": "mkdirp icon-build build-resources/appx && node script/generateIcon.ts",
+    "generate-icon": "mkdirp icon-build && node script/generateIcon.ts",
     "generate-licenses": "yarn licenses generate-disclaimer -R > licenses.txt && echo '\n\nffmpeg is licensed under GPL v2+:\n\nhttp://www.gnu.org/licenses/old-licenses/gpl-2.0.html' >> licenses.txt",
     "generate-docs": "node script/generateDocs.ts",
     "check-licenses": "node script/checkLicenses.ts",
@@ -36,9 +35,8 @@
     "generate-test-media": "node script/videomix/generateTestMedia.ts"
   },
   "author": {
-    "name": "Mikael Finstad",
-    "email": "finstaden@gmail.com",
-    "url": "https://mifi.no/"
+    "name": "wizardy126",
+    "url": "https://wizardy.net"
   },
   "repository": {
     "type": "git",
@@ -190,160 +188,23 @@
         "to": "locales"
       }
     ],
-    "mac": {
-      "hardenedRuntime": true,
-      "notarize": true,
-      "appId": "net.wizardy.videomix-mac",
-      "category": "public.app-category.productivity",
-      "target": [
-        {
-          "target": "mas",
-          "arch": "universal"
-        },
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "electronLanguages": [
-        "en"
-      ],
-      "extraResources": [
-        {
-          "from": "ffmpeg/darwin-${arch}",
-          "to": "."
-        }
-      ],
-      "icon": "icon-build/app.icns",
-      "fileAssociations": [
-        {
-          "ext": [
-            "webm",
-            "mkv",
-            "flv",
-            "vob",
-            "ogv",
-            "drc",
-            "gif",
-            "gifv",
-            "mng",
-            "avi",
-            "mts",
-            "m2ts",
-            "ts",
-            "mov",
-            "qt",
-            "wmv",
-            "yuv",
-            "rm",
-            "rmvb",
-            "asf",
-            "amv",
-            "mp4",
-            "m4v",
-            "mpg",
-            "mp2",
-            "mpeg",
-            "mpe",
-            "mpv",
-            "m2v",
-            "svi",
-            "3gp",
-            "3g2",
-            "mxf",
-            "roq",
-            "nsv",
-            "f4v",
-            "f4p",
-            "f4a",
-            "f4b"
-          ],
-          "name": "Video",
-          "description": "Video files",
-          "role": "Viewer"
-        },
-        {
-          "ext": [
-            "aa",
-            "aac",
-            "aax",
-            "act",
-            "aiff",
-            "alac",
-            "amr",
-            "ape",
-            "au",
-            "awb",
-            "dct",
-            "dss",
-            "dvf",
-            "flac",
-            "gsm",
-            "iklax",
-            "ivs",
-            "m4a",
-            "m4b",
-            "m4p",
-            "mmf",
-            "mp3",
-            "mpc",
-            "msv",
-            "nmf",
-            "nsf",
-            "ogg",
-            "oga",
-            "mogg",
-            "opus",
-            "ra",
-            "rf64",
-            "sln",
-            "tta",
-            "voc",
-            "vox",
-            "wav",
-            "wma",
-            "wv",
-            "8svx",
-            "cda"
-          ],
-          "name": "Audio",
-          "description": "Audio files",
-          "role": "Viewer"
-        }
-      ]
-    },
-    "mas": {
-      "artifactName": "${productName}-${os}-${arch}-DONT-USE-THIS-FILE.${ext}",
-      "hardenedRuntime": false,
-      "notarize": false,
-      "entitlements": "entitlements.mas.plist",
-      "entitlementsInherit": "entitlements.mas.inherit.plist",
-      "provisioningProfile": "LosslessCut_Mac_App_Store_provisioning_profile.provisionprofile",
-      "binaries": [
-        "Contents/Resources/ffmpeg",
-        "Contents/Resources/ffprobe"
-      ]
-    },
     "win": {
       "target": [
         {
           "arch": "x64",
-          "target": "7z"
+          "target": "zip"
         },
         {
           "arch": "x64",
-          "target": "appx"
-        },
-        {
-          "arch": "arm64",
           "target": "7z"
         },
         {
           "arch": "arm64",
-          "target": "appx"
+          "target": "zip"
+        },
+        {
+          "arch": "arm64",
+          "target": "7z"
         }
       ],
       "extraResources": [
@@ -447,18 +308,20 @@
           "name": "Audio",
           "description": "Audio files",
           "role": "Viewer"
+        },
+        {
+          "ext": [
+            "vmx"
+          ],
+          "name": "VideoMix Project",
+          "description": "VideoMix project files",
+          "role": "Editor"
         }
       ]
     },
-    "appx": {
-      "artifactName": "${productName}-${os}-${arch}-DONT-USE-THIS-FILE.${ext}",
-      "applicationId": "VideoMix",
-      "identityName": "wizardy126.videomix",
-      "publisher": "CN=wizardy126.videomix",
-      "publisherDisplayName": "wizardy126"
-    },
     "linux": {
       "executableName": "videomix",
+      "syncDesktopName": true,
       "extraResources": [
         {
           "from": "ffmpeg/linux-${arch}/lib",
@@ -477,10 +340,6 @@
           "target": "AppImage"
         },
         {
-          "arch": "x64",
-          "target": "snap"
-        },
-        {
           "arch": "arm64",
           "target": "tar.bz2"
         },
@@ -488,12 +347,17 @@
           "arch": "armv7l",
           "target": "tar.bz2"
         }
-      ]
-    },
-    "snap": {
-      "plugs": [
-        "default",
-        "removable-media"
+      ],
+      "fileAssociations": [
+        {
+          "ext": [
+            "vmx"
+          ],
+          "name": "VideoMix Project",
+          "description": "VideoMix project files",
+          "mimeType": "application/x-videomix-project",
+          "role": "Editor"
+        }
       ]
     }
   },

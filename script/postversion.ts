@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 import { DateTime } from 'luxon';
 
-const xmlUrl = new URL('../no.mifi.losslesscut.appdata.xml', import.meta.url);
+const xmlUrl = new URL('../net.wizardy.videomix.appdata.xml', import.meta.url);
 const xmlData = await readFile(xmlUrl);
 
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));

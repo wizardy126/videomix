@@ -43,7 +43,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T15 | Timeline del montaje (vista del plan) | M5 | Sonnet | T10, T13 | hecha |
 | T16 | Limpieza de la UI heredada de LosslessCut | M5 | Sonnet | T13 | hecha |
 | T17 | i18n (es), atajos y manual de usuario | M5 | Sonnet | T16 | hecha |
-| T18 | Empaquetado de VideoMix | M6 | Sonnet | T17 | pendiente |
+| T18 | Empaquetado de VideoMix | M6 | Sonnet | T17 | hecha |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 
