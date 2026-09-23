@@ -9,11 +9,12 @@ import type { KeyBinding, Config } from '../common/types.js';
 import logger from './logger.js';
 import { isWindows, pathExists } from './util.js';
 import { fallbackLng } from './i18nCommon.js';
+import { isKeyboardActionRetired } from '../common/videomix/legacyUi.js';
 
 const { app } = electron;
 
 
-const defaultKeyBindings: KeyBinding[] = [
+const allDefaultKeyBindings: KeyBinding[] = [
   { keys: 'ShiftLeft+Equal', action: 'addSegment' },
   { keys: 'Space', action: 'togglePlayResetSpeed' },
   { keys: 'KeyK', action: 'togglePlayNoResetSpeed' },
@@ -117,6 +118,9 @@ const defaultKeyBindings: KeyBinding[] = [
   { keys: 'ControlLeft+ShiftLeft+KeyM', action: 'showMixSettings' },
   { keys: 'MetaLeft+ShiftLeft+KeyM', action: 'showMixSettings' },
 ];
+
+// VideoMix: no default keys for the retired LosslessCut actions (they do nothing there, T16)
+const defaultKeyBindings = allDefaultKeyBindings.filter(({ action }) => !isKeyboardActionRetired(action));
 
 const defaults: Config = {
   version: 2,

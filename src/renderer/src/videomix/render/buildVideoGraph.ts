@@ -373,15 +373,17 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
     overlayAt(e.label, position(e), e.kind === 'column' ? ':eof_action=pass' : '');
   }
 
-  // Gap bars: while layers are wider than their window they cover the gaps, so the gaps are redrawn on top at the
-  // right edge of every layout column that has a column to its right.
+  // Gap bars: while layers are wider than their window they cover the gaps, so the gaps are redrawn on top between
+  // every two neighbouring layout columns: at the right edge of the left one, or just left of the right one when a fill
+  // opens between them (getFillSpansAtFrame). A column past W takes its bar out of the frame with it.
   if (anyVarying && settings.gap.width > 0) {
     const layoutColumns = elements.filter((e) => e.column != null);
     for (const [i, e] of layoutColumns.slice(0, -1).entries()) {
-      invariant(layoutColumns[i + 1] != null);
+      const next = layoutColumns[i + 1];
+      invariant(next != null);
       const bar = newLabel('gap');
       filters.push(`${colorSource(gapColor, settings.gap.width, N)}[${bar}]`);
-      overlayAt(bar, e.xs.map((x, n) => roundEven(x + e.ws[n]!)), '');
+      overlayAt(bar, e.xs.map((x, n) => roundEven(Math.max(x + e.ws[n]!, next.xs[n]! - settings.gap.width))), '');
     }
   }
 

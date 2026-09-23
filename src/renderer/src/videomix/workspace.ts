@@ -8,13 +8,8 @@ import type { MixMusic, MixSource } from './types';
 
 // Pure helpers for the multi-source workspace in App.tsx (T05). No React/Electron here, so they can be tested with vitest.
 
-/**
- * The app always runs as VideoMix (01-requisitos P1). The LosslessCut code paths that don't apply (.llc autosave,
- * chapter import, open-file actions, batch list) are switched off with this flag in App.tsx instead of being deleted,
- * so the changes there stay small and easy to follow (the leftovers are removed in T16).
- * Typed as `boolean` so the disabled branches still type-check.
- */
-export const videoMixMode = true as boolean;
+// The VideoMix flag lives in common, so main (menu, default key bindings) can use it too
+export { videoMixMode } from '../../../common/videomix/legacyUi';
 
 // Decided by extension only: probing every dropped file would be slow, and the audio-only case is just a suggestion the user confirms.
 const audioExtensions = new Set(['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga', 'opus', 'wma', 'aif', 'aiff', 'ac3', 'mka']);

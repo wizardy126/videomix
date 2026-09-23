@@ -6,7 +6,6 @@ import { nanoid } from 'nanoid';
 import mainApi from '../../mainApi';
 import { UserFacingError } from '../../../errors';
 import { abortFfmpegs, runFfmpegWithProgress } from '../../ffmpeg';
-import { showRefuseToOverwrite } from '../../dialogs';
 import type { SetWorking } from '../../hooks/useLoading';
 import type { WithErrorHandling } from '../../hooks/useErrorHandling';
 import type { ShowGenericDialog } from '../../components/GenericDialog';
@@ -15,7 +14,7 @@ import { validateMixProject } from '../project';
 import { ensureLoudness } from '../loudness';
 import { buildRenderJob, getChunkConcurrency } from '../render/buildRenderJob';
 import { buildAudioGraph } from '../render/buildAudioGraph';
-import { getDefaultOutputPath, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
+import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
 import { runRenderJob } from '../render/runRenderJob';
 import type { RenderRunnerDeps } from '../render/runRenderJob';
 import { askForRenderWarnings, getIssueText, getRenderWarningText, showRenderProblems } from '../renderDialogs';
@@ -44,12 +43,34 @@ const runnerDeps: RenderRunnerDeps = {
   abortAll: () => abortFfmpegs(),
 };
 
+/** Remove the temp dirs/files of renders and previews that were never cleaned up (app closed or crashed meanwhile). */
+async function removeOrphanTempEntries() {
+  try {
+    const tmpDir: string = remote.app.getPath('temp');
+    const names: string[] = (await fs.readdir(tmpDir)).filter((name: string) => name.startsWith('videomix-'));
+    const entries = (await Promise.all(names.map(async (name) => {
+      try {
+        const stats = await fs.lstat(path.join(tmpDir, name));
+        // never follow links
+        return stats.isFile() || stats.isDirectory() ? { name, mtimeMs: stats.mtimeMs } : undefined;
+      } catch {
+        return undefined;
+      }
+    }))).filter((entry) => entry != null);
+    const orphans = getOrphanTempEntries(entries, Date.now());
+    if (orphans.length > 0) console.log('Removing orphan temp files', orphans);
+    await Promise.all(orphans.map(async (name) => rmQuiet(path.join(tmpDir, name))));
+  } catch (err) {
+    console.warn('Failed to clean up orphan temp files', err);
+  }
+}
+
 /**
  * Render and preview of the mix (T13, 04-diseno §6.6): project → validation → plan (+ warnings to confirm) →
  * loudness analysis (cached in the project) → chunked render (runRenderJob) → finished dialog / preview dialog.
  * Both are cancellable from the Working dialog; temp files are always removed.
  */
-export default function useMixRender({ mixProject, workingRef, setWorking, setProgress, withErrorHandling, showGenericDialog, openExportFinishedDialog, appendFfmpegCommandLog, enableOverwriteOutput }: {
+export default function useMixRender({ mixProject, workingRef, setWorking, setProgress, withErrorHandling, showGenericDialog, openExportFinishedDialog, appendFfmpegCommandLog }: {
   mixProject: UseMixProject,
   workingRef: RefObject<boolean>,
   setWorking: SetWorking,
@@ -58,7 +79,6 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
   showGenericDialog: ShowGenericDialog,
   openExportFinishedDialog: (params: { filePath: string, children: string }) => Promise<void>,
   appendFfmpegCommandLog: (args: string[]) => void,
-  enableOverwriteOutput: boolean,
 }) {
   const { project, projectPath, setLoudnessCache } = mixProject;
 
@@ -75,6 +95,9 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
   }, []);
 
   useEffect(() => () => { removePreview(); }, [removePreview]);
+
+  // Once at startup (T16). Only old entries, so it can't touch a render running in another instance
+  useEffect(() => { removeOrphanTempEntries(); }, []);
 
   /** Validation, missing files and plan warnings. Returns the plan, or undefined if the user can't or won't go on. */
   const prepare = useCallback(async ({ preview }: { preview: boolean }) => {
@@ -183,11 +206,8 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       const outPath = withOutputExtension(filePath);
       lastOutputPathRef.current = outPath;
 
-      // The save dialog already asked to replace it; the "overwrite output" setting can still forbid it
-      if (!enableOverwriteOutput && await mainApi.pathExists(outPath)) {
-        await showRefuseToOverwrite();
-        return;
-      }
+      // LosslessCut's "overwrite output" setting is ignored (T16): the save dialog already asked to replace the file, and
+      // the render only replaces it once it has finished (partial name + rename)
 
       const id = nanoid(8);
       await render({
@@ -200,7 +220,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
 
       await openExportFinishedDialog({ filePath: outPath, children: i18n.t('The mix has been rendered to: {{path}}', { path: outPath }) });
     }, i18n.t('Failed to render the mix'));
-  }, [enableOverwriteOutput, openExportFinishedDialog, prepare, project.sources, projectPath, render, withErrorHandling, workingRef]);
+  }, [openExportFinishedDialog, prepare, project.sources, projectPath, render, withErrorHandling, workingRef]);
 
   const userPreviewMix = useCallback(async () => {
     if (workingRef.current) return;

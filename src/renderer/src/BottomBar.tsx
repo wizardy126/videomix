@@ -552,15 +552,20 @@ function BottomBar({
       </div>
 
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '.1em .3em', gap: '.5em', height: '2em' }}>
-        <InvertCutModeButton invertCutSegments={invertCutSegments} setInvertCutSegments={setInvertCutSegments} />
+        {/* VideoMix: clips are always kept, and the view is always the advanced one (T16) */}
+        {!videoMixMode && (
+          <>
+            <InvertCutModeButton invertCutSegments={invertCutSegments} setInvertCutSegments={setInvertCutSegments} />
 
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <SimpleModeButton />
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <SimpleModeButton />
 
-          {simpleMode && (
-            <div role="button" onClick={toggleSimpleMode} style={{ fontSize: '.8em', marginLeft: '.2em' }}>{t('Toggle advanced view')}</div>
-          )}
-        </div>
+              {simpleMode && (
+                <div role="button" onClick={toggleSimpleMode} style={{ fontSize: '.8em', marginLeft: '.2em' }}>{t('Toggle advanced view')}</div>
+              )}
+            </div>
+          </>
+        )}
 
         {isFileOpened && !simpleMode && (
           <>
@@ -575,13 +580,16 @@ function BottomBar({
 
             <div ref={playbackRateRef} title={t('Playback rate')} style={{ color: 'var(--gray-11)', fontSize: '.7em', borderRadius: '.5em' }}>{playbackRate.toFixed(1)}</div>
 
-            <div style={{ whiteSpace: 'nowrap' }}>
-              <IoMdSpeedometer title={t('Change FPS')} style={{ fontSize: '1.3em', verticalAlign: 'middle' }} role="button" onClick={handleChangePlaybackRateClick} />
+            {/* VideoMix: the output FPS/playback rate of LosslessCut's export doesn't apply to the render */}
+            {!videoMixMode && (
+              <div style={{ whiteSpace: 'nowrap' }}>
+                <IoMdSpeedometer title={t('Change FPS')} style={{ fontSize: '1.3em', verticalAlign: 'middle' }} role="button" onClick={handleChangePlaybackRateClick} />
 
-              {detectedFps != null && (
-                <span title={t('Video FPS')} role="button" onClick={handleChangePlaybackRateClick} style={{ color: 'var(--gray-11)', fontSize: '.7em', marginLeft: '.3em' }}>{(detectedFps * outputPlaybackRate).toFixed(3)}</span>
-              )}
-            </div>
+                {detectedFps != null && (
+                  <span title={t('Video FPS')} role="button" onClick={handleChangePlaybackRateClick} style={{ color: 'var(--gray-11)', fontSize: '.7em', marginLeft: '.3em' }}>{(detectedFps * outputPlaybackRate).toFixed(3)}</span>
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -608,7 +616,8 @@ function BottomBar({
           </div>
         </div>
 
-        {!simpleMode && isFileOpened && (
+        {/* VideoMix: it would trash a source of the project */}
+        {!simpleMode && isFileOpened && !videoMixMode && (
           <FaTrashAlt
             title={actionTitle(t('Close file and clean up'), 'cleanupFilesDialog')}
             style={{ fontSize: '1em', color: dangerColor }}

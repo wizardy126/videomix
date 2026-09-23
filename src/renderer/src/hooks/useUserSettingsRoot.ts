@@ -7,6 +7,7 @@ import type { Config } from '../../../common/types.js';
 import { errorToast } from '../swal';
 import isDev from '../isDev';
 import { mySpring, emitter as animationsEmitter } from '../animations';
+import { videoMixMode } from '../../../common/videomix/legacyUi';
 
 const remote = window.require('@electron/remote');
 const { systemPreferences } = remote;
@@ -257,7 +258,8 @@ export default function useUserSettingsRoot() {
     avoidNegativeTs,
     autoMerge,
     timecodeFormat,
-    invertCutSegments,
+    // VideoMix: segments are clips, always kept (the Keep/Remove toggle is hidden); the stored setting is left alone
+    invertCutSegments: videoMixMode ? false : invertCutSegments,
     autoExportExtraStreams,
     askBeforeClose,
     enableImportChapters,
@@ -275,7 +277,9 @@ export default function useUserSettingsRoot() {
     autoDeleteMergedSegments,
     exportConfirmEnabled,
     segmentsToChapters,
-    simpleMode,
+    // VideoMix: always the advanced view (I sets a marker, O turns it into a clip; all the timeline controls), whatever
+    // the stored setting, whose toggle is hidden (T16)
+    simpleMode: videoMixMode ? false : simpleMode,
     cutFileTemplate,
     cutMergedFileTemplate,
     mergedFileTemplate,

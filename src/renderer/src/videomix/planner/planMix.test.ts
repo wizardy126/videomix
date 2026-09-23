@@ -236,6 +236,10 @@ describe('decisions after T10 (T10b)', () => {
     // at the start of the animation the new columns are 0 px wide at the right edge of the freed column
     expect(getAnimatedColumn(before!, after!, 1, 1920, 0)).toEqual({ x: 1920, width: 0 });
     expect(getAnimatedColumn(before!, after!, 2, 1920, 0)).toEqual({ x: 1920, width: 0 });
+    // with a gap and no right neighbour it sits past the edge with its gap (T16: no gap bar popping up next to a right fill)
+    expect(getAnimatedColumn(before!, after!, 2, 1920, 16)).toEqual({ x: 1936, width: 0 });
+    // column 1 still has column 2 as right neighbour in `after`, but column 2 isn't in `before`: same rule
+    expect(getAnimatedColumn(before!, after!, 1, 1920, 16)).toEqual({ x: 1936, width: 0 });
   });
 
   test('end of the video: a clip without successor fades out to the fill', () => {

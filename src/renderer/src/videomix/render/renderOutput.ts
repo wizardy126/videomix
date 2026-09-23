@@ -61,6 +61,20 @@ export const getRenderWorkDir = (path: PathLike, tmpDir: string, kind: 'render' 
 /** Preview output, outside the work dir: it lives until the preview dialog is closed. */
 export const getPreviewOutputPath = (path: PathLike, tmpDir: string, id: string) => path.join(tmpDir, `videomix-preview-${id}.${OUTPUT_EXTENSION}`);
 
+// Only what getRenderWorkDir and getPreviewOutputPath create (the ids are nanoid(8)), nothing else in the temp dir
+const tempEntryPattern = /^videomix-(?:render|preview)-[\w-]{8}(?:\.mp4)?$/;
+
+/** Old enough to be sure no render or preview (of this or another instance) is still using it. */
+export const ORPHAN_TEMP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Temp dir entries left by a render or preview that never cleaned up (the app was closed or crashed meanwhile): ours
+ * by name, and not modified for `maxAgeMs`. Returns their names.
+ */
+export function getOrphanTempEntries(entries: { name: string, mtimeMs: number }[], now: number, maxAgeMs = ORPHAN_TEMP_MAX_AGE_MS) {
+  return entries.filter(({ name, mtimeMs }) => tempEntryPattern.test(name) && now - mtimeMs > maxAgeMs).map(({ name }) => name);
+}
+
 /** A gap scaled to another output height, kept even (yuv420p) like the planner's widths. */
 export const scaleGap = (gap: number, fromHeight: number, toHeight: number) => 2 * Math.round((gap * toHeight) / fromHeight / 2);
 

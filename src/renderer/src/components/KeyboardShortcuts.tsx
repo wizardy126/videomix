@@ -21,6 +21,7 @@ import Action from './Action';
 import TextInput from './TextInput';
 import Kbd from './Kbd';
 import { useAppContext } from '../contexts';
+import { isKeyboardActionRetired, videoMixMode } from '../../../common/videomix/legacyUi';
 
 
 type Category = string;
@@ -571,7 +572,8 @@ const KeyboardShortcuts = memo(({
 
       // outputCategory
       export: {
-        name: t('Export segment(s)'),
+        // VideoMix: the export key renders the mix
+        name: videoMixMode ? t('Render mix') : t('Export segment(s)'),
         category: outputCategory,
       },
       captureSnapshot: {
@@ -861,7 +863,8 @@ const KeyboardShortcuts = memo(({
   const searchQueryTrimmed = searchQuery.toLowerCase().trim();
   const isSearching = !!searchQueryTrimmed;
 
-  const actionEntries = useMemo(() => (Object.entries(actionsMap) as unknown as [keyof typeof actionsMap, typeof actionsMap[keyof typeof actionsMap]][]).filter(([key, { name, category }]) => (
+  // VideoMix: retired actions stay in actionsMap (so their bindings aren't treated as invalid), but aren't listed
+  const actionEntries = useMemo(() => (Object.entries(actionsMap) as unknown as [keyof typeof actionsMap, typeof actionsMap[keyof typeof actionsMap]][]).filter(([key, { name, category }]) => !isKeyboardActionRetired(key) && (
     !isSearching
     || key.toLocaleLowerCase().includes(searchQueryTrimmed)
     || name.toLowerCase().includes(searchQueryTrimmed)

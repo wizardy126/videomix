@@ -39,6 +39,8 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
 
   // Sources whose file wasn't found (when opening/recovering the project or activating the source)
   const [missingSourceIds, setMissingSourceIds] = useState<ReadonlySet<string>>(new Set());
+  // Settles when the recovery offer at startup is over (see the effect at the end)
+  const recoveryDoneRef = useRef<Promise<void>>(Promise.resolve());
 
   const setSourceMissing = useCallback((sourceId: string, missing: boolean) => setMissingSourceIds((existing) => {
     if (existing.has(sourceId) === missing) return existing;
@@ -195,6 +197,9 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
    * Throws (the caller wraps it in withErrorHandling).
    */
   const openFiles = useCallback(async (filePaths: string[]) => {
+    // Files opened at startup (command line, file association) wait for the recovery offer, so the dialogs don't overlap
+    await recoveryDoneRef.current;
+
     const { projectPaths, audioPaths, mediaPaths, unsupportedPaths } = classifyOpenedPaths(filePaths);
 
     const [projectFilePath] = projectPaths;
@@ -242,7 +247,7 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     if (recoveryCheckedRef.current) return;
     recoveryCheckedRef.current = true;
 
-    (async () => {
+    recoveryDoneRef.current = (async () => {
       await withErrorHandling(async () => {
         const recoverables = await mixProject.getRecoverableProjects();
         // The .vmx was saved after these, so there's nothing to recover: purge them so they don't pile up

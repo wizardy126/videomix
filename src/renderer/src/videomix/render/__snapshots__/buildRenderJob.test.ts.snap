@@ -64,15 +64,15 @@ color=c=black:s=640x360:r=30:d=0.533333,format=yuva420p,fade=t=out:start_frame=0
 color=c=black:s=270x360:r=30:d=0.533333,trim=end_frame=15[base7];
 [base7][sc6]overlay=x='-132+4*gte(t,0.05)+8*gte(t,0.083333)+10*gte(t,0.116667)+12*gte(t,0.15)+12*gte(t,0.183333)+14*gte(t,0.216667)+12*gte(t,0.25)+14*gte(t,0.283333)+12*gte(t,0.316667)+12*gte(t,0.35)+10*gte(t,0.383333)+8*gte(t,0.416667)+4*gte(t,0.45)':y=0:eval=frame:shortest=1[clip5];
 [fsrc9]crop=360:360:0:0,scale=12:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=12:46,boxblur=luma_radius=3:luma_power=2,scale=100:360:flags=bilinear,setsar=1[fill8];
-[fsrc11]crop=360:360:0:0,scale=12:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=12:46,boxblur=luma_radius=3:luma_power=2,scale=92:360:flags=bilinear,setsar=1[fill10];
+[fsrc11]crop=360:360:0:0,scale=12:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=12:46,boxblur=luma_radius=3:luma_power=2,scale=100:360:flags=bilinear,setsar=1[fill10];
 [clip0]split=3[m12][fsrc9][fsrc11];
 color=c=0x303030:s=640x360:r=30:d=0.533333,trim=end_frame=15,format=yuv420p[cv13];
 [cv13][fill8]overlay=x=0:y=0[cv14];
 [cv14][m12]overlay=x='100-2*gte(t,0.016667)-2*gte(t,0.05)-6*gte(t,0.083333)-8*gte(t,0.116667)-8*gte(t,0.15)-10*gte(t,0.183333)-10*gte(t,0.216667)-8*gte(t,0.25)-10*gte(t,0.283333)-10*gte(t,0.316667)-8*gte(t,0.35)-8*gte(t,0.383333)-6*gte(t,0.416667)-2*gte(t,0.45)':y=0:eval=frame:eof_action=pass[cv15];
-[cv15][fill10]overlay=x='548-2*gte(t,0.016667)-6*gte(t,0.05)-10*gte(t,0.083333)-14*gte(t,0.116667)-14*gte(t,0.15)-18*gte(t,0.183333)-18*gte(t,0.216667)-16*gte(t,0.25)-18*gte(t,0.283333)-18*gte(t,0.316667)-14*gte(t,0.35)-14*gte(t,0.383333)-10*gte(t,0.416667)-6*gte(t,0.45)':y=0:eval=frame[cv16];
-[cv16][clip5]overlay=x='640-4*gte(t,0.016667)-10*gte(t,0.05)-14*gte(t,0.083333)-20*gte(t,0.116667)-22*gte(t,0.15)-26*gte(t,0.183333)-26*gte(t,0.216667)-28*gte(t,0.25)-26*gte(t,0.283333)-26*gte(t,0.316667)-22*gte(t,0.35)-20*gte(t,0.383333)-14*gte(t,0.416667)-10*gte(t,0.45)':y=0:eval=frame:eof_action=pass[cv17];
+[cv15][fill10]overlay=x='540-2*gte(t,0.016667)-6*gte(t,0.05)-10*gte(t,0.083333)-14*gte(t,0.116667)-14*gte(t,0.15)-18*gte(t,0.183333)-18*gte(t,0.216667)-16*gte(t,0.25)-18*gte(t,0.283333)-18*gte(t,0.316667)-14*gte(t,0.35)-14*gte(t,0.383333)-10*gte(t,0.416667)-6*gte(t,0.45)':y=0:eval=frame[cv16];
+[cv16][clip5]overlay=x='648-4*gte(t,0.016667)-10*gte(t,0.05)-16*gte(t,0.083333)-20*gte(t,0.116667)-22*gte(t,0.15)-26*gte(t,0.183333)-28*gte(t,0.216667)-28*gte(t,0.25)-28*gte(t,0.283333)-26*gte(t,0.316667)-22*gte(t,0.35)-20*gte(t,0.383333)-16*gte(t,0.416667)-10*gte(t,0.45)':y=0:eval=frame:eof_action=pass[cv17];
 color=c=0x303030:s=8x360:r=30:d=0.533333,trim=end_frame=15[gap18];
-[cv17][gap18]overlay=x='540-2*gte(t,0.016667)-6*gte(t,0.05)-10*gte(t,0.083333)-14*gte(t,0.116667)-14*gte(t,0.15)-18*gte(t,0.183333)-18*gte(t,0.216667)-16*gte(t,0.25)-18*gte(t,0.283333)-18*gte(t,0.316667)-14*gte(t,0.35)-14*gte(t,0.383333)-10*gte(t,0.416667)-6*gte(t,0.45)':y=0:eval=frame[cv19];
+[cv17][gap18]overlay=x='640-4*gte(t,0.016667)-10*gte(t,0.05)-16*gte(t,0.083333)-20*gte(t,0.116667)-22*gte(t,0.15)-26*gte(t,0.183333)-28*gte(t,0.216667)-28*gte(t,0.25)-28*gte(t,0.283333)-26*gte(t,0.316667)-22*gte(t,0.35)-20*gte(t,0.383333)-16*gte(t,0.416667)-10*gte(t,0.45)':y=0:eval=frame[cv19];
 [cv19]format=yuv420p[vout]",
     "/work/chunk-0002.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=45,setpts=PTS-STARTPTS,crop=1080:1080:0:0,scale=360:360:flags=bicubic,setsar=1[clip0];
 [1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=45,setpts=PTS-STARTPTS,crop=816:1080:552:0,scale=272:360:flags=bicubic,setsar=1[clip1];

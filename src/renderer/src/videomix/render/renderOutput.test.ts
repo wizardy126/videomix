@@ -1,11 +1,33 @@
 import path from 'node:path';
 import { describe, test, expect } from 'vitest';
 
-import { getDefaultOutputPath, getPartialOutputPath, getPreviewFps, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, scaleGap, withOutputExtension } from './renderOutput';
+import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, ORPHAN_TEMP_MAX_AGE_MS, getPreviewFps, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, scaleGap, withOutputExtension } from './renderOutput';
 import { createEmptyMixProject } from '../types';
 import type { MixClip, MixProject } from '../types';
 
 const p = path.posix;
+
+describe('orphan temp files', () => {
+  test('only our render/preview entries, and only old ones', () => {
+    const now = 1_000_000_000_000;
+    const old = now - ORPHAN_TEMP_MAX_AGE_MS - 1;
+    const recent = now - 60_000;
+    const entries = [
+      { name: path.basename(getRenderWorkDir(p, '/tmp', 'render', 'aB3_x-9Z')), mtimeMs: old },
+      { name: path.basename(getRenderWorkDir(p, '/tmp', 'preview', 'Q1w2E3r4')), mtimeMs: old },
+      { name: path.basename(getPreviewOutputPath(p, '/tmp', 'zzzzzzzz')), mtimeMs: old },
+      // in use (another instance may be rendering) or too recent to tell
+      { name: path.basename(getRenderWorkDir(p, '/tmp', 'render', 'recent00')), mtimeMs: recent },
+      // not ours, or not exactly our names
+      { name: 'videomix-recovery', mtimeMs: old },
+      { name: 'videomix-render-abc', mtimeMs: old },
+      { name: 'videomix-render-aB3_x-9Z.part.mp4', mtimeMs: old },
+      { name: 'videomix-preview-zzzzzzzz.mov', mtimeMs: old },
+      { name: 'other-render-aB3_x-9Z', mtimeMs: old },
+    ];
+    expect(getOrphanTempEntries(entries, now)).toEqual(['videomix-render-aB3_x-9Z', 'videomix-preview-Q1w2E3r4', 'videomix-preview-zzzzzzzz.mp4']);
+  });
+});
 
 describe('output paths', () => {
   test('default output: project name next to the project', () => {

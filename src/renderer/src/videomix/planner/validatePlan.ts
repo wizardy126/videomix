@@ -8,7 +8,8 @@ type Layout = MixPlan['layouts'][number];
 /**
  * Geometry of `column` at the `layout` end of an animation between `layout` and `other` (ADR-001): its own, or width 0
  * just left of its right neighbour when it is missing from `layout` (x of the first column after it in `other` that
- * is also in `layout`, minus the gap; W if there is none).
+ * is also in `layout`, minus the gap; W + gap if there is none). Without a neighbour it sits past the right edge with
+ * its gap, so its gap enters/leaves the frame with it instead of popping up next to a right fill (T16).
  */
 export function getAnimatedColumn(layout: Layout, other: Layout, column: number, width: number, gap: number) {
   const own = layout.columns.find((c) => c.column === column);
@@ -18,7 +19,7 @@ export function getAnimatedColumn(layout: Layout, other: Layout, column: number,
     const neighbour = layout.columns.find((lc) => lc.column === c.column);
     if (neighbour != null) return { x: neighbour.x - gap, width: 0 };
   }
-  return { x: width, width: 0 };
+  return { x: width + gap, width: 0 };
 }
 
 /**
@@ -82,7 +83,7 @@ export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): 
     if (layout.time > maxStart + TOL) fail(`${at} re-layout after the last clip started`);
 
     // ADR-001: during an animation the columns keep their left-to-right order, and a column that appears or
-    // disappears does it at width 0 just left of its right neighbour (its x minus the gap; W if it has none)
+    // disappears does it at width 0 just left of its right neighbour (its x minus the gap; W + gap if it has none)
     if (prev != null) {
       const prevOrder = prev.columns.map((c) => c.column).filter((id) => layout.columns.some((c) => c.column === id));
       const nextOrder = layout.columns.map((c) => c.column).filter((id) => prev.columns.some((c) => c.column === id));

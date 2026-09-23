@@ -6,6 +6,7 @@ import { t } from 'i18next';
 import { homepageUrl, getReleaseUrl, licensesUrl, thanksUrl, usageUrl, faqUrl, troubleshootingUrl, featureRequestUrl, githubUrl } from '../common/constants.js';
 import { logFilePath } from './logger.js';
 import { getConfigPath } from './configStore.js';
+import { videoMixMode } from '../common/videomix/legacyUi.js';
 
 
 // menu-safe i18n.t:
@@ -13,6 +14,9 @@ import { getConfigPath } from './configStore.js';
 const esc = (val: string) => val.replaceAll('&', '&&');
 
 const { Menu } = electron;
+
+// VideoMix: LosslessCut items that don't apply to a VideoMix project are left out (T16, see retiredKeyboardActions)
+const llcOnly = <T>(items: T[]) => (videoMixMode ? [] : items);
 
 export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
   app: Electron.App,
@@ -41,12 +45,13 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
             mainWindow.webContents.send('openDirDialog');
           },
         },
-        {
+        // VideoMix: the downloaded file would be loaded without being a source of the project
+        ...llcOnly([{
           label: esc(t('Open URL')),
           async click() {
             mainWindow.webContents.send('promptDownloadMediaUrl');
           },
-        },
+        }]),
         { type: 'separator' },
         {
           label: esc(t('Close')),
@@ -55,7 +60,7 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
             mainWindow.webContents.send('closeCurrentFile');
           },
         },
-        {
+        ...llcOnly<MenuItemConstructorOptions>([{
           label: esc(t('Close batch')),
           async click() {
             mainWindow.webContents.send('closeBatch');
@@ -191,7 +196,7 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
               },
             },
           ],
-        },
+        }]),
         { type: 'separator' },
         {
           label: esc(t('Convert to supported format')),
@@ -199,7 +204,8 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
             mainWindow.webContents.send('html5ify');
           },
         },
-        {
+        // VideoMix: these load the fixed copy, which isn't a source of the project
+        ...llcOnly<MenuItemConstructorOptions>([{
           label: esc(t('Fix incorrect duration')),
           click() {
             mainWindow.webContents.send('fixInvalidDuration');
@@ -210,7 +216,7 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
           click() {
             mainWindow.webContents.send('decimate');
           },
-        },
+        }]),
         { type: 'separator' },
 
         { type: 'separator' },
@@ -305,28 +311,31 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
         { role: 'copy', label: esc(t('Copy')) },
         { role: 'paste', label: esc(t('Paste')) },
         { role: 'selectAll', label: esc(t('Select All')) },
-        { type: 'separator' },
-        {
-          label: esc(t('Tracks')),
-          submenu: [
-            {
-              label: esc(t('Extract all tracks')),
-              click() {
-                mainWindow.webContents.send('extractAllStreams');
+        ...llcOnly<MenuItemConstructorOptions>([
+          { type: 'separator' },
+          {
+            label: esc(t('Tracks')),
+            submenu: [
+              {
+                label: esc(t('Extract all tracks')),
+                click() {
+                  mainWindow.webContents.send('extractAllStreams');
+                },
               },
-            },
-            {
-              label: esc(t('Edit tracks / metadata tags')),
-              click() {
-                mainWindow.webContents.send('showStreamsSelector');
+              {
+                label: esc(t('Edit tracks / metadata tags')),
+                click() {
+                  mainWindow.webContents.send('showStreamsSelector');
+                },
               },
-            },
-          ],
-        },
+            ],
+          },
+        ]),
       ],
     },
 
-    {
+    // VideoMix: all of it is retired except "Split segment at cursor", which stays on its key (B)
+    ...llcOnly<MenuItemConstructorOptions>([{
       label: esc(t('Segments')),
       submenu: [
         {
@@ -426,7 +435,7 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
           },
         },
       ],
-    },
+    }]),
 
     {
       label: esc(t('View')),
@@ -450,7 +459,7 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
     {
       label: esc(t('Tools')),
       submenu: [
-        {
+        ...llcOnly<MenuItemConstructorOptions>([{
           label: esc(t('Merge/concatenate files')),
           click() {
             mainWindow.webContents.send('concatBatch');
@@ -479,19 +488,19 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
           click() {
             mainWindow.webContents.send('detectSceneChanges');
           },
-        },
+        }]),
         {
           label: esc(t('Read all keyframes')),
           click() {
             mainWindow.webContents.send('readAllKeyframes');
           },
         },
-        {
+        ...llcOnly([{
           label: esc(t('Create segments from keyframes')),
           click() {
             mainWindow.webContents.send('createSegmentsFromKeyframes');
           },
-        },
+        }]),
         {
           label: esc(t('Last ffmpeg commands')),
           click() { mainWindow.webContents.send('toggleLastCommands'); },
@@ -531,11 +540,12 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
           label: esc(t('Report an error')),
           click() { mainWindow.webContents.send('openSendReportDialog'); },
         },
-        {
+        // VideoMix: LosslessCut's feature requests and donations are for LosslessCut
+        ...llcOnly([{
           label: esc(t('Feature request')),
           click() { openExternal(featureRequestUrl); },
-        },
-        ...(!isStoreBuild ? [{
+        }]),
+        ...(!isStoreBuild && !videoMixMode ? [{
           label: esc(`${t('Donate')} ❤️`),
           click() { openExternal(thanksUrl); },
         }] : []),

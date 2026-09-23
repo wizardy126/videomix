@@ -68,6 +68,21 @@ describe('timeline', () => {
     expect([...getFillSpansAtFrame(fills, getColumnsAtFrame(fills, 75))]).toEqual([]);
   });
 
+  test('a column growing at the right edge next to a right fill: the gap comes in with it (no gap bar pops up)', () => {
+    const tl = getRenderTimeline(testPlans.fills, { fps: 30, gap: 8, transitionDuration: 0.5 });
+    // without a right neighbour it starts past W with its gap: W + gap
+    expect(getColumnsAtFrame(tl, 60).get(1)).toEqual({ x: 648, width: 0 });
+    // the areas of the frame before the animation and of its first frame are the same: [0, 100) fill, column, [540, 640) fill
+    const spans = (f: number) => [...getFillSpansAtFrame(tl, getColumnsAtFrame(tl, f)).values()].sort((a, b) => a.x - b.x);
+    expect(spans(59)).toEqual([{ x: 0, width: 100 }, { x: 540, width: 100 }]);
+    expect(spans(60)).toEqual(spans(59));
+    // the fill between the columns touches the left one and keeps the gap before the right one
+    const mid = getColumnsAtFrame(tl, 67);
+    const between = getFillSpansAtFrame(tl, mid).get('0-1')!;
+    expect(between.x).toBeCloseTo(mid.get(0)!.x + mid.get(0)!.width, 6);
+    expect(between.x + between.width + 8).toBeCloseTo(mid.get(1)!.x, 6);
+  });
+
   test('end of video: clip without successor fades into fill', () => {
     const tl = getRenderTimeline(testPlans.substitutions, { fps: 30, gap: 8, transitionDuration: 0.5 });
     const b = tl.placements.find((p) => p.placement.clipId === 'b')!;

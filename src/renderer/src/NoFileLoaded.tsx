@@ -13,6 +13,7 @@ import { splitKeyboardKeys } from './util';
 import { getModifier } from './hooks/useTimelineScroll';
 import Kbd from './components/Kbd';
 import mainApi from './mainApi';
+import { videoMixMode } from './videomix/workspace';
 
 
 function Keys({ keys }: { keys: string | undefined }) {
@@ -76,13 +77,16 @@ function NoFileLoaded({ mifiLink, currentCutSeg, onClick, darkMode, keyBindingBy
         <Trans><SetCutpointButton currentCutSeg={currentCutSegOrDefault} side="start" style={{ verticalAlign: 'middle' }} /> <SetCutpointButton currentCutSeg={currentCutSegOrDefault} side="end" style={{ verticalAlign: 'middle' }} />, <Keys keys={keyBindingByAction['setCutStart']?.keys} /> <Keys keys={keyBindingByAction['setCutEnd']?.keys} /> or <span><kbd style={{ marginRight: '.1em' }}>{getModifier(segmentMouseModifierKey)}</kbd></span>+<FaMouse style={{ marginRight: '.1em', verticalAlign: 'middle' }} /> to set cutpoints</Trans>
       </div>
 
-      <div style={{ fontSize: '1.3em', color: 'var(--gray-11)' }} role="button" onClick={(e) => e.stopPropagation()}>
-        {simpleMode ? (
-          <Trans><SimpleModeButton style={{ verticalAlign: 'middle' }} /> to show advanced view</Trans>
-        ) : (
-          <Trans><SimpleModeButton style={{ verticalAlign: 'middle' }} /> to show simple view</Trans>
-        )}
-      </div>
+      {/* VideoMix: the view is always the advanced one (T16) */}
+      {!videoMixMode && (
+        <div style={{ fontSize: '1.3em', color: 'var(--gray-11)' }} role="button" onClick={(e) => e.stopPropagation()}>
+          {simpleMode ? (
+            <Trans><SimpleModeButton style={{ verticalAlign: 'middle' }} /> to show advanced view</Trans>
+          ) : (
+            <Trans><SimpleModeButton style={{ verticalAlign: 'middle' }} /> to show simple view</Trans>
+          )}
+        </div>
+      )}
 
       {mifiLink && typeof mifiLink === 'object' && 'loadUrl' in mifiLink && typeof mifiLink.loadUrl === 'string' && mifiLink.loadUrl ? (
         <div style={{ position: 'relative', margin: '.3em', width: '24em', height: '8em' }}>

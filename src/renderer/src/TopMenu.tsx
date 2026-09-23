@@ -13,6 +13,7 @@ import useUserSettings from './hooks/useUserSettings';
 import useActionTitle from './hooks/useActionTitle';
 import styles from './TopMenu.module.css';
 import OutDirSelector from './components/OutDirSelector';
+import { videoMixMode } from './videomix/workspace';
 
 
 const { stat } = window.require('node:fs/promises');
@@ -91,7 +92,8 @@ function TopMenu({
       className={`no-user-select ${styles['wrapper']}`}
       style={{ background: controlsBackground, transition: darkModeTransition, display: 'flex', alignItems: 'center', padding: '.3em .3em', gap: '.3em', justifyContent: 'space-between', flexWrap: 'wrap' }}
     >
-      {filePath && (
+      {/* VideoMix: tracks, output format and export mode belong to LosslessCut's export. The working dir (snapshots) is in Settings (T16) */}
+      {filePath && !videoMixMode && (
         <>
           <Button onClick={withBlur(() => setStreamsSelectorShown(true))}>
             <FaList style={{ fontSize: '.7em', marginRight: '.5em' }} />
@@ -120,22 +122,26 @@ function TopMenu({
 
       <div style={{ flexGrow: 1 }} />
 
-      <OutDirSelector>
-        <Button
-          ref={workingDirButtonRef}
-          title={customOutDir}
-          style={{ paddingLeft: showClearWorkingDirButton ? '.4em' : undefined }}
-        >
-          {customOutDir ? t('Working dir set') : t('Working dir unset')}
-        </Button>
-      </OutDirSelector>
+      {!videoMixMode && (
+        <>
+          <OutDirSelector>
+            <Button
+              ref={workingDirButtonRef}
+              title={customOutDir}
+              style={{ paddingLeft: showClearWorkingDirButton ? '.4em' : undefined }}
+            >
+              {customOutDir ? t('Working dir set') : t('Working dir unset')}
+            </Button>
+          </OutDirSelector>
 
-      {renderOutFmt(outFmtStyle)}
+          {renderOutFmt(outFmtStyle)}
 
-      {!simpleMode && (isCustomFormatSelected || outFormatLocked) && renderFormatLock()}
+          {!simpleMode && (isCustomFormatSelected || outFormatLocked) && renderFormatLock()}
 
-      {filePath && (
-        <ExportModeButton selectedSegments={selectedSegments} style={exportModeStyle} />
+          {filePath && (
+            <ExportModeButton selectedSegments={selectedSegments} style={exportModeStyle} />
+          )}
+        </>
       )}
 
       {!simpleMode && (

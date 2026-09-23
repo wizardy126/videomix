@@ -24,6 +24,7 @@ import type { TunerType } from '../types';
 import Truncated from './Truncated';
 import { dangerColor } from '../colors';
 import OutDirSelector from './OutDirSelector.js';
+import { videoMixMode } from '../videomix/workspace';
 
 // eslint-disable-next-line react/jsx-props-no-spreading
 const Button = ({ style, ...props }: ButtonProps) => <ButtonRaw style={{ padding: '.5em .9em', ...style }} {...props} />;
@@ -142,19 +143,22 @@ function Settings({
           </td>
         </Row>
 
-        <Row>
-          <KeyCell>
-            {t('Show export options screen before exporting?')}
-            <div style={detailsStyle}>
-              {t('This gives you an overview of the export and allows you to customise more parameters before exporting, like changing the output file name.')}
-            </div>
-          </KeyCell>
-          <td>
-            <Switch checked={exportConfirmEnabled} onCheckedChange={toggleExportConfirmEnabled} />
-          </td>
-        </Row>
+        {/* VideoMix: the rows about LosslessCut's export, .llc project files and file opening don't apply (T16) */}
+        {!videoMixMode && (
+          <Row>
+            <KeyCell>
+              {t('Show export options screen before exporting?')}
+              <div style={detailsStyle}>
+                {t('This gives you an overview of the export and allows you to customise more parameters before exporting, like changing the output file name.')}
+              </div>
+            </KeyCell>
+            <td>
+              <Switch checked={exportConfirmEnabled} onCheckedChange={toggleExportConfirmEnabled} />
+            </td>
+          </Row>
+        )}
 
-        {showAdvancedSettings && (
+        {showAdvancedSettings && !videoMixMode && (
           <Row>
             <KeyCell>
               {t('Auto save project file?')}<br />
@@ -165,7 +169,7 @@ function Settings({
           </Row>
         )}
 
-        {showAdvancedSettings && (
+        {showAdvancedSettings && !videoMixMode && (
           <Row>
             <KeyCell>{t('Store project file (.llc) in the working directory or next to loaded media file?')}</KeyCell>
             <td>
@@ -218,25 +222,27 @@ function Settings({
         )}
 
 
-        <Header title={t('Options affecting exported files')} />
+        {!videoMixMode && <Header title={t('Options affecting exported files')} />}
 
-        <Row>
-          <KeyCell>
-            {t('Choose cutting mode: Remove or keep selected segments from video when exporting?')}<br />
-            <div style={detailsStyle}>
-              {invertCutSegments ? (
-                <><b>{t('Remove')}</b>: {t('The video inside segments will be discarded, while the video surrounding them will be kept.')}</>
-              ) : (
-                <><b>{t('Keep')}</b>: {t('The video inside segments will be kept, while the video outside will be discarded.')}</>
-              )}
-            </div>
-          </KeyCell>
-          <td>
-            <Button onClick={() => setInvertCutSegments((v) => !v)}>
-              <FaYinYang style={{ verticalAlign: 'middle', marginRight: '.3em', color: invertCutSegments ? dangerColor : undefined }} /> {invertCutSegments ? t('Remove') : t('Keep')}
-            </Button>
-          </td>
-        </Row>
+        {!videoMixMode && (
+          <Row>
+            <KeyCell>
+              {t('Choose cutting mode: Remove or keep selected segments from video when exporting?')}<br />
+              <div style={detailsStyle}>
+                {invertCutSegments ? (
+                  <><b>{t('Remove')}</b>: {t('The video inside segments will be discarded, while the video surrounding them will be kept.')}</>
+                ) : (
+                  <><b>{t('Keep')}</b>: {t('The video inside segments will be kept, while the video outside will be discarded.')}</>
+                )}
+              </div>
+            </KeyCell>
+            <td>
+              <Button onClick={() => setInvertCutSegments((v) => !v)}>
+                <FaYinYang style={{ verticalAlign: 'middle', marginRight: '.3em', color: invertCutSegments ? dangerColor : undefined }} /> {invertCutSegments ? t('Remove') : t('Keep')}
+              </Button>
+            </td>
+          </Row>
+        )}
 
         <Row>
           <KeyCell>
@@ -256,7 +262,7 @@ function Settings({
           </td>
         </Row>
 
-        {showAdvancedSettings && (
+        {showAdvancedSettings && !videoMixMode && (
           <Row>
             <KeyCell>{t('Set file modification date/time of output files to:')}</KeyCell>
             <td>
@@ -269,7 +275,7 @@ function Settings({
           </Row>
         )}
 
-        {showAdvancedSettings && (
+        {showAdvancedSettings && !videoMixMode && (
           <Row>
             <KeyCell>{t('Treat source file modification date/time as:')}</KeyCell>
             <td>
@@ -281,36 +287,40 @@ function Settings({
           </Row>
         )}
 
-        <Row>
-          <KeyCell>
-            {t('Keyframe cut mode')}<br />
-            <div style={detailsStyle}>
-              {keyframeCut ? (
-                <>
-                  <b>{t('Keyframe cut')}</b>: {t('Cut at the preceding keyframe (not accurate time.) Equiv to')}:<br />
-                  <code className="highlighted">ffmpeg -ss N -i input.mp4</code>
-                </>
-              ) : (
-                <>
-                  <b>{t('Normal cut')}</b>: {t('Accurate time but could leave an empty portion at the beginning of the video. Equiv to')}:<br />
-                  <code className="highlighted">ffmpeg -i input -ss N</code>
-                </>
-              )}
-            </div>
-          </KeyCell>
-          <td>
-            <Switch checked={keyframeCut} onCheckedChange={() => toggleKeyframeCut()} />
-          </td>
-        </Row>
+        {!videoMixMode && (
+          <Row>
+            <KeyCell>
+              {t('Keyframe cut mode')}<br />
+              <div style={detailsStyle}>
+                {keyframeCut ? (
+                  <>
+                    <b>{t('Keyframe cut')}</b>: {t('Cut at the preceding keyframe (not accurate time.) Equiv to')}:<br />
+                    <code className="highlighted">ffmpeg -ss N -i input.mp4</code>
+                  </>
+                ) : (
+                  <>
+                    <b>{t('Normal cut')}</b>: {t('Accurate time but could leave an empty portion at the beginning of the video. Equiv to')}:<br />
+                    <code className="highlighted">ffmpeg -i input -ss N</code>
+                  </>
+                )}
+              </div>
+            </KeyCell>
+            <td>
+              <Switch checked={keyframeCut} onCheckedChange={() => toggleKeyframeCut()} />
+            </td>
+          </Row>
+        )}
 
-        <Row>
-          <KeyCell>{t('Cleanup files after export?')}</KeyCell>
-          <td>
-            <Button onClick={askForCleanupChoices}><FaBroom style={{ verticalAlign: 'middle', marginRight: '.3em' }} />{t('Change preferences')}</Button>
-          </td>
-        </Row>
+        {!videoMixMode && (
+          <Row>
+            <KeyCell>{t('Cleanup files after export?')}</KeyCell>
+            <td>
+              <Button onClick={askForCleanupChoices}><FaBroom style={{ verticalAlign: 'middle', marginRight: '.3em' }} />{t('Change preferences')}</Button>
+            </td>
+          </Row>
+        )}
 
-        {showAdvancedSettings && (
+        {showAdvancedSettings && !videoMixMode && (
           <Row>
             <KeyCell>
               {t('Extract unprocessable tracks to separate files or discard them?')}<br />
@@ -451,7 +461,7 @@ function Settings({
           </Row>
         )}
 
-        {showAdvancedSettings && (
+        {showAdvancedSettings && !videoMixMode && (
           <Row>
             <KeyCell>{t('Auto load timecode from file as an offset in the timeline?')}</KeyCell>
             <td>
@@ -522,7 +532,7 @@ function Settings({
           </td>
         </Row>
 
-        {showAdvancedSettings && (
+        {showAdvancedSettings && !videoMixMode && (
           <Row>
             <KeyCell>{t('Ask about what to do when opening a new file when another file is already already open?')}</KeyCell>
             <td>
@@ -531,7 +541,7 @@ function Settings({
           </Row>
         )}
 
-        {showAdvancedSettings && (
+        {showAdvancedSettings && !videoMixMode && (
           <Row>
             <KeyCell>{t('Import chapters to segments when opening file')}</KeyCell>
             <Select value={enableImportChapters} onChange={(e) => setEnableImportChapters(e.target.value as EnableImportChapters)}>

@@ -166,7 +166,7 @@ Suavizado `smoothstep` de los anchos.
   Se elige la última. Visualmente equivale a un desenfoque fuerte; en zonas planas se nota algo de "bloque" suave, aceptable para un fondo.
 - **Separación**:
   - lienzo `color=c=<gap.color>`; en bloques estables la separación es el lienzo que asoma entre columnas;
-  - en bloques con animación, las capas son más anchas que su ventana y tapan la separación, así que se redibujan barras `color=<gap.color>:s=<gap>xH` con `overlay` en `x(t)` = borde derecho de cada columna.
+  - en bloques con animación, las capas son más anchas que su ventana y tapan la separación, así que se redibujan barras `color=<gap.color>:s=<gap>xH` con `overlay` en `x(t)` = borde derecho de cada columna (o, si entre ella y la siguiente se abre un relleno, `x` de la siguiente − `gap`: el relleno toca a la columna izquierda; T16).
 
 ### 5. Rendimiento: grafo único frente a bloques (≈2 min, 15 clips, 1080p)
 
@@ -259,7 +259,7 @@ Suavizado `smoothstep` de los anchos.
 - **Lienzo**:
   1. `color=c=<gap.color>:s=WxH:r=F:d=<dur>`.
   2. Columnas **de izquierda a derecha** con `overlay=x=<x o Σ>:y=0:eof_action=pass`.
-  3. Si hay animación y separación, las barras de separación en `x = x_i + w_i` de cada columna menos la última.
+  3. Si hay animación y separación, las barras de separación en `x = max(x_i + w_i, x_{i+1} − gap)` de cada columna menos la última (T16).
   4. Rellenos: `split` de la columna adyacente → `blurCover(ancho,H)`, o `color` si `fill.mode = 'color'` → `format=yuva420p,fade=t=in:…:alpha=1` si aparece → `overlay`.
   5. `fade=t=in` / `fade=t=out` global con `st` local al bloque (primer y último bloque).
   6. `format=yuv420p`.
@@ -350,7 +350,7 @@ Mismo camino con W×H de previsualización (640×360), `ultrafast` y CRF alto. E
 - **T10** (invariantes del plan que el render necesita):
   - **durante una animación, las columnas conservan su orden** de izquierda a derecha (el apilado depende de él);
   - una columna que aparece o desaparece lo hace con ancho 0 pegada a su vecina derecha, y su clip termina o empieza con la animación;
-    - Regla exacta (T10b): en el extremo donde falta, la columna tiene ancho 0 y `x` = `x` de la primera columna posterior que existe en ambos keyframes − `gap` (o `W` si no hay ninguna). Está en `getAnimatedColumn` (`planner/validatePlan.ts`).
+    - Regla exacta (T10b): en el extremo donde falta, la columna tiene ancho 0 y `x` = `x` de la primera columna posterior que existe en ambos keyframes − `gap` (o `W + gap` si no hay ninguna; hasta T16 era `W`, que con separación > 0 y un relleno derecho hacía asomar una barra de separación en un fotograma). Está en `getAnimatedColumn` (`planner/validatePlan.ts`).
     - El planificador crea las columnas nuevas justo a la derecha de la columna liberada (crecen desde su borde derecho) y nunca añade y quita columnas en la misma animación, así que es compatible. `validatePlan` comprueba ambas invariantes (orden estable y ausencia de solapes con esta regla).
   - las transiciones que coinciden con una animación empiezan dentro de ella, o se fusionan en el mismo intervalo;
     - Esto incluye el fundido al relleno del final del vídeo (`ColumnPlacement.transitionOut`, T10b), que ocupa `[endTime − transitionOut, endTime]` y se trata como un intervalo ocupado más.

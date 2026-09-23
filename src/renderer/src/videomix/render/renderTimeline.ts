@@ -141,9 +141,10 @@ export function getColumnsAtFrame(tl: RenderTimeline, f: number): Map<number, Co
 
 /**
  * Fill areas at frame `f`, from the (interpolated) columns: the row edges the columns don't reach, and during a
- * re-layout any space that opens between two columns beyond the gap (e.g. the last column collapsing towards W while
+ * re-layout any space that opens between two columns beyond the gap (e.g. the last column collapsing past W while
  * a right fill appears). Keyed by position so an area can be followed across frames: `L`, `R` and `<a>-<b>` (between
- * columns a and b). A fill touches its neighbours without gap, as the planner lays it out (04-diseno §3.1).
+ * columns a and b). A fill touches its neighbours without gap, as the planner lays it out (04-diseno §3.1); between two
+ * columns the gap stays next to the right one, so when that one is past W the fill is exactly the right edge fill.
  */
 export function getFillSpansAtFrame(tl: RenderTimeline, columns: Map<number, ColumnGeometry>) {
   const W = tl.plan.width;
@@ -162,7 +163,7 @@ export function getFillSpansAtFrame(tl: RenderTimeline, columns: Map<number, Col
   add('L', 0, sorted[0]![1].x);
   sorted.slice(0, -1).forEach(([id, g], i) => {
     const [nextId, next] = sorted[i + 1]!;
-    add(`${id}-${nextId}`, g.x + g.width + gap, next.x);
+    add(`${id}-${nextId}`, g.x + g.width, next.x - gap);
   });
   const [, last] = sorted.at(-1)!;
   add('R', last.x + last.width, W);
