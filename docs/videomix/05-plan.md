@@ -21,6 +21,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M5 · Previsualización y pulido** | Timeline del montaje, limpieza de la UI heredada, i18n y manual | T15, T16, T17 |
 | **M6 · Empaquetado** | Builds de VideoMix | T18 |
 | **M7 · Overlays** | Imágenes PNG, contadores, barras de progreso y efectos de sonido sobre el vídeo final | T19–T23 |
+| **M8 · Mejoras v2** | A1, A2, A4, B1, B2, B5, C1, C2, D1, D2, E3 | T24–T34 |
 
 ## Tareas
 
@@ -51,6 +52,17 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T21b | Overlays: sonoridad de efectos muy cortos | M7 | Sonnet | T21, T23 | hecha |
 | T22 | Overlays: pistas en la vista Mix y panel de propiedades | M7 | Opus | T19 | hecha |
 | T23 | Overlays: i18n, manual y revisión final | M7 | Sonnet | T20, T21, T22 | hecha |
+| T24 | v2: modelo v3 y migración (todas las mejoras) | M8 | Opus | — | pendiente |
+| T25 | v2: encoders por hardware y H.265 (D2) | M8 | Sonnet | T24 | pendiente |
+| T26 | v2: textos libres y presets globales (B1, B2) | M8 | Opus | T24 | pendiente |
+| T27 | v2: lista de música y ducking (C1, C2) | M8 | Opus | T24 | pendiente |
+| T28 | v2: render incremental con caché (D1) | M8 | Opus | T25 | pendiente |
+| T29 | v2: salida vertical 9:16 y 1:1 (B5) | M8 | Opus | T24 | pendiente |
+| T30 | v2: fijar clips a un momento y grupos (A4) | M8 | Opus | T29 | pendiente |
+| T31 | v2: miniaturas (A2) | M8 | Sonnet | T29 | pendiente |
+| T32 | v2: previsualización en vivo (A1) | M8 | Opus | T26, T27, T29 | pendiente |
+| T33 | v2: tests end-to-end de la UI (E3) | M8 | Opus | T32 | pendiente |
+| T34 | v2: i18n, manual y cierre | M8 | Sonnet | T24–T33 | pendiente |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 
@@ -77,6 +89,16 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 | La sincronización clips ↔ segmentos es frágil | Alternativa de segmentos derivados (04-diseno §6.3), decidida en T07 con ADR |
 | `App.tsx` es enorme y está acoplado | Cambios mínimos, hooks o componentes nuevos, flag VideoMix localizado |
 | Fuentes con rotación, VFR o códecs no soportados por Chromium | Coordenadas en el espacio orientado, `fps` en el grafo, reutilizar html5ify y el reproductor compat |
+
+## Oleadas de M8
+
+1. T24 (modelo).
+2. T25 ∥ T26 ∥ T27.
+3. T28 ∥ T29.
+4. T30 ∥ T31.
+5. T32.
+6. T33.
+7. T34.
 
 ## Pendientes al integrar en la rama por defecto
 

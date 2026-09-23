@@ -536,3 +536,27 @@ Implementado en `render/overlayFilters.ts` (grafo) y `overlays/overlayFrames.ts`
 - Estado de la UI en `hooks/useMixOverlays.ts` (plan, tiempos resueltos, selección, cursor de la vista "Mix"); lógica pura en `overlayTimeline.ts` (carriles, arrastres, cajas) y `overlayRemoval.ts`. El panel (`components/OverlayPanel.tsx`) ocupa la barra derecha mientras hay un elemento seleccionado en la vista "Mix".
 - **Borrados**: `useMixProject.dispatch` añade `resolved` a toda acción que borre algo de lo que dependan elementos (también dentro de `batch`) y avisa con un toast; así ningún punto de llamada puede olvidarlo.
 - **Duración de los sonidos en la UI**: se obtiene con ffprobe (`getDuration`) la primera vez que aparece cada fichero y se guarda en memoria durante la sesión (`hooks/useOverlaySoundDurations.ts`). El render usa la de T21.
+
+## 9. Mejoras v2 (T24–T34)
+
+Requisitos: [01-requisitos §10](01-requisitos.md). Resumen técnico; cada task-doc concreta los detalles.
+
+- **Formato v3** (T24): todos los cambios de modelo en una sola migración v2 → v3.
+  - `settings.output = { aspect: '16:9' | '9:16' | '1:1', resolution }` sustituye a `resolution`.
+  - `settings.encoder = { codec: 'h264' | 'h265', hardware: 'auto' | 'none' | 'nvenc' | 'qsv' | 'videotoolbox' | 'vaapi' }`.
+  - `settings.music` pasa a ser `settings.musicPlaylist = { tracks: { path, absolutePath, volumeDb }[], crossfade, loop, ducking: { enabled, amountDb } }`.
+  - Nuevo overlay `type: 'text'`.
+  - En los clips, `pinTime?: number` (fijar a un momento) y `groupId?: string` (agrupar).
+
+  Los presets (B2) no van en el proyecto: se guardan en la configuración global (`configStore`).
+- **Salida vertical** (T29): el planificador trabaja en un **eje principal**.
+  - En 9:16 se trasponen las proporciones (`a → 1/a`) y los recortes; el resultado son filas.
+  - En 1:1 se prueban ambas disposiciones y se elige la de menor puntuación, o se fija por proyecto si hiciera falta.
+  - El render y la mini vista usan el mismo eje.
+- **Render incremental** (T28): clave de bloque = hash del grafo del bloque + ficheros de entrada (ruta, mtime, tamaño) + parámetros de codificación. Los bloques se guardan en `<proyecto>.vmx.cache/`; el concat final reutiliza los que existan. Hay limpieza de bloques huérfanos.
+- **Encoders** (T25): se detectan en main con `ffmpeg -encoders` más una prueba de codificación corta. Los argumentos se mapean por encoder, con un control de calidad equivalente a CRF.
+- **Previsualización en vivo** (T32):
+  - un `<video>` por clip visible, más uno en espera para el siguiente, colocados y recortados con CSS o canvas según `renderTimeline`;
+  - los overlays se dibujan en canvas;
+  - el audio va con WebAudio (ganancias de normalización más `gainDb`, música y efectos);
+  - el reloj de la previsualización manda sobre los vídeos.

@@ -69,3 +69,14 @@
 | T21b | [T21b-sonidos-cortos.md](T21b-sonidos-cortos.md) |
 | T22 | [T22-overlays-ui.md](T22-overlays-ui.md) |
 | T23 | [T23-overlays-cierre.md](T23-overlays-cierre.md) |
+| T24 | [T24-v2-modelo.md](T24-v2-modelo.md) |
+| T25 | [T25-v2-encoders.md](T25-v2-encoders.md) |
+| T26 | [T26-v2-textos-presets.md](T26-v2-textos-presets.md) |
+| T27 | [T27-v2-musica-ducking.md](T27-v2-musica-ducking.md) |
+| T28 | [T28-v2-render-incremental.md](T28-v2-render-incremental.md) |
+| T29 | [T29-v2-salida-vertical.md](T29-v2-salida-vertical.md) |
+| T30 | [T30-v2-plan-manual.md](T30-v2-plan-manual.md) |
+| T31 | [T31-v2-miniaturas.md](T31-v2-miniaturas.md) |
+| T32 | [T32-v2-preview-vivo.md](T32-v2-preview-vivo.md) |
+| T33 | [T33-v2-tests-e2e.md](T33-v2-tests-e2e.md) |
+| T34 | [T34-v2-cierre.md](T34-v2-cierre.md) |

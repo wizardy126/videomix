@@ -174,7 +174,23 @@ Añadido tras la v1. Son capas que se dibujan o suenan **encima del vídeo final
 - Los recursos son **ficheros del usuario**, guardados en el `.vmx` con ruta relativa y absoluta, como las fuentes. Un elemento se puede duplicar.
 - La previsualización y el render incluyen todos los elementos.
 
-## 10. Fuera de alcance en v1 (backlog)
+## 10. Mejoras v2 (elegidas por el usuario)
+
+| ID | Mejora | Decisiones |
+|---|---|---|
+| A1 | **Previsualización en vivo aproximada** | En el área del player al activar la pestaña Mix. Columnas o filas, re-layouts, overlays y transiciones simples en tiempo real, **con audio** a volúmenes aproximados. El render sigue siendo la referencia exacta. |
+| A2 | **Miniaturas** en la lista de clips y en la vista Mix | Fotograma de inicio recortado al máx., cacheado y regenerado al cambiar el inicio o el rectángulo. |
+| A4 | **Ajustes manuales del plan** | **Fijar un clip a un momento** del vídeo final (el algoritmo organiza el resto alrededor) y **agrupar clips** para que empiecen juntos. |
+| B1 | **Textos libres** | **Varias líneas y alineación**, borde y sombra, *fades* y **animación de entrada** (deslizar desde un lado o escribir letra a letra). Mismo sistema de anclajes y posición que el resto de overlays. |
+| B2 | **Estilos reutilizables** (presets) | Para textos, contadores y barras. **Globales de la app**, con exportar e importar a fichero. |
+| B5 | **Salida vertical 9:16 y cuadrada 1:1** | En 9:16 se traspone la regla: **una sola columna de filas a ancho completo**, nunca lado a lado. En 1:1, filas o columnas, lo que encaje mejor. Resoluciones: 9:16 → 720×1280, 1080×1920 y 2160×3840; 1:1 → 720, 1080 y 2160. |
+| C1 | **Ducking de la música** | La música baja cuando los clips suenan y sube en los silencios. Cantidad configurable (−10 dB por defecto), con ataque y relajación suaves. Se activa por proyecto. |
+| C2 | **Varias pistas de música** | Lista ordenada (arrastrar y soltar), volumen en dB por pista, **crossfade** entre pistas (2 s por defecto) y opción de **repetir la lista**. Se corta con *fade* al final del vídeo. Cada pista se normaliza a −16 LUFS. |
+| D1 | **Render incremental** | Los bloques ya renderizados se cachean en una **carpeta oculta junto al `.vmx`** y persisten entre sesiones; solo se rehacen los bloques afectados por un cambio. |
+| D2 | **Codificación por hardware y H.265** | Detección automática de NVENC, QSV, VideoToolbox y VAAPI, con x264/x265 como respaldo y selección manual en los ajustes. Salida en H.264 o H.265. |
+| E3 | **Tests end-to-end de la UI** | Playwright + Electron, ejecutados en local (no en CI). |
+
+## 11. Fuera de alcance (backlog)
 
 - Keyframes o paneo del rectángulo.
 - Ajustes manuales del plan de montaje.
