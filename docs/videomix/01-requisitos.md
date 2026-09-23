@@ -91,7 +91,7 @@ Crear proyectos de vídeo a partir de trozos de vídeos. El usuario define *clip
 - Se oye el audio de **todos los clips visibles**.
 - **Equilibrado**: normalización de sonoridad **EBU R128 (`loudnorm`) en dos pasadas**, con objetivo **−16 LUFS** (decidido por el usuario). El análisis de cada clip se hace antes y se cachea. Después se mezcla compensando el número de fuentes simultáneas. Los clips sin audio no aportan nada.
 - **Por clip**: se puede **silenciar** y aplicar **ganancia** (±dB) además del equilibrado automático.
-- **Pista de música**: **una**, opcional (mp3, m4a, aac, wav, flac, ogg, opus…), con volumen independiente.
+- **Pista de música**: **una**, opcional (mp3, m4a, aac, wav, flac, ogg, opus…), con volumen independiente. **Se normaliza** a −16 LUFS igual que los clips, y el volumen es relativo a eso (0 dB = tan fuerte como los clips); por defecto −12 dB (decidido tras T12).
   - Si es más corta que el vídeo: **loop opcional** (si está desactivado, termina y queda el audio de los clips).
   - Si es más larga: se corta al final con **fade-out**.
   - Sin ducking en v1.

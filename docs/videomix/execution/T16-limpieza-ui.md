@@ -20,6 +20,10 @@ Ocultar o retirar la UI de LosslessCut que no tiene sentido en VideoMix, **sin r
 2. Se prefiere **ocultar desde el layout o el menú** a borrar código profundo (menos riesgo). El código muerto evidente y aislado (componentes que ya nadie monta) se puede eliminar.
 3. Revisa los atajos de teclado por defecto: quita los que apunten a acciones retiradas.
 
+## Backlog técnico incluido
+
+- `getAnimatedColumn` (planner): con una separación > 0, una columna que aparece o desaparece sin vecina derecha usa x = W. Se ve una barra de un fotograma del ancho de la separación. Hay que usar x = W + gap y mantener coherentes el planificador, `validatePlan` y el render (ver T11, dudas).
+
 ## Criterios de aceptación
 
 - No quedan botones ni menús que lleven a flujos de LosslessCut incompatibles con el proyecto VideoMix.

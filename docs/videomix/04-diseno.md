@@ -168,7 +168,7 @@ interface MixPlan {
 
 **Semántica de los keyframes** (contrato con T11/T15):
 
-- Entre `time` y `time + transitionDuration` los `x`/anchos pasan linealmente del keyframe anterior a este; después quedan fijos hasta el siguiente keyframe.
+- Entre `time` y `time + transitionDuration` los `x`/anchos pasan con curva `smoothstep` (ver T11) del keyframe anterior a este; después quedan fijos hasta el siguiente keyframe.
 - Una columna que **no estaba** en el keyframe anterior es nueva: crece desde ancho 0 y su primer clip empieza justo en `time` (sin xfade).
 - Una columna que **desaparece** encoge hasta 0 y su último clip termina justo en `time + transitionDuration`.
 - Las columnas contiguas están separadas exactamente por `gap`; el relleno estructural se reparte a izquierda y derecha (bloque de columnas centrado, la parte izquierda par) y toca a sus vecinos sin separación.
@@ -279,17 +279,32 @@ Decidido en el spike T09: **[ADR-001](decisiones/ADR-001-render.md)**, con las m
   - una columna que aparece o desaparece lo hace con ancho 0 junto a su vecina derecha;
   - las transiciones que coinciden con una animación caen dentro de su intervalo.
 
-### 4.2 Módulos
+### 4.2 Módulos (implementados en T11)
 
-- **`render/renderChunks.ts`** (puro): `getRenderChunks(plan, settings)` devuelve los bloques `[f0, f1)` en fotogramas.
-- **`render/buildVideoGraph.ts`** (puro): recibe `MixPlan`, clips, fuentes, ajustes y un bloque, y devuelve `{ inputs: string[][], filterComplex: string, frames: number }`.
-- **`render/buildAudioGraph.ts`** (puro): ver §5.
-- **`render/buildRenderArgs.ts`** (puro): compone los argumentos finales de ffmpeg de cada bloque, del audio y del concat + mux.
-- **Ejecución**: `runFfmpegWithProgress` (main) por bloque con concurrencia 2, pasada de audio y `concat`.
-- **Tests**:
-  - snapshots de argumentos para planes de ejemplo;
-  - invariantes: etiquetas conectadas, ningún `crop` fuera del fotograma, suma de fotogramas de los bloques igual al total, ningún bloque que corte un `xfade`;
-  - un test opcional con ffmpeg real si está disponible, que se omite si no.
+Todos en `src/renderer/src/videomix/render/`, puros (sin React ni Electron). Detalles en [T11](execution/T11-grafo-video.md).
+
+- **`renderTimeline.ts`**: `getRenderTimeline(plan, { fps, gap, transitionDuration })` pasa el plan a fotogramas una sola vez (`f = round(t·fps)`): colocaciones con `[f0, f1)`, clip anterior/siguiente de la columna y fundido final hacia el relleno (`endsInFill`, `fadeOutFrames` desde `transitionOut`); keyframes con `[f0, f1]`.
+  - `getColumnsAtFrame(tl, f)`: geometría de cada columna del layout en un fotograma. Durante un re-layout interpola con **`smoothstep`** (ADR-001; 04-diseno §3.1 dice "con curva `smoothstep` (ver T11)": el render suaviza, T15 puede usar el `smoothstep` exportado). Las columnas que aparecen o desaparecen usan `getAnimatedColumn` del planificador.
+  - `getFillSpansAtFrame(tl, columns)`: rellenos `L`, `R` y los huecos que se abren entre dos columnas durante un re-layout.
+- **`renderChunks.ts`**: `getRenderChunks(tl, { maxChunkSeconds = 15 })` → `RenderChunk { index, f0, f1, animated }[]`. Intervalos ocupados: xfades (`[inicio del entrante, fin del saliente]`), fundidos hacia el relleno y cambios de layout (animados o instantáneos). Cortes obligatorios en los extremos de los intervalos con cambio de layout; los tramos estables largos se parten fuera de los intervalos ocupados.
+- **`buildVideoGraph.ts`**: `buildVideoGraph({ timeline, clips, sourcePaths, settings, chunk })` → `VideoGraph { inputs: string[][], filterComplex, outLabel: 'vout', frames }`, según el esqueleto del ADR.
+  - `RenderClip = Pick<MixClip, 'id' | 'sourceId' | 'start' | 'maxRect' | 'minRect'>`; `sourcePaths`: `sourceId` → ruta.
+  - Recortes con el `getCropForAspect` real (pares) y, en la capa de columna, escala anisótropa en los fotogramas `fill` (igual que el camino estático, que estira hasta ±1 %).
+  - Columnas y rellenos se componen como "elementos" de izquierda a derecha; los rellenos toman como fuente la columna más cercana que se reproduce durante todo el bloque (o color, en modo `color`, sin fuente o con menos de 16 px).
+  - Fundido final de un clip hacia el relleno: `xfade` con el tipo global entre la capa del clip y una capa de relleno del tamaño de la columna (concat si dura 0).
+  - Fundido global a/desde negro: capa negra con alfa (`fade` con `start_frame`/`nb_frames`, `trim`), exacto aunque caiga partido entre bloques. Duración = `D` (la misma que el audio, `getGlobalFadeDuration`).
+- **`buildRenderJob.ts`**: `buildRenderJob({ plan, clips, sourcePaths, settings, encoding?, workDir, outPath, maxChunkSeconds?, buildAudioGraph?, join? })` → `RenderJob`:
+  - `files`: `{ path, content }[]` que hay que escribir antes de ejecutar nada (grafos y lista del concat);
+  - `chunks`: `{ chunk, args, frames, duration, outPath, graphPath, fileName }[]`, independientes entre sí (concurrencia: `getChunkConcurrency({ height, cpuCount })`);
+  - `audio`: la pasada de audio (independiente de los bloques);
+  - `concat`: el último paso (concat demuxer `-c copy` + mux del audio, `-t` exacto, `+faststart`);
+  - `tempPaths`: todo lo que hay que borrar al terminar o cancelar; `totalFrames` y `duration` para el progreso.
+  - Los `args` no llevan el binario; empiezan por `-hide_banner -nostdin -y`. Codificación común: `libx264 -preset -crf -pix_fmt yuv420p -r fps`, `-an`, `-frames:v N`. `encoding` sustituye CRF/preset (previsualización). El plan ya viene calculado para la resolución de salida.
+  - **Hook de audio (T12/T13)**: `buildAudioGraph: (input: AudioGraphInput) => AudioGraph`, con `AudioGraphInput = { plan, clips, sourcePaths, settings, duration }` (`duration` = fotogramas/fps) y `AudioGraph = { inputs, filterComplex, outLabel }`. El job escribe el grafo en `audio.graph.txt` y codifica AAC 192 kbps, 48 kHz, estéreo en `audio.m4a`. Por defecto (`buildSilentAudioGraph`) genera silencio. T13: `buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness })`.
+- **`verifyFilterGraph.ts`**: comprobaciones estructurales para los tests (etiquetas producidas y consumidas una vez, entradas existentes y usadas, `crop` de las entradas dentro del fotograma y par, `split=n`, sin `if()`).
+- **Ejecución** (T13): escribir `files`, `runFfmpegWithProgress` por bloque con concurrencia 2, pasada de audio y `concat`; progreso = Σ fotogramas / `totalFrames`.
+- **Script de desarrollo**: `node script/videomix/renderPlan.ts [proyecto.vmx] [--size WxH] [--fixture <plan>] [--frames t1,t2]` (sin proyecto, escribe y renderiza un ejemplo con los medios de T02).
+- **Tests**: snapshots de argumentos y grafos de 5 planes escritos a mano (`renderTestFixtures.ts`), verificador sobre 25 planes aleatorios del planificador y test con ffmpeg real (`buildRenderJob.ffmpeg.test.ts`, 320×180, se omite sin ffmpeg o sin los medios).
 
 ## 5. Audio
 

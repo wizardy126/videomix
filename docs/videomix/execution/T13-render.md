@@ -16,6 +16,7 @@ Conectar proyecto → plan → análisis de audio → render en la app, con prog
 ## Alcance
 
 1. **`videomix/hooks/useMixRender.ts`**:
+   - **APIs disponibles**: `ensureLoudness` (`videomix/loudness.ts`), `planMix` + `getPlannerInput` (`planner/`), `buildRenderJob` con el hook `buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness })` y `getChunkConcurrency` (`render/`). Ver 04-diseno §4.2 y §5.
    - `userRenderMix()`:
      - valida el proyecto y muestra los problemas;
      - diálogo "Guardar como" del MP4 (nombre por defecto basado en el proyecto);
@@ -27,7 +28,7 @@ Conectar proyecto → plan → análisis de audio → render en la app, con prog
      - limpia los temporales (también si se cancela o falla);
      - registra los comandos en "Last commands";
      - muestra el diálogo de fin con "Mostrar en carpeta".
-   - `userPreviewMix()`: igual pero a 640×360, preset `ultrafast`, CRF alto y en un directorio temporal. Muestra el resultado en un diálogo con un `<video>` y botón de cerrar.
+   - `userPreviewMix()`: igual pero a 640×360 (el plan se calcula a esa resolución, con la separación escalada y par, como hace `script/videomix/renderPlan.ts`), preset `ultrafast`, CRF alto y en un directorio temporal. Muestra el resultado en un diálogo con un `<video>` y botón de cerrar.
    - Los avisos del plan (upscale > ×2, relleno) se muestran antes de renderizar, con opción de continuar.
 2. Si la ejecución por bloques necesita funciones nuevas en main (p. ej. un directorio temporal o concat con lista), añádelas en `src/main/videomix/`.
 3. **Montar `MixSettingsDialog`** (T14, ver sus notas): menú Project → "Mix settings…" y botón en la UI.

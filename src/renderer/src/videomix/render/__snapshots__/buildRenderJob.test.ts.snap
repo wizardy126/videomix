@@ -1,0 +1,309 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildRenderJob > colour fill mode, no gap, fade in/out off 1`] = `
+"[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1080:1080:0:0,scale=360:360:flags=bicubic,setsar=1[fg1];
+color=c=0x112233:s=440x360:r=30:d=2.033333,trim=end_frame=60[bg2];
+[bg2][fg1]overlay=x=40:y=0:shortest=1[clip0];
+color=c=0x112233:s=100x360:r=30:d=2.033333,trim=end_frame=60[fill3];
+color=c=0x112233:s=100x360:r=30:d=2.033333,trim=end_frame=60[fill4];
+color=c=0x000000:s=640x360:r=30:d=2.033333,trim=end_frame=60,format=yuv420p[cv5];
+[cv5][fill3]overlay=x=0:y=0[cv6];
+[cv6][clip0]overlay=x=100:y=0:eof_action=pass[cv7];
+[cv7][fill4]overlay=x=540:y=0[cv8];
+[cv8]format=yuv420p[vout]"
+`;
+
+exports[`buildRenderJob > fills plan: args and graphs 1`] = `
+{
+  "audio": "-hide_banner -nostdin -y -f lavfi -i anullsrc=r=48000:cl=stereo -/filter_complex /work/audio.graph.txt -map [aout] -c:a aac -b:a 192k -ar 48000 -ac 2 /work/audio.m4a",
+  "chunks": [
+    {
+      "animated": false,
+      "args": "-hide_banner -nostdin -y -ss 0.4 -t 2.6 -i /media/sq-1080-6s.mp4 -/filter_complex /work/chunk-0000.graph.txt -map [vout] -frames:v 60 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0000.mp4",
+      "f0": 0,
+      "f1": 60,
+      "index": 0,
+    },
+    {
+      "animated": true,
+      "args": "-hide_banner -nostdin -y -ss 2.4 -t 1.1 -i /media/sq-1080-6s.mp4 -ss 0.9 -t 1.1 -i /media/h-1080p-10s.mp4 -/filter_complex /work/chunk-0001.graph.txt -map [vout] -frames:v 15 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0001.mp4",
+      "f0": 60,
+      "f1": 75,
+      "index": 1,
+    },
+    {
+      "animated": false,
+      "args": "-hide_banner -nostdin -y -ss 2.9 -t 2.1 -i /media/sq-1080-6s.mp4 -ss 1.4 -t 2.1 -i /media/h-1080p-10s.mp4 -/filter_complex /work/chunk-0002.graph.txt -map [vout] -frames:v 45 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0002.mp4",
+      "f0": 75,
+      "f1": 120,
+      "index": 2,
+    },
+  ],
+  "concat": "-hide_banner -nostdin -y -f concat -safe 0 -i /work/chunks.txt -i /work/audio.m4a -map 0:v -map 1:a -c copy -t 4 -movflags +faststart /out/mix.mp4",
+  "files": {
+    "/work/audio.graph.txt": "[0:a]atrim=duration=4[aout]",
+    "/work/chunk-0000.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1080:1080:0:0,split[s3][s4];
+[s3]scale=360:360:flags=bicubic,setsar=1[fg1];
+[s4]scale=56:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=56:46,boxblur=luma_radius=6:luma_power=2,scale=440:360:flags=bilinear,setsar=1[bg2];
+[bg2][fg1]overlay=x=40:y=0:shortest=1[clip0];
+[fsrc6]scale=12:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=12:46,boxblur=luma_radius=3:luma_power=2,scale=100:360:flags=bilinear,setsar=1[fill5];
+[fsrc8]scale=12:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=12:46,boxblur=luma_radius=3:luma_power=2,scale=100:360:flags=bilinear,setsar=1[fill7];
+[clip0]split=3[m9][fsrc6][fsrc8];
+color=c=0x303030:s=640x360:r=30:d=2.033333,trim=end_frame=60,format=yuv420p[cv10];
+[cv10][fill5]overlay=x=0:y=0[cv11];
+[cv11][m9]overlay=x=100:y=0:eof_action=pass[cv12];
+[cv12][fill7]overlay=x=540:y=0[cv13];
+color=c=black:s=640x360:r=30:d=0.533333,format=yuva420p,fade=t=out:start_frame=0:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=15,setpts=PTS-STARTPTS[fade14];
+[cv13][fade14]overlay=x=0:y=0:eof_action=pass[cv15];
+[cv15]format=yuv420p[vout]",
+    "/work/chunk-0001.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1080:1080:0:0,split[s3][s4];
+[s4]scale=56:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=56:46,boxblur=luma_radius=6:luma_power=2,scale=440:360:flags=bilinear,setsar=1[base2];
+[s3]scale=w='360+2*gte(t,0.45)':h=360:eval=frame:flags=bicubic,setsar=1[sc1];
+[base2][sc1]overlay=x='40-2*gte(t,0.05)-2*gte(t,0.083333)-4*gte(t,0.116667)-2*gte(t,0.15)-4*gte(t,0.183333)-4*gte(t,0.216667)-4*gte(t,0.25)-4*gte(t,0.283333)-4*gte(t,0.316667)-2*gte(t,0.35)-4*gte(t,0.383333)-2*gte(t,0.416667)-2*gte(t,0.45)':y=0:eval=frame:shortest=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=806:1080:558:0,scale=w=270:h=360:eval=frame:flags=bicubic,setsar=1[sc6];
+color=c=black:s=270x360:r=30:d=0.533333,trim=end_frame=15[base7];
+[base7][sc6]overlay=x='-132+4*gte(t,0.05)+8*gte(t,0.083333)+10*gte(t,0.116667)+12*gte(t,0.15)+12*gte(t,0.183333)+14*gte(t,0.216667)+12*gte(t,0.25)+14*gte(t,0.283333)+12*gte(t,0.316667)+12*gte(t,0.35)+10*gte(t,0.383333)+8*gte(t,0.416667)+4*gte(t,0.45)':y=0:eval=frame:shortest=1[clip5];
+[fsrc9]crop=360:360:0:0,scale=12:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=12:46,boxblur=luma_radius=3:luma_power=2,scale=100:360:flags=bilinear,setsar=1[fill8];
+[fsrc11]crop=360:360:0:0,scale=12:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=12:46,boxblur=luma_radius=3:luma_power=2,scale=92:360:flags=bilinear,setsar=1[fill10];
+[clip0]split=3[m12][fsrc9][fsrc11];
+color=c=0x303030:s=640x360:r=30:d=0.533333,trim=end_frame=15,format=yuv420p[cv13];
+[cv13][fill8]overlay=x=0:y=0[cv14];
+[cv14][m12]overlay=x='100-2*gte(t,0.016667)-2*gte(t,0.05)-6*gte(t,0.083333)-8*gte(t,0.116667)-8*gte(t,0.15)-10*gte(t,0.183333)-10*gte(t,0.216667)-8*gte(t,0.25)-10*gte(t,0.283333)-10*gte(t,0.316667)-8*gte(t,0.35)-8*gte(t,0.383333)-6*gte(t,0.416667)-2*gte(t,0.45)':y=0:eval=frame:eof_action=pass[cv15];
+[cv15][fill10]overlay=x='548-2*gte(t,0.016667)-6*gte(t,0.05)-10*gte(t,0.083333)-14*gte(t,0.116667)-14*gte(t,0.15)-18*gte(t,0.183333)-18*gte(t,0.216667)-16*gte(t,0.25)-18*gte(t,0.283333)-18*gte(t,0.316667)-14*gte(t,0.35)-14*gte(t,0.383333)-10*gte(t,0.416667)-6*gte(t,0.45)':y=0:eval=frame[cv16];
+[cv16][clip5]overlay=x='640-4*gte(t,0.016667)-10*gte(t,0.05)-14*gte(t,0.083333)-20*gte(t,0.116667)-22*gte(t,0.15)-26*gte(t,0.183333)-26*gte(t,0.216667)-28*gte(t,0.25)-26*gte(t,0.283333)-26*gte(t,0.316667)-22*gte(t,0.35)-20*gte(t,0.383333)-14*gte(t,0.416667)-10*gte(t,0.45)':y=0:eval=frame:eof_action=pass[cv17];
+color=c=0x303030:s=8x360:r=30:d=0.533333,trim=end_frame=15[gap18];
+[cv17][gap18]overlay=x='540-2*gte(t,0.016667)-6*gte(t,0.05)-10*gte(t,0.083333)-14*gte(t,0.116667)-14*gte(t,0.15)-18*gte(t,0.183333)-18*gte(t,0.216667)-16*gte(t,0.25)-18*gte(t,0.283333)-18*gte(t,0.316667)-14*gte(t,0.35)-14*gte(t,0.383333)-10*gte(t,0.416667)-6*gte(t,0.45)':y=0:eval=frame[cv19];
+[cv19]format=yuv420p[vout]",
+    "/work/chunk-0002.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=45,setpts=PTS-STARTPTS,crop=1080:1080:0:0,scale=360:360:flags=bicubic,setsar=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=45,setpts=PTS-STARTPTS,crop=816:1080:552:0,scale=272:360:flags=bicubic,setsar=1[clip1];
+color=c=0x303030:s=640x360:r=30:d=1.533333,trim=end_frame=45,format=yuv420p[cv2];
+[cv2][clip0]overlay=x=0:y=0:eof_action=pass[cv3];
+[cv3][clip1]overlay=x=368:y=0:eof_action=pass[cv4];
+color=c=black:s=640x360:r=30:d=1.533333,format=yuva420p,fade=t=in:start_frame=30:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=45,setpts=PTS-STARTPTS[fade5];
+[cv4][fade5]overlay=x=0:y=0:eof_action=pass[cv6];
+[cv6]format=yuv420p[vout]",
+    "/work/chunks.txt": "file 'chunk-0000.mp4'
+file 'chunk-0001.mp4'
+file 'chunk-0002.mp4'
+",
+  },
+  "totalFrames": 120,
+}
+`;
+
+exports[`buildRenderJob > relayout plan: args and graphs 1`] = `
+{
+  "audio": "-hide_banner -nostdin -y -f lavfi -i anullsrc=r=48000:cl=stereo -/filter_complex /work/audio.graph.txt -map [aout] -c:a aac -b:a 192k -ar 48000 -ac 2 /work/audio.m4a",
+  "chunks": [
+    {
+      "animated": false,
+      "args": "-hide_banner -nostdin -y -ss 0 -t 2.5 -i /media/v-1080x1920-12s.mp4 -ss 0.9 -t 2.6 -i /media/h-1080p-10s.mp4 -/filter_complex /work/chunk-0000.graph.txt -map [vout] -frames:v 60 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0000.mp4",
+      "f0": 0,
+      "f1": 60,
+      "index": 0,
+    },
+    {
+      "animated": true,
+      "args": "-hide_banner -nostdin -y -ss 1.9 -t 1.1 -i /media/v-1080x1920-12s.mp4 -ss 2.9 -t 1.1 -i /media/h-1080p-10s.mp4 -ss 0 -t 1 -i /media/h-720p-25fps-8s.mp4 -/filter_complex /work/chunk-0001.graph.txt -map [vout] -frames:v 15 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0001.mp4",
+      "f0": 60,
+      "f1": 75,
+      "index": 1,
+    },
+    {
+      "animated": false,
+      "args": "-hide_banner -nostdin -y -ss 2.4 -t 2.1 -i /media/v-1080x1920-12s.mp4 -ss 0.4 -t 2.1 -i /media/h-720p-25fps-8s.mp4 -/filter_complex /work/chunk-0002.graph.txt -map [vout] -frames:v 45 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0002.mp4",
+      "f0": 75,
+      "f1": 120,
+      "index": 2,
+    },
+  ],
+  "concat": "-hide_banner -nostdin -y -f concat -safe 0 -i /work/chunks.txt -i /work/audio.m4a -map 0:v -map 1:a -c copy -t 4 -movflags +faststart /out/mix.mp4",
+  "files": {
+    "/work/audio.graph.txt": "[0:a]atrim=duration=4[aout]",
+    "/work/chunk-0000.graph.txt": "[0:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1080:1846:0:38,scale=632:1080:flags=bicubic,setsar=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1280:1080:320:0,scale=1280:1080:flags=bicubic,setsar=1[clip1];
+color=c=0x303030:s=1920x1080:r=30:d=2.033333,trim=end_frame=60,format=yuv420p[cv2];
+[cv2][clip0]overlay=x=0:y=0:eof_action=pass[cv3];
+[cv3][clip1]overlay=x=640:y=0:eof_action=pass[cv4];
+color=c=black:s=1920x1080:r=30:d=0.533333,format=yuva420p,fade=t=out:start_frame=0:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=15,setpts=PTS-STARTPTS[fade5];
+[cv4][fade5]overlay=x=0:y=0:eof_action=pass[cv6];
+[cv6]format=yuv420p[vout]",
+    "/work/chunk-0001.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1080:1846:0:38,scale=w='632+2*gte(t,0.016667)+6*gte(t,0.05)+8*gte(t,0.083333)+10*gte(t,0.116667)+12*gte(t,0.15)+14*gte(t,0.183333)+14*gte(t,0.216667)+14*gte(t,0.25)+14*gte(t,0.283333)+14*gte(t,0.316667)+12*gte(t,0.35)+10*gte(t,0.383333)+8*gte(t,0.416667)+6*gte(t,0.45)':h='1080+4*gte(t,0.016667)+8*gte(t,0.05)+16*gte(t,0.083333)+16*gte(t,0.116667)+22*gte(t,0.15)+22*gte(t,0.183333)+24*gte(t,0.216667)+24*gte(t,0.25)+24*gte(t,0.283333)+22*gte(t,0.316667)+22*gte(t,0.35)+18*gte(t,0.383333)+14*gte(t,0.416667)+8*gte(t,0.45)':eval=frame:flags=bicubic,setsar=1[sc1];
+color=c=black:s=776x1080:r=30:d=0.533333,trim=end_frame=15[base2];
+[base2][sc1]overlay=x=0:y='0-2*gte(t,0.016667)-4*gte(t,0.05)-8*gte(t,0.083333)-8*gte(t,0.116667)-10*gte(t,0.15)-10*gte(t,0.183333)-14*gte(t,0.216667)-12*gte(t,0.25)-12*gte(t,0.283333)-10*gte(t,0.316667)-12*gte(t,0.35)-8*gte(t,0.383333)-6*gte(t,0.416667)-6*gte(t,0.45)':eval=frame:shortest=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1280:1080:320:0,scale=w='1280+2*gte(t,0.016667)-2*gte(t,0.05)+2*gte(t,0.116667)-2*gte(t,0.183333)+2*gte(t,0.25)-2*gte(t,0.316667)+2*gte(t,0.383333)-2*gte(t,0.45)':h=1080:eval=frame:flags=bicubic,setsar=1[sc4];
+color=c=black:s=1280x1080:r=30:d=0.533333,trim=end_frame=15[base5];
+[base5][sc4]overlay=x='0-2*gte(t,0.016667)-2*gte(t,0.05)-4*gte(t,0.083333)-6*gte(t,0.116667)-6*gte(t,0.15)-6*gte(t,0.183333)-6*gte(t,0.216667)-8*gte(t,0.25)-8*gte(t,0.283333)-6*gte(t,0.316667)-6*gte(t,0.35)-6*gte(t,0.383333)-4*gte(t,0.416667)-2*gte(t,0.45)':y=0:eval=frame:shortest=1[clip3];
+[2:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=854:720:214:0,scale=w='1280+2*gte(t,0.016667)+2*gte(t,0.05)-2*gte(t,0.083333)-2*gte(t,0.283333)+2*gte(t,0.316667)-2*gte(t,0.383333)+2*gte(t,0.416667)':h=1080:eval=frame:flags=bicubic,setsar=1[sc7];
+color=c=black:s=1280x1080:r=30:d=0.533333,trim=end_frame=15[base8];
+[base8][sc7]overlay=x='0-4*gte(t,0.05)-2*gte(t,0.083333)-6*gte(t,0.116667)-6*gte(t,0.15)-6*gte(t,0.183333)-10*gte(t,0.216667)-6*gte(t,0.25)-4*gte(t,0.283333)-10*gte(t,0.316667)-6*gte(t,0.35)-2*gte(t,0.383333)-6*gte(t,0.416667)-4*gte(t,0.45)':y=0:eval=frame:shortest=1[clip6];
+[clip3][clip6]xfade=transition=fade:duration=0.5:offset=0[x9];
+color=c=0x303030:s=1920x1080:r=30:d=0.533333,trim=end_frame=15,format=yuv420p[cv10];
+[cv10][clip0]overlay=x=0:y=0:eof_action=pass[cv11];
+[cv11][x9]overlay=x='640+2*gte(t,0.016667)+4*gte(t,0.05)+8*gte(t,0.083333)+12*gte(t,0.116667)+12*gte(t,0.15)+12*gte(t,0.183333)+14*gte(t,0.216667)+16*gte(t,0.25)+14*gte(t,0.283333)+12*gte(t,0.316667)+12*gte(t,0.35)+12*gte(t,0.383333)+8*gte(t,0.416667)+4*gte(t,0.45)':y=0:eval=frame:eof_action=pass[cv12];
+color=c=0x303030:s=8x1080:r=30:d=0.533333,trim=end_frame=15[gap13];
+[cv12][gap13]overlay=x='632+2*gte(t,0.016667)+4*gte(t,0.05)+8*gte(t,0.083333)+12*gte(t,0.116667)+12*gte(t,0.15)+12*gte(t,0.183333)+14*gte(t,0.216667)+16*gte(t,0.25)+14*gte(t,0.283333)+12*gte(t,0.316667)+12*gte(t,0.35)+12*gte(t,0.383333)+8*gte(t,0.416667)+4*gte(t,0.45)':y=0:eval=frame[cv14];
+[cv14]format=yuv420p[vout]",
+    "/work/chunk-0002.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=45,setpts=PTS-STARTPTS,crop=1080:1504:0:208,scale=776:1080:flags=bicubic,setsar=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=45,setpts=PTS-STARTPTS,crop=758:720:262:0,scale=1136:1080:flags=bicubic,setsar=1[clip1];
+color=c=0x303030:s=1920x1080:r=30:d=1.533333,trim=end_frame=45,format=yuv420p[cv2];
+[cv2][clip0]overlay=x=0:y=0:eof_action=pass[cv3];
+[cv3][clip1]overlay=x=784:y=0:eof_action=pass[cv4];
+color=c=black:s=1920x1080:r=30:d=1.533333,format=yuva420p,fade=t=in:start_frame=30:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=45,setpts=PTS-STARTPTS[fade5];
+[cv4][fade5]overlay=x=0:y=0:eof_action=pass[cv6];
+[cv6]format=yuv420p[vout]",
+    "/work/chunks.txt": "file 'chunk-0000.mp4'
+file 'chunk-0001.mp4'
+file 'chunk-0002.mp4'
+",
+  },
+  "totalFrames": 120,
+}
+`;
+
+exports[`buildRenderJob > removal plan: args and graphs 1`] = `
+{
+  "audio": "-hide_banner -nostdin -y -f lavfi -i anullsrc=r=48000:cl=stereo -/filter_complex /work/audio.graph.txt -map [aout] -c:a aac -b:a 192k -ar 48000 -ac 2 /work/audio.m4a",
+  "chunks": [
+    {
+      "animated": false,
+      "args": "-hide_banner -nostdin -y -ss 0 -t 2.5 -i /media/v-1080x1920-12s.mp4 -ss 1.9 -t 2.6 -i /media/v-rotated-9s.mp4 -ss 0 -t 2.5 -i /media/h-720p-25fps-8s.mp4 -/filter_complex /work/chunk-0000.graph.txt -map [vout] -frames:v 60 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0000.mp4",
+      "f0": 0,
+      "f1": 60,
+      "index": 0,
+    },
+    {
+      "animated": true,
+      "args": "-hide_banner -nostdin -y -ss 1.9 -t 1.1 -i /media/v-1080x1920-12s.mp4 -ss 3.9 -t 1.1 -i /media/v-rotated-9s.mp4 -ss 1.9 -t 1.1 -i /media/h-720p-25fps-8s.mp4 -/filter_complex /work/chunk-0001.graph.txt -map [vout] -frames:v 15 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0001.mp4",
+      "f0": 60,
+      "f1": 75,
+      "index": 1,
+    },
+    {
+      "animated": false,
+      "args": "-hide_banner -nostdin -y -ss 2.4 -t 2.1 -i /media/v-1080x1920-12s.mp4 -ss 2.4 -t 2.1 -i /media/h-720p-25fps-8s.mp4 -/filter_complex /work/chunk-0002.graph.txt -map [vout] -frames:v 45 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0002.mp4",
+      "f0": 75,
+      "f1": 120,
+      "index": 2,
+    },
+  ],
+  "concat": "-hide_banner -nostdin -y -f concat -safe 0 -i /work/chunks.txt -i /work/audio.m4a -map 0:v -map 1:a -c copy -t 4 -movflags +faststart /out/mix.mp4",
+  "files": {
+    "/work/audio.graph.txt": "[0:a]atrim=duration=4[aout]",
+    "/work/chunk-0000.graph.txt": "[0:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=202:360:flags=bicubic,setsar=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=202:360:flags=bicubic,setsar=1[clip1];
+[2:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=560:720:360:0,split[s5][s6];
+[s5]scale=220:282:flags=bicubic,setsar=1[fg3];
+[s6]scale=28:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=28:46,boxblur=luma_radius=6:luma_power=2,scale=220:360:flags=bilinear,setsar=1[bg4];
+[bg4][fg3]overlay=x=0:y=39:shortest=1[clip2];
+color=c=0x303030:s=640x360:r=30:d=2.033333,trim=end_frame=60,format=yuv420p[cv7];
+[cv7][clip0]overlay=x=0:y=0:eof_action=pass[cv8];
+[cv8][clip1]overlay=x=210:y=0:eof_action=pass[cv9];
+[cv9][clip2]overlay=x=420:y=0:eof_action=pass[cv10];
+color=c=black:s=640x360:r=30:d=0.533333,format=yuva420p,fade=t=out:start_frame=0:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=15,setpts=PTS-STARTPTS[fade11];
+[cv10][fade11]overlay=x=0:y=0:eof_action=pass[cv12];
+[cv12]format=yuv420p[vout]",
+    "/work/chunk-0001.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=w='202+2*gte(t,0.016667)+2*gte(t,0.05)+4*gte(t,0.083333)+6*gte(t,0.116667)+6*gte(t,0.15)+8*gte(t,0.183333)+6*gte(t,0.216667)+8*gte(t,0.25)+6*gte(t,0.283333)+8*gte(t,0.316667)+6*gte(t,0.35)+6*gte(t,0.383333)+4*gte(t,0.416667)+2*gte(t,0.45)':h='360+2*gte(t,0.016667)+4*gte(t,0.05)+8*gte(t,0.083333)+10*gte(t,0.116667)+10*gte(t,0.15)+12*gte(t,0.183333)+14*gte(t,0.216667)+12*gte(t,0.25)+14*gte(t,0.283333)+12*gte(t,0.316667)+10*gte(t,0.35)+10*gte(t,0.383333)+8*gte(t,0.416667)+4*gte(t,0.45)':eval=frame:flags=bicubic,setsar=1[sc1];
+color=c=black:s=276x360:r=30:d=0.533333,trim=end_frame=15[base2];
+[base2][sc1]overlay=x=0:y='0-2*gte(t,0.05)-4*gte(t,0.083333)-6*gte(t,0.116667)-4*gte(t,0.15)-6*gte(t,0.183333)-8*gte(t,0.216667)-6*gte(t,0.25)-6*gte(t,0.283333)-6*gte(t,0.316667)-6*gte(t,0.35)-4*gte(t,0.383333)-4*gte(t,0.416667)-2*gte(t,0.45)':eval=frame:shortest=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=w='202+2*gte(t,0.016667)':h=360:eval=frame:flags=bicubic,setsar=1[sc4];
+color=c=black:s=202x360:r=30:d=0.533333,trim=end_frame=15[base5];
+[base5][sc4]overlay=x='0-2*gte(t,0.016667)-4*gte(t,0.05)-4*gte(t,0.083333)-8*gte(t,0.116667)-8*gte(t,0.15)-10*gte(t,0.183333)-10*gte(t,0.216667)-10*gte(t,0.25)-10*gte(t,0.283333)-10*gte(t,0.316667)-8*gte(t,0.35)-6*gte(t,0.383333)-6*gte(t,0.416667)-4*gte(t,0.45)':y=0:eval=frame:shortest=1[clip3];
+[2:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=708:720:286:0,split[s9][s10];
+[s10]scale=44:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=44:46,boxblur=luma_radius=6:luma_power=2,scale=356:360:flags=bilinear,setsar=1[base8];
+[s9]scale=w='280+2*gte(t,0.016667)+6*gte(t,0.05)+10*gte(t,0.083333)+12*gte(t,0.116667)+14*gte(t,0.15)+16*gte(t,0.183333)+16*gte(t,0.216667)-2*gte(t,0.25)+2*gte(t,0.283333)-2*gte(t,0.316667)+2*gte(t,0.35)-2*gte(t,0.383333)+2*gte(t,0.416667)':h='284+2*gte(t,0.016667)+6*gte(t,0.05)+10*gte(t,0.083333)+12*gte(t,0.116667)+16*gte(t,0.15)+16*gte(t,0.183333)+14*gte(t,0.216667)':eval=frame:flags=bicubic,setsar=1[sc7];
+[base8][sc7]overlay=x='-30-2*gte(t,0.116667)-2*gte(t,0.15)-2*gte(t,0.183333)-2*gte(t,0.216667)+8*gte(t,0.25)+6*gte(t,0.283333)+8*gte(t,0.316667)+4*gte(t,0.35)+6*gte(t,0.383333)+2*gte(t,0.416667)+4*gte(t,0.45)':y='38-4*gte(t,0.05)-4*gte(t,0.083333)-6*gte(t,0.116667)-8*gte(t,0.15)-8*gte(t,0.183333)-8*gte(t,0.216667)':eval=frame:shortest=1[clip6];
+color=c=0x303030:s=640x360:r=30:d=0.533333,trim=end_frame=15,format=yuv420p[cv11];
+[cv11][clip0]overlay=x=0:y=0:eof_action=pass[cv12];
+[cv12][clip3]overlay=x='210+4*gte(t,0.05)+2*gte(t,0.083333)+6*gte(t,0.116667)+6*gte(t,0.15)+6*gte(t,0.183333)+6*gte(t,0.216667)+6*gte(t,0.25)+6*gte(t,0.283333)+6*gte(t,0.316667)+6*gte(t,0.35)+6*gte(t,0.383333)+2*gte(t,0.416667)+4*gte(t,0.45)':y=0:eval=frame:eof_action=pass[cv13];
+[cv13][clip6]overlay=x='420-2*gte(t,0.016667)-4*gte(t,0.05)-8*gte(t,0.083333)-10*gte(t,0.116667)-12*gte(t,0.15)-12*gte(t,0.183333)-14*gte(t,0.216667)-12*gte(t,0.25)-14*gte(t,0.283333)-12*gte(t,0.316667)-12*gte(t,0.35)-10*gte(t,0.383333)-8*gte(t,0.416667)-4*gte(t,0.45)':y=0:eval=frame:eof_action=pass[cv14];
+color=c=0x303030:s=8x360:r=30:d=0.533333,trim=end_frame=15[gap15];
+[cv14][gap15]overlay=x='202+4*gte(t,0.05)+4*gte(t,0.083333)+4*gte(t,0.116667)+8*gte(t,0.15)+6*gte(t,0.183333)+8*gte(t,0.216667)+6*gte(t,0.25)+8*gte(t,0.283333)+6*gte(t,0.316667)+8*gte(t,0.35)+4*gte(t,0.383333)+4*gte(t,0.416667)+4*gte(t,0.45)':y=0:eval=frame[cv16];
+color=c=0x303030:s=8x360:r=30:d=0.533333,trim=end_frame=15[gap17];
+[cv16][gap17]overlay=x='412-2*gte(t,0.016667)-4*gte(t,0.05)-8*gte(t,0.083333)-10*gte(t,0.116667)-12*gte(t,0.15)-12*gte(t,0.183333)-14*gte(t,0.216667)-12*gte(t,0.25)-14*gte(t,0.283333)-12*gte(t,0.316667)-12*gte(t,0.35)-10*gte(t,0.383333)-8*gte(t,0.416667)-4*gte(t,0.45)':y=0:eval=frame[cv18];
+[cv18]format=yuv420p[vout]",
+    "/work/chunk-0002.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=45,setpts=PTS-STARTPTS,crop=1080:1408:0:256,scale=276:360:flags=bicubic,setsar=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=45,setpts=PTS-STARTPTS,crop=712:720:284:0,scale=356:360:flags=bicubic,setsar=1[clip1];
+color=c=0x303030:s=640x360:r=30:d=1.533333,trim=end_frame=45,format=yuv420p[cv2];
+[cv2][clip0]overlay=x=0:y=0:eof_action=pass[cv3];
+[cv3][clip1]overlay=x=284:y=0:eof_action=pass[cv4];
+color=c=black:s=640x360:r=30:d=1.533333,format=yuva420p,fade=t=in:start_frame=30:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=45,setpts=PTS-STARTPTS[fade5];
+[cv4][fade5]overlay=x=0:y=0:eof_action=pass[cv6];
+[cv6]format=yuv420p[vout]",
+    "/work/chunks.txt": "file 'chunk-0000.mp4'
+file 'chunk-0001.mp4'
+file 'chunk-0002.mp4'
+",
+  },
+  "totalFrames": 120,
+}
+`;
+
+exports[`buildRenderJob > static plan: args and graphs 1`] = `
+{
+  "audio": "-hide_banner -nostdin -y -f lavfi -i anullsrc=r=48000:cl=stereo -/filter_complex /work/audio.graph.txt -map [aout] -c:a aac -b:a 192k -ar 48000 -ac 2 /work/audio.m4a",
+  "chunks": [
+    {
+      "animated": false,
+      "args": "-hide_banner -nostdin -y -ss 0 -t 3.5 -i /media/v-1080x1920-12s.mp4 -ss 0.9 -t 3.6 -i /media/h-1080p-10s.mp4 -/filter_complex /work/chunk-0000.graph.txt -map [vout] -frames:v 90 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0000.mp4",
+      "f0": 0,
+      "f1": 90,
+      "index": 0,
+    },
+  ],
+  "concat": "-hide_banner -nostdin -y -f concat -safe 0 -i /work/chunks.txt -i /work/audio.m4a -map 0:v -map 1:a -c copy -t 3 -movflags +faststart /out/mix.mp4",
+  "files": {
+    "/work/audio.graph.txt": "[0:a]atrim=duration=3[aout]",
+    "/work/chunk-0000.graph.txt": "[0:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=90,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=202:360:flags=bicubic,setsar=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=90,setpts=PTS-STARTPTS,crop=1290:1080:316:0,scale=430:360:flags=bicubic,setsar=1[clip1];
+color=c=0x303030:s=640x360:r=30:d=3.033333,trim=end_frame=90,format=yuv420p[cv2];
+[cv2][clip0]overlay=x=0:y=0:eof_action=pass[cv3];
+[cv3][clip1]overlay=x=210:y=0:eof_action=pass[cv4];
+color=c=black:s=640x360:r=30:d=0.533333,format=yuva420p,fade=t=out:start_frame=0:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=15,setpts=PTS-STARTPTS[fade5];
+[cv4][fade5]overlay=x=0:y=0:eof_action=pass[cv6];
+color=c=black:s=640x360:r=30:d=3.033333,format=yuva420p,fade=t=in:start_frame=75:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=90,setpts=PTS-STARTPTS[fade7];
+[cv6][fade7]overlay=x=0:y=0:eof_action=pass[cv8];
+[cv8]format=yuv420p[vout]",
+    "/work/chunks.txt": "file 'chunk-0000.mp4'
+",
+  },
+  "totalFrames": 90,
+}
+`;
+
+exports[`buildRenderJob > substitutions plan: args and graphs 1`] = `
+{
+  "audio": "-hide_banner -nostdin -y -f lavfi -i anullsrc=r=48000:cl=stereo -/filter_complex /work/audio.graph.txt -map [aout] -c:a aac -b:a 192k -ar 48000 -ac 2 /work/audio.m4a",
+  "chunks": [
+    {
+      "animated": false,
+      "args": "-hide_banner -nostdin -y -ss 0 -t 5 -i /media/v-1080x1920-12s.mp4 -ss 0.9 -t 3.6 -i /media/h-1080p-10s.mp4 -ss 0 -t 4 -i /media/h-720p-25fps-8s.mp4 -/filter_complex /work/chunk-0000.graph.txt -map [vout] -frames:v 180 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0000.mp4",
+      "f0": 0,
+      "f1": 180,
+      "index": 0,
+    },
+  ],
+  "concat": "-hide_banner -nostdin -y -f concat -safe 0 -i /work/chunks.txt -i /work/audio.m4a -map 0:v -map 1:a -c copy -t 6 -movflags +faststart /out/mix.mp4",
+  "files": {
+    "/work/audio.graph.txt": "[0:a]atrim=duration=6[aout]",
+    "/work/chunk-0000.graph.txt": "[0:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=135,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=202:360:flags=bicubic,setsar=1[clip0];
+[fsrc2]trim=start_frame=120:end_frame=180,setpts=PTS-STARTPTS,scale=26:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=26:46,boxblur=luma_radius=6:luma_power=2,scale=202:360:flags=bilinear,setsar=1[fill1];
+[clip0][fill1]xfade=transition=fade:duration=0.5:offset=4[x3];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=90,setpts=PTS-STARTPTS,crop=1290:1080:316:0,scale=430:360:flags=bicubic,setsar=1[clip4];
+[2:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=105,setpts=PTS-STARTPTS,crop=860:720:210:0,scale=430:360:flags=bicubic,setsar=1[clip5];
+[clip4][clip5]xfade=transition=fade:duration=0.5:offset=2.5[x6];
+[x6]split=2[m7][fsrc2];
+color=c=0x303030:s=640x360:r=30:d=6.033333,trim=end_frame=180,format=yuv420p[cv8];
+[cv8][x3]overlay=x=0:y=0:eof_action=pass[cv9];
+[cv9][m7]overlay=x=210:y=0:eof_action=pass[cv10];
+color=c=black:s=640x360:r=30:d=0.533333,format=yuva420p,fade=t=out:start_frame=0:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=15,setpts=PTS-STARTPTS[fade11];
+[cv10][fade11]overlay=x=0:y=0:eof_action=pass[cv12];
+color=c=black:s=640x360:r=30:d=6.033333,format=yuva420p,fade=t=in:start_frame=165:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=180,setpts=PTS-STARTPTS[fade13];
+[cv12][fade13]overlay=x=0:y=0:eof_action=pass[cv14];
+[cv14]format=yuv420p[vout]",
+    "/work/chunks.txt": "file 'chunk-0000.mp4'
+",
+  },
+  "totalFrames": 180,
+}
+`;
