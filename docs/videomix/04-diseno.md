@@ -461,3 +461,64 @@ Recomendación original:
 | `hooks/useSegmentsAutoSave.ts` | Desactivado en VideoMix |
 | `Timeline.tsx` / `SegmentList.tsx` | Sin cambios o mínimos; `SegmentList` queda sustituido por `ClipList` |
 | `.github/workflows/build.yml` | Desactivado |
+
+## 8. Elementos superpuestos (overlays)
+
+Requisitos: [01-requisitos §9](01-requisitos.md). Tareas: T19–T23.
+
+### 8.1 Modelo (T19)
+
+`MixProject` pasa a **`version: 2`**, con migración automática desde v1 (`overlays: []`).
+
+```ts
+type OverlayAnchor =
+  | { kind: 'absolute', time: number }
+  | { kind: 'clip', clipId: string, edge: 'start' | 'end', offset: number }
+  | { kind: 'element', elementId: string, edge: 'start' | 'end', offset: number };
+
+interface OverlayBase { id: string, name: string, anchor: OverlayAnchor }
+// Caja en fracciones del fotograma de salida (0..1) para que valga en cualquier resolución
+interface OverlayBox { x: number, y: number, width: number, height: number }
+
+interface ImageOverlay extends OverlayBase { type: 'image', path: string, absolutePath: string, duration: number, box: OverlayBox, fadeIn: number, fadeOut: number }
+interface CountdownOverlay extends OverlayBase {
+  type: 'countdown', duration: number, box: OverlayBox /* x,y = posición; height = tamaño de letra */,
+  decimals: 0 | 1 | 2 | 3, leadingZeros: boolean, color: string,
+  font?: { path: string, absolutePath: string } | undefined,   // por defecto, la fuente incluida
+  border: { width: number, color: string }, shadow: { x: number, y: number, color: string } | undefined, fadeOut: number,
+}
+interface ProgressBarOverlay extends OverlayBase {
+  type: 'progressBar', duration: number, linkedCountdownId?: string | undefined, box: OverlayBox,
+  fillColor: string, backgroundColor: string /* '#00000000' = sin fondo */, border: { width: number, color: string },
+  direction: 'ltr' | 'rtl' | 'btt' | 'ttb', mode: 'fill' | 'empty',
+}
+interface SoundOverlay extends OverlayBase { type: 'sound', path: string, absolutePath: string, gainDb: number }
+
+type MixOverlay = ImageOverlay | CountdownOverlay | ProgressBarOverlay | SoundOverlay;
+// MixProject.overlays: MixOverlay[]  (el orden es el orden de capas: el último va encima)
+```
+
+- **Resolución de tiempos** (`resolveOverlayTimes(project, plan) → Map<id, { start, end, warnings }>`, pura):
+  - orden topológico de los anclajes y detección de ciclos;
+  - los anclajes a clips usan `ColumnPlacement.startTime` / `endTime`;
+  - la duración de los sonidos sale de su medida (T21) o de ffprobe;
+  - la barra con `linkedCountdownId` toma el inicio y la duración del contador.
+
+### 8.2 Render de vídeo (T20)
+
+- Se aplica **sobre la salida compuesta de cada bloque** (después de columnas, rellenos y separaciones, antes del *fade* global), con el tiempo absoluto del vídeo (`t + inicioDelBloque`) para que un elemento partido entre bloques salga continuo.
+- **PNG**: entrada `-loop 1 -i` (o `-i` con `-t`), `scale` a la caja, `fade` con alfa y `overlay=enable='between(...)'`.
+- **Contador**: `drawtext` con `fontfile` y el texto por expresión de tiempo (`%{eif:…}` con los decimales). Borde (`borderw`/`bordercolor`) y sombra (`shadowx`/`shadowy`/`shadowcolor`), y `alpha` para el *fade*. Una fuente libre (OFL) se incluye en `extraResources`.
+- **Barra**: `drawbox` (o `color` + `overlay`) con el ancho o alto en función de `t`, respetando el borde y el fondo.
+- La mini vista del fotograma (T15) dibuja las cajas de los elementos visibles en ese instante.
+
+### 8.3 Audio (T21)
+
+- Los efectos de sonido se miden con `ensureLoudness` (clave de cache propia) y se normalizan a −16 LUFS más `gainDb`.
+- Entran en la pasada de audio con `adelay` y se suman después de la compensación de simultaneidad y antes del limitador.
+
+### 8.4 UI (T22)
+
+- Carriles nuevos en `MixPlanView` y un panel de propiedades.
+- Edición de posición y tamaño sobre la mini vista del fotograma (reutiliza la lógica de arrastre de `overlayMath`).
+- Undo/redo mediante el reducer del proyecto.

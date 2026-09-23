@@ -63,3 +63,8 @@
 | T16 | [T16-limpieza-ui.md](T16-limpieza-ui.md) |
 | T17 | [T17-i18n-manual.md](T17-i18n-manual.md) |
 | T18 | [T18-empaquetado.md](T18-empaquetado.md) |
+| T19 | [T19-overlays-modelo.md](T19-overlays-modelo.md) |
+| T20 | [T20-overlays-render.md](T20-overlays-render.md) |
+| T21 | [T21-overlays-sonido.md](T21-overlays-sonido.md) |
+| T22 | [T22-overlays-ui.md](T22-overlays-ui.md) |
+| T23 | [T23-overlays-cierre.md](T23-overlays-cierre.md) |

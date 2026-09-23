@@ -127,7 +127,54 @@ Crear proyectos de vídeo a partir de trozos de vídeos. El usuario define *clip
 | W3 | Validación con ffmpeg real y vídeos sintéticos. **No se para entre hitos**: el usuario revisa la UI cuando pueda. |
 | W4 | Definición de hecho: `tsc` + `lint` + `test` en verde. Tests unitarios obligatorios para el planificador/layout y para el generador del grafo ffmpeg. |
 
-## 9. Fuera de alcance en v1 (backlog)
+## 9. Elementos superpuestos (overlays)
+
+Añadido tras la v1. Son capas que se dibujan o suenan **encima del vídeo final**, después del montaje automático de columnas.
+
+### 9.1 Tipos
+
+- **Imagen PNG** (con transparencia):
+  - posición y tamaño libres, en % del fotograma para que valgan en cualquier resolución, con presets (esquinas, centro, pantalla completa);
+  - *fade* de entrada y de salida configurables.
+- **Contador de cuenta atrás**:
+  - cuenta desde su duración hasta 0 mientras está visible y, al llegar a 0, **desaparece** (con *fade* opcional);
+  - formato **automático**: `SS` por debajo de 60 s y `MM:SS` a partir de 60 s, con **0–3 decimales** y ceros a la izquierda opcionales;
+  - redondeo hacia arriba a la precisión elegida;
+  - tamaño, color, **fuente** (fichero TTF/OTF, con una fuente libre incluida por defecto), **borde y sombra** configurables;
+  - posición como las imágenes.
+- **Barra de progreso**:
+  - rectángulo con posición y tamaño libres;
+  - color de relleno y de fondo, borde opcional;
+  - dirección (izq→der, der→izq, abajo→arriba, arriba→abajo);
+  - se rellena o se vacía de forma animada durante su duración;
+  - puede ir sola o vinculada a un contador (mismo inicio y duración).
+- **Efecto de sonido**:
+  - fichero de audio;
+  - **normalizado a −16 LUFS** más un ajuste en dB por efecto (0 dB = tan fuerte como los clips);
+  - no cuenta en la compensación de simultaneidad;
+  - sin *ducking*.
+
+### 9.2 Tiempo y anclaje
+
+- Cada elemento tiene inicio y duración. Los efectos de sonido duran lo que dure el fichero.
+- El inicio puede ser:
+  - **absoluto**: tiempo del vídeo final;
+  - **anclado a un clip**: inicio o fin del clip ± desplazamiento. Se mueve solo si el montaje recoloca el clip;
+  - **anclado a otro elemento**: inicio o fin de otro elemento ± desplazamiento. Por ejemplo, un sonido al terminar un contador.
+- Una barra "vinculada a un contador" toma el inicio y la duración del contador.
+- Se detectan los ciclos. Si el clip o el elemento de referencia se borra, el elemento pasa a tiempo absoluto (con su tiempo actual) y se muestra un aviso.
+- Lo que caiga fuera de la duración del vídeo se recorta, con aviso.
+- **Orden de capas**: el último elemento de la lista va encima, con acciones de subir y bajar.
+
+### 9.3 Edición
+
+- Tres pistas extra en la vista **"Mix"**: Imágenes, Contadores y barras, y Sonidos. Los bloques se arrastran y se redimensionan.
+- **Panel de propiedades** del elemento seleccionado.
+- La mini vista del fotograma muestra y permite colocar los elementos visuales.
+- Los recursos son **ficheros del usuario**, guardados en el `.vmx` con ruta relativa y absoluta, como las fuentes. Un elemento se puede duplicar.
+- La previsualización y el render incluyen todos los elementos.
+
+## 10. Fuera de alcance en v1 (backlog)
 
 - Keyframes o paneo del rectángulo.
 - Ajustes manuales del plan de montaje.

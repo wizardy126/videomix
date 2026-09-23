@@ -20,6 +20,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M4 · Render** | Orquestación del render y la preview, ajustes de montaje | T13, T14 |
 | **M5 · Previsualización y pulido** | Timeline del montaje, limpieza de la UI heredada, i18n y manual | T15, T16, T17 |
 | **M6 · Empaquetado** | Builds de VideoMix | T18 |
+| **M7 · Overlays** | Imágenes PNG, contadores, barras de progreso y efectos de sonido sobre el vídeo final | T19–T23 |
 
 ## Tareas
 
@@ -44,6 +45,11 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T16 | Limpieza de la UI heredada de LosslessCut | M5 | Sonnet | T13 | hecha |
 | T17 | i18n (es), atajos y manual de usuario | M5 | Sonnet | T16 | hecha |
 | T18 | Empaquetado de VideoMix | M6 | Sonnet | T17 | hecha |
+| T19 | Overlays: modelo, migración v2 y anclajes | M7 | Opus | — | pendiente |
+| T20 | Overlays: render de vídeo (PNG, contador, barra) | M7 | Opus | T19 | pendiente |
+| T21 | Overlays: efectos de sonido en la mezcla | M7 | Sonnet | T19 | pendiente |
+| T22 | Overlays: pistas en la vista Mix y panel de propiedades | M7 | Opus | T19 | pendiente |
+| T23 | Overlays: i18n, manual y revisión final | M7 | Sonnet | T20, T21, T22 | pendiente |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 
