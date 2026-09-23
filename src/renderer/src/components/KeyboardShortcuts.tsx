@@ -788,6 +788,18 @@ const KeyboardShortcuts = memo(({
         name: t('Remove clip'),
         category: mixProjectCategory,
       },
+      showMixSettings: {
+        name: t('Mix settings'),
+        category: mixProjectCategory,
+      },
+      previewMix: {
+        name: t('Preview mix'),
+        category: mixProjectCategory,
+      },
+      renderMix: {
+        name: t('Render mix'),
+        category: mixProjectCategory,
+      },
     };
 
     // eslint-disable-next-line no-shadow

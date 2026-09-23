@@ -1,4 +1,4 @@
-import type { CSSProperties, ClipboardEvent, Dispatch, FormEvent, SetStateAction } from 'react';
+import type { CSSProperties, ClipboardEvent, Dispatch, FormEvent, ReactNode, SetStateAction } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { MdRotate90DegreesCcw } from 'react-icons/md';
@@ -272,7 +272,7 @@ function BottomBar({
   toggleShowThumbnails, toggleWaveformMode, waveformMode, showThumbnails,
   outputPlaybackRate, setOutputPlaybackRate,
   formatTimecode, parseTimecode, playbackRate,
-  currentFrame, playbackMode, displayTime, fileDurationNonZero, getFrameCount,
+  currentFrame, playbackMode, displayTime, fileDurationNonZero, getFrameCount, exportButtons,
 }: {
   zoom: number,
   setZoom: (fn: (z: number) => number) => void,
@@ -284,6 +284,8 @@ function BottomBar({
   cleanupFilesDialog: () => void,
   captureSnapshot: () => void,
   onExportPress: () => void,
+  /** VideoMix: replaces LosslessCut's export controls (the mix is rendered, not exported, and with no file open too). */
+  exportButtons?: ReactNode | undefined,
   segmentsToExport: SegmentToExport[],
   hasVideo: boolean,
   seekAbs: (a: number) => void,
@@ -634,11 +636,15 @@ function BottomBar({
           </div>
         )}
 
-        {!exportConfirmEnabled && (<FaExclamationTriangle style={{ color: dangerColor, marginLeft: '.4em' }} title={t('Export options screen is disabled, and you will not see any important notices or warnings.')} />)}
-        {(!simpleMode || !exportConfirmEnabled) && <ToggleExportConfirm style={{ marginLeft: exportConfirmEnabled ? '.4em' : undefined }} />}
+        {exportButtons ?? (
+          <>
+            {!exportConfirmEnabled && (<FaExclamationTriangle style={{ color: dangerColor, marginLeft: '.4em' }} title={t('Export options screen is disabled, and you will not see any important notices or warnings.')} />)}
+            {(!simpleMode || !exportConfirmEnabled) && <ToggleExportConfirm style={{ marginLeft: exportConfirmEnabled ? '.4em' : undefined }} />}
 
-        {isFileOpened && (
-          <ExportButton segmentsToExport={segmentsToExport} areWeCutting={areWeCutting} onClick={withBlur(onExportPress)} />
+            {isFileOpened && (
+              <ExportButton segmentsToExport={segmentsToExport} areWeCutting={areWeCutting} onClick={withBlur(onExportPress)} />
+            )}
+          </>
         )}
       </div>
     </>

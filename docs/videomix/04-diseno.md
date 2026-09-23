@@ -302,32 +302,33 @@ Todos en `src/renderer/src/videomix/render/`, puros (sin React ni Electron). Det
   - Los `args` no llevan el binario; empiezan por `-hide_banner -nostdin -y`. Codificación común: `libx264 -preset -crf -pix_fmt yuv420p -r fps`, `-an`, `-frames:v N`. `encoding` sustituye CRF/preset (previsualización). El plan ya viene calculado para la resolución de salida.
   - **Hook de audio (T12/T13)**: `buildAudioGraph: (input: AudioGraphInput) => AudioGraph`, con `AudioGraphInput = { plan, clips, sourcePaths, settings, duration }` (`duration` = fotogramas/fps) y `AudioGraph = { inputs, filterComplex, outLabel }`. El job escribe el grafo en `audio.graph.txt` y codifica AAC 192 kbps, 48 kHz, estéreo en `audio.m4a`. Por defecto (`buildSilentAudioGraph`) genera silencio. T13: `buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness })`.
 - **`verifyFilterGraph.ts`**: comprobaciones estructurales para los tests (etiquetas producidas y consumidas una vez, entradas existentes y usadas, `crop` de las entradas dentro del fotograma y par, `split=n`, sin `if()`).
-- **Ejecución** (T13): escribir `files`, `runFfmpegWithProgress` por bloque con concurrencia 2, pasada de audio y `concat`; progreso = Σ fotogramas / `totalFrames`.
+- **Ejecución** (T13, `render/runRenderJob.ts`, con dependencias inyectadas): escribe `files`, ejecuta la pasada de audio y los bloques con `getChunkConcurrency` (`runFfmpegWithProgress`), luego el `concat` a un nombre parcial (`<nombre>.<id>.part.mp4`) que se renombra al final; borra el directorio temporal siempre y el parcial si falla o se cancela. Progreso = Σ fotogramas / `totalFrames` (la razón de tiempo de main se pasa a fotogramas), más un 1 % para audio y otro para el `concat` (`render/renderProgress.ts`). Orquestación y previsualización en `hooks/useMixRender.ts` (ver [T13](execution/T13-render.md)).
 - **Script de desarrollo**: `node script/videomix/renderPlan.ts [proyecto.vmx] [--size WxH] [--fixture <plan>] [--frames t1,t2]` (sin proyecto, escribe y renderiza un ejemplo con los medios de T02).
 - **Tests**: snapshots de argumentos y grafos de 5 planes escritos a mano (`renderTestFixtures.ts`), verificador sobre 25 planes aleatorios del planificador y test con ffmpeg real (`buildRenderJob.ffmpeg.test.ts`, 320×180, se omite sin ffmpeg o sin los medios).
 
 ## 5. Audio
 
-Implementado en T12 (detalles y medidas en [T12](execution/T12-audio.md)).
+Implementado en T12 (detalles y medidas en [T12](execution/T12-audio.md)); la normalización de la música es de T12b ([T12b](execution/T12b-normalizar-musica.md)).
 
 ### 5.1 Análisis de sonoridad
 
-- **Main**: `measureLoudness({ filePath, start, end, abortSignal? })` en `src/main/videomix/loudness.ts`, expuesta en `remoteApiLegacy` como `videomix.measureLoudness`. Devuelve `LoudnessMeasurement`.
+- **Main**: `measureLoudness({ filePath, start?, end?, abortSignal? })` en `src/main/videomix/loudness.ts`, expuesta en `remoteApiLegacy` como `videomix.measureLoudness`. Devuelve `LoudnessMeasurement`. `start`/`end` son opcionales desde T12b: si se omiten los dos, no se pasan `-ss`/`-t` y mide el fichero completo (lo usa la música).
   1. `ffprobe -select_streams a:0` → canales y layout de la primera pista de audio. Sin pista → `{ hasAudio: false }`.
   2. Primera pasada de `loudnorm` sobre esa pista:
 
      ```
-     ffmpeg -hide_banner -nostats -ss <start> -t <dur> -i <path> -map 0:a:0 -af [channelmap,]loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json -f null -
+     ffmpeg -hide_banner -nostats [-ss <start> -t <dur>] -i <path> -map 0:a:0 -af [channelmap,]loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json -f null -
      ```
 
   3. `loudnessParse.ts` (puro, con tests) parsea el bloque JSON de stderr (`input_i`, `input_tp`, `input_lra`, `input_thresh`).
   - **Silencio** (`input_i = -inf` o ≤ −70 LUFS, la puerta absoluta de EBU R128): `{ hasAudio: false }`.
   - **Sin `dual_mono`**: la mezcla convierte mono en estéreo con la matriz por defecto de swresample (−3 dB por canal), que conserva la sonoridad medida en un canal. Comprobado con el script de demo.
   - La medida guarda además `channels` y `channelLayout` (opcionales en el esquema) para aplicar `getFixChannelLayoutFilter` también al mezclar.
-- **Renderer**: `ensureLoudness({ project, onProgress?, abortSignal?, onCacheEntries?, deps?, concurrency = 2 })` en `videomix/loudness.ts`.
+- **Renderer**: `ensureLoudness({ project, music?, onProgress?, abortSignal?, onCacheEntries?, deps?, concurrency = 2 })` en `videomix/loudness.ts`.
   - Mide solo los clips no silenciados con duración > 0 cuya clave no está en `loudnessCache`; los clips con el mismo fichero y rango comparten medida.
+  - `music` (T12b, opcional, aditivo): `{ absolutePath }` de la música del proyecto. Si se pasa, mide también el fichero completo (clave propia, `getMusicLoudnessCacheKey`, con el rango centinela `[0, Infinity)` de `getLoudnessCacheKey`, que ningún clip real puede producir) y añade esa medida al mapa de salida bajo `MUSIC_LOUDNESS_KEY` (exportada por `render/buildAudioGraph.ts`). El tipo de retorno no cambia (`Record<string, LoudnessMeasurement>`), así que sigue encajando sin cambios en el cierre de T13 sobre `buildAudioGraph`.
   - `onCacheEntries` recibe las entradas nuevas (pasar `setLoudnessCache` de `useMixProject`), también las ya medidas si se cancela o falla.
-  - Devuelve las medidas **por id de clip**, la entrada de `buildAudioGraph`.
+  - Devuelve las medidas **por id de clip** (más la de la música, si se pidió), la entrada de `buildAudioGraph`.
   - Cancelación: `abortSignal` llega a `runFfmpeg` como `cancelSignal`; `abortFfmpegs` también sirve.
 - **Clave de cache**: `sha1(absolutePath \n mtimeMs \n size \n start \n end)` en hexadecimal (`getLoudnessCacheKey`, Web Crypto), con `fs.stat` de `MixSource.absolutePath`.
 
@@ -340,7 +341,7 @@ buildAudioGraph({ plan, clips, sourcePaths, settings, duration?, loudness }): Au
 // clips: Pick<MixClip, 'id' | 'sourceId' | 'start' | 'muted' | 'gainDb'>[]
 // sourcePaths: sourceId → ruta (MixSource.absolutePath, la misma que se midió)
 // duration: duración exacta del vídeo (fotogramas / fps); por defecto plan.duration
-// loudness: medidas por id de clip (ensureLoudness)
+// loudness: medidas por id de clip (ensureLoudness); la de la música (T12b), si la hay, bajo MUSIC_LOUDNESS_KEY
 // AudioPass = { inputs: string[][], filterComplex: string, outLabel: 'aout' }, igual que AudioGraph de T11
 ```
 
@@ -362,7 +363,7 @@ El `RenderClip` del *hook* no lleva `muted` ni `gainDb`, así que el llamador (T
    - Un clip cuenta desde la mitad de su fundido de entrada hasta la mitad del de salida: en una sustitución el entrante empieza a contar justo cuando el saliente deja de hacerlo, así que la ganancia no cambia. Con fundidos de potencia constante, la potencia se mantiene.
    - Cada cambio es una rampa lineal centrada en ese instante y tan larga como el fundido que lo causa. Se escribe como suma plana `g0 ± Δ·clip((t−a)/r,0,1) …`, sin `if()` anidados.
    - Se descartó la compensación por clip: exigiría también ganancias variables por clip.
-4. **Música**: `-stream_loop -1` si `loop`; `aresample`/`aformat`, `atrim` a la duración, `volume=volumeDb` (**sin normalizar**), `afade=t=out` final de `max(2 s, D)`; `amix` de 2 entradas con `normalize=0:duration=first`.
+4. **Música**: `-stream_loop -1` si `loop`; `aresample`/`aformat`, `atrim` a la duración, `volume=<normalización + volumeDb>dB` (T12b: **normalizada como un clip** —mismos topes—, así que 0 dB suena tan alto como los clips; sin medida, solo `volumeDb`, con aviso en el código), `afade=t=out` final de `max(2 s, D)`; `amix` de 2 entradas con `normalize=0:duration=first`. Valor por defecto de `volumeDb` al elegir un fichero: −12 dB (`DEFAULT_MUSIC_VOLUME_DB`).
 5. **Salida**: `atrim` a la duración, `alimiter=limit=−1 dBFS:level=disabled:latency=1` (`latency=1` compensa el retardo del *lookahead*: sin él, el audio llega 5 ms tarde), `afade` in/out global de `getGlobalFadeDuration(settings)` (= `D` si `fadeInOut`; el vídeo debe usar la misma) y `aformat` final estéreo 48 kHz.
 
 **Demo**: `node script/videomix/audioDemo.ts [--music] [--columns n]` mezcla los medios de T02 con el planificador real y mide la sonoridad integrada de cada tramo. Para cargar módulos del renderer desde Node, `script/videomix/rendererImports.ts` registra un *hook* de resolución (imports sin extensión e `import.meta.env`).

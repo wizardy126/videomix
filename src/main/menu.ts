@@ -271,6 +271,25 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
             mainWindow.webContents.send('addSourcesDialog');
           },
         },
+        { type: 'separator' },
+        {
+          label: esc(t('Mix settings...')),
+          click() {
+            mainWindow.webContents.send('showMixSettings');
+          },
+        },
+        {
+          label: esc(t('Preview mix')),
+          click() {
+            mainWindow.webContents.send('previewMix');
+          },
+        },
+        {
+          label: esc(t('Render mix...')),
+          click() {
+            mainWindow.webContents.send('renderMix');
+          },
+        },
       ],
     },
 

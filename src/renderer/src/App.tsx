@@ -37,6 +37,9 @@ import SourceList from './videomix/components/SourceList';
 import useMixProject from './videomix/hooks/useMixProject';
 import useMixWorkspace from './videomix/hooks/useMixWorkspace';
 import useMixClips from './videomix/hooks/useMixClips';
+import useMixRender from './videomix/hooks/useMixRender';
+import MixSettingsDialog from './videomix/components/MixSettingsDialog';
+import MixRenderButtons from './videomix/components/MixRenderButtons';
 import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
 import TopMenu from './TopMenu';
 import LastCommands from './LastCommands';
@@ -1592,6 +1595,10 @@ function App() {
   // VideoMix: clips of the project <-> segments of the active source's timeline, selected clip and clip actions (ADR-002)
   const mixClips = useMixClips({ mixProject, currentSourceId: mixWorkspace.currentSourceId, activateSource: mixWorkspace.userActivateSource, cutSegments, setCutSegments, currentCutSeg, setCurrentSegIndex, fileDuration, getRelevantTime, seekAbs });
 
+  // VideoMix: preview and render of the mix (T13), and the mix settings dialog (T14). They replace LosslessCut's export
+  const mixRender = useMixRender({ mixProject, workingRef, setWorking, setProgress, withErrorHandling, showGenericDialog, openExportFinishedDialog, appendFfmpegCommandLog, enableOverwriteOutput });
+  const [mixSettingsOpen, setMixSettingsOpen] = useState(false);
+
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);
 
@@ -2161,7 +2168,8 @@ function App() {
       addSegment,
       duplicateCurrentSegment,
       toggleLastCommands,
-      export: () => onExportPress(),
+      // VideoMix: the export key renders the mix (LosslessCut's export doesn't apply)
+      export: videoMixMode ? () => { mixRender.userRenderMix(); } : () => onExportPress(),
       extractCurrentSegmentFramesAsImages,
       extractSelectedSegmentsFramesAsImages,
       reorderSegsByStartTime,
@@ -2246,10 +2254,13 @@ function App() {
       addClip: mixClips.userAddClip,
       duplicateCurrentClip: () => mixClips.userDuplicateClip(mixClips.selectedClipId),
       removeCurrentClip: () => mixClips.userRemoveClip(mixClips.selectedClipId),
+      showMixSettings: () => setMixSettingsOpen(true),
+      previewMix: () => { mixRender.userPreviewMix(); },
+      renderMix: () => { mixRender.userRenderMix(); },
     };
 
     return ret;
-  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState]);
+  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, mixRender, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState]);
 
   const getKeyboardAction = useCallback((action: MainKeyboardAction) => mainActions[action], [mainActions]);
 
@@ -2841,6 +2852,9 @@ function App() {
                     cleanupFilesDialog={cleanupFilesDialog}
                     captureSnapshot={captureSnapshot}
                     onExportPress={onExportPress}
+                    exportButtons={videoMixMode ? (
+                      <MixRenderButtons onSettings={() => setMixSettingsOpen(true)} onPreview={mixRender.userPreviewMix} onRender={mixRender.userRenderMix} disabled={mixProject.project.clips.length === 0} />
+                    ) : undefined}
                     segmentsToExport={segmentsToExport}
                     seekAbs={seekAbs}
                     currentSegIndexSafe={currentSegIndexSafe}
@@ -2931,6 +2945,8 @@ function App() {
                     </Dialog.Content>
                   </Dialog.Portal>
                 </Dialog.Root>
+
+                {videoMixMode && <MixSettingsDialog open={mixSettingsOpen} onOpenChange={setMixSettingsOpen} settings={mixProject.project.settings} onChange={mixProject.updateSettings} />}
 
                 <LastCommands visible={lastCommandsVisible} onTogglePress={toggleLastCommands} ffmpegCommandLog={ffmpegCommandLog} setFfmpegCommandLog={setFfmpegCommandLog} />
 

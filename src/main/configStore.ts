@@ -107,6 +107,15 @@ const defaultKeyBindings: KeyBinding[] = [
   { keys: 'MetaLeft+KeyD', action: 'duplicateCurrentClip' },
   { keys: 'Delete', action: 'removeCurrentClip' },
   { keys: 'MetaLeft+Backspace', action: 'removeCurrentClip' },
+
+  // VideoMix mix. Plain E ('export') also renders in VideoMix mode. Ctrl/Cmd+E, Ctrl/Cmd+P and Ctrl/Cmd+Shift+M are not
+  // used by any other binding or menu accelerator (Cmd+M alone is the macOS minimize shortcut, so Shift is added).
+  { keys: 'ControlLeft+KeyE', action: 'renderMix' },
+  { keys: 'MetaLeft+KeyE', action: 'renderMix' },
+  { keys: 'ControlLeft+KeyP', action: 'previewMix' },
+  { keys: 'MetaLeft+KeyP', action: 'previewMix' },
+  { keys: 'ControlLeft+ShiftLeft+KeyM', action: 'showMixSettings' },
+  { keys: 'MetaLeft+ShiftLeft+KeyM', action: 'showMixSettings' },
 ];
 
 const defaults: Config = {

@@ -37,8 +37,8 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T10b | Ajuste del planificador (decisiones del usuario) | M3 | Opus | T10, T09 | hecha |
 | T11 | Generador del grafo de vídeo | M3 | Opus | T09, T10 | hecha |
 | T12 | Audio: análisis de sonoridad y grafo de audio | M3 | Opus | T03, T09 | hecha |
-| T12b | Normalización de la pista de música | M3 | Sonnet | T12 | pendiente |
-| T13 | Orquestación del render y la previsualización | M4 | Opus | T07, T11, T12 | pendiente |
+| T12b | Normalización de la pista de música | M3 | Sonnet | T12 | hecha |
+| T13 | Orquestación del render y la previsualización | M4 | Opus | T07, T11, T12 | hecha |
 | T14 | Diálogo de ajustes de montaje | M4 | Sonnet | T04 | hecha |
 | T15 | Timeline del montaje (vista del plan) | M5 | Sonnet | T10, T13 | pendiente |
 | T16 | Limpieza de la UI heredada de LosslessCut | M5 | Sonnet | T13 | pendiente |
