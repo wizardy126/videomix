@@ -115,17 +115,19 @@ export function getPlacementFades(plan: Pick<MixPlan, 'placements' | 'layouts'>,
 /** Compensation for `n` simultaneous (uncorrelated) sources, as amplitude: -10·log10(n) dB. */
 const getCompensation = (n: number) => 1 / Math.sqrt(Math.max(n, 1));
 
+/** One change of the simultaneity compensation: a linear ramp of `gainDelta` (amplitude) centred on `time`, `ramp` s long (0 = a step). */
+export interface CompensationStep { time: number, ramp: number, gainDelta: number }
+
 /**
- * Compensation for the number of clips sounding at the same time (04-diseno §5.2 point 3), as a `volume` expression
- * of `t` applied once to the sum of the clips.
+ * Compensation for the number of clips sounding at the same time (04-diseno §5.2 point 3), as its initial gain and
+ * its changes. Shared by the render (`getCompensationExpr`) and the live preview (T32), which evaluates it per frame.
  *
  * - A clip counts from the middle of its fade-in to the middle of its fade-out. In a crossfade the incoming clip starts
  *   counting just when the outgoing one stops, so a substitution doesn't change the gain (the clip fades are
  *   equal-power, `qsin`, so their power adds up to 1 too).
  * - Each change is a linear ramp centred on that instant, as long as the fade that caused it.
- * - Written as a flat sum of ramps `g0 + Δ·clip((t-a)/r,0,1) + …` (never nested `if()`, ADR-001).
  */
-export function getCompensationExpr(audible: { startTime: number, endTime: number, fadeIn: number, fadeOut: number }[], duration: number) {
+export function getCompensationSteps(audible: { startTime: number, endTime: number, fadeIn: number, fadeOut: number }[], duration: number) {
   const changes = new Map<number, { delta: number, ramp: number }>();
   const addChange = (time: number, delta: number, ramp: number) => {
     const key = Math.round(time * 1e6) / 1e6;
@@ -140,17 +142,39 @@ export function getCompensationExpr(audible: { startTime: number, endTime: numbe
   });
 
   const initial = getCompensation(count);
-  const terms: string[] = [];
+  const steps: CompensationStep[] = [];
   [...changes.entries()].sort(([a], [b]) => a - b).forEach(([time, { delta, ramp }]) => {
     if (delta === 0) return;
     const gainDelta = getCompensation(count + delta) - getCompensation(count);
     count += delta;
     if (Math.abs(gainDelta) < 1e-6) return;
+    steps.push({ time, ramp: ramp > EPS ? ramp : 0, gainDelta });
+  });
+  return { initial, steps };
+}
+
+/** Value of the compensation (`getCompensationSteps`) at `t`: what the render's `volume` expression evaluates to. */
+export function evaluateCompensation({ initial, steps }: ReturnType<typeof getCompensationSteps>, t: number) {
+  let gain = initial;
+  for (const { time, ramp, gainDelta } of steps) {
+    if (ramp > 0) gain += gainDelta * Math.min(1, Math.max(0, (t - (time - ramp / 2)) / ramp));
+    else if (t >= time) gain += gainDelta;
+  }
+  return gain;
+}
+
+/**
+ * The simultaneity compensation (`getCompensationSteps`) as a `volume` expression of `t` applied once to the sum of the
+ * clips, written as a flat sum of ramps `g0 + Δ·clip((t-a)/r,0,1) + …` (never nested `if()`, ADR-001).
+ */
+export function getCompensationExpr(audible: { startTime: number, endTime: number, fadeIn: number, fadeOut: number }[], duration: number) {
+  const { initial, steps } = getCompensationSteps(audible, duration);
+  const terms = steps.map(({ time, ramp, gainDelta }) => {
     const sign = gainDelta < 0 ? '-' : '+';
-    const step = ramp > EPS
+    const step = ramp > 0
       ? `clip((t-${fmt(time - ramp / 2)})/${fmt(ramp)},0,1)`
       : `gte(t,${fmt(time)})`;
-    terms.push(`${sign}${fmt(Math.abs(gainDelta))}*${step}`);
+    return `${sign}${fmt(Math.abs(gainDelta))}*${step}`;
   });
   if (terms.length === 0) return initial === 1 ? undefined : fmt(initial);
   return `${fmt(initial)}${terms.join('')}`;

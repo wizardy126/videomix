@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { ensureLoudness, getLoudnessCacheKey, getSoundDurations } from './loudness';
+import { ensureLoudness, getCachedLoudness, getLoudnessCacheKey, getSoundDurations } from './loudness';
 import type { LoudnessDeps } from './loudness';
 import { createEmptyMixProject } from './types';
 import type { LoudnessMeasurement, MixClip, MixProject } from './types';
@@ -185,5 +185,24 @@ describe('ensureLoudness', () => {
     await expect(ensureLoudness({ project, deps, onCacheEntries, abortSignal: abortController.signal, concurrency: 1 })).rejects.toThrow();
     expect(deps.measureLoudness).toHaveBeenCalledTimes(1);
     expect(Object.keys(onCacheEntries.mock.calls[0]![0] as object)).toHaveLength(1);
+  });
+});
+
+describe('getCachedLoudness', () => {
+  test('returns only what is cached, without measuring', async () => {
+    const deps = makeDeps();
+    const onCacheEntries = vi.fn();
+    const musicTracks = [{ id: 't1', absolutePath: '/media/music.mp3' }];
+    deps.measureLoudness.mockImplementation(async ({ start }) => (start == null ? { ...measurement(-18), duration: 100 } : measurement(-20)));
+    await ensureLoudness({ project: makeProject([clip('c1', 's1', 0, 5)]), musicTracks, deps, onCacheEntries });
+    const cache = onCacheEntries.mock.calls[0]![0] as Record<string, LoudnessMeasurement>;
+
+    const statFails = vi.fn(async (path: string) => {
+      if (path === '/media/b.mp4') throw new Error('ENOENT');
+      return { mtimeMs: 1000, size: path.length };
+    });
+    const project = makeProject([clip('c1', 's1', 0, 5), clip('c2', 's1', 1, 5), clip('c3', 's2', 0, 5), clip('c4', 's1', 0, 5, true)], cache);
+    const result = await getCachedLoudness({ project, musicTracks, sounds: [{ id: 'snd', absolutePath: '/media/beep.wav' }], deps: { stat: statFails } });
+    expect(result).toEqual({ c1: measurement(-20), t1: { ...measurement(-18), duration: 100 } });
   });
 });

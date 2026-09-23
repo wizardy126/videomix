@@ -1298,5 +1298,8 @@
   "Pinned at {{time}} of the video": "Fijado en {{time}} del vídeo",
   "The clips {{clips}} are grouped but don't all start together": "Los clips {{clips}} están agrupados pero no empiezan todos a la vez",
   "Ungroup": "Desagrupar",
-  "Unpin": "Quitar fijación"
+  "Unpin": "Quitar fijación",
+  "Approximate live preview: the render is the reference": "Previsualización en vivo aproximada: el render es la referencia",
+  "Audio levels are not normalized until the clips have been analysed (preview or render the mix once)": "Los volúmenes no están normalizados hasta que se analicen los clips (previsualiza o monta una vez)",
+  "Frames drawn per second": "Fotogramas dibujados por segundo"
 }

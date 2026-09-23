@@ -32,7 +32,7 @@ interface Context {
 }
 
 /** Reference px → output px; a non-zero length stays at least 1 px. */
-const lengthPx = (value: number, height: number) => (value > 0 ? Math.max(1, Math.round(overlayPxToOutput(value, height))) : 0);
+export const lengthPx = (value: number, height: number) => (value > 0 ? Math.max(1, Math.round(overlayPxToOutput(value, height))) : 0);
 
 const alignFactors = { left: '0', center: '0.5', right: '1' } as const;
 

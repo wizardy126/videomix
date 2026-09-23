@@ -601,11 +601,11 @@ Requisitos: [01-requisitos §10](01-requisitos.md). Resumen técnico; cada task-
   - UI: selector de proporción en Ajustes → Salida; la mini vista dibuja filas y los carriles del timeline son las filas de arriba abajo. Previsualización: lado corto de 360 px con la proporción de la salida (`getPreviewSize`).
 - **Render incremental** (T28, implementado): clave de bloque = hash del grafo del bloque + ficheros de entrada (ruta, mtime, tamaño) + parámetros de codificación. Los bloques y la pasada de audio se guardan en `.<proyecto>.vmx.cache/` (oculta en macOS/Linux); el concat final reutiliza los que existan. Hay limpieza de bloques huérfanos tras cada render y un tamaño máximo global. Detalle en §4.2.
 - **Encoders** (T25): se detectan en main con `ffmpeg -encoders` más una prueba de codificación corta. Los argumentos se mapean por encoder, con un control de calidad equivalente a CRF.
-- **Previsualización en vivo** (T32):
-  - un `<video>` por clip visible, más uno en espera para el siguiente, colocados y recortados con CSS o canvas según `renderTimeline`;
-  - los overlays se dibujan en canvas;
-  - el audio va con WebAudio (ganancias de normalización más `gainDb`, música y efectos);
-  - el reloj de la previsualización manda sobre los vídeos.
+- **Previsualización en vivo** (T32, implementado; detalle en [T32](execution/T32-v2-preview-vivo.md)): en la pestaña Mix, el área del player muestra la composición en un `<canvas>` (`components/MixLivePreview.tsx`, `hooks/useMixLivePreview.ts`, `preview/`).
+  - Lógica pura con tests en `preview/`: reloj maestro y corrección de deriva (`previewClock.ts`), qué vídeos y pistas cargar y su *pool* de elementos (`previewSchedule.ts`), lista de dibujo por fotograma con la geometría del render (`previewDraw.ts`: `getColumnsAtFrame`, `getFillSpansAtFrame`, `getCropForAspect`), overlays con `overlayFrames`/`textLayout` (`previewOverlays.ts`) y ganancias de audio (`previewAudio.ts`: normalización, `getPlacementFades`, `getCompensationSteps`, `getMusicSchedule`, *ducking* aproximado).
+  - `previewCanvas.ts` pinta con `drawImage` y el recorte de la fuente; `previewEngine.ts` aplica todo al DOM (elementos `<video>`/`<audio>`, grafo WebAudio, `requestAnimationFrame`).
+  - Aproximaciones: todas las transiciones se ven como fundido cruzado; el desenfoque del relleno es un desenfoque barato de la columna más cercana; el *ducking* sigue la actividad de los clips y no la señal; el limitador es un `DynamicsCompressorNode`; solo se usa la sonoridad ya cacheada.
+  - El reloj de la previsualización manda sobre los vídeos (salto si la deriva supera 0,15 s; ajuste de `playbackRate` de ±5 % si es menor).
 
 ### 9.1 Textos y presets (T26)
 

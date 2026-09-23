@@ -158,3 +158,44 @@ export function getSoundDurations(loudness: Record<string, LoudnessMeasurement>,
   });
   return result;
 }
+
+/**
+ * The measurements already in `project.loudnessCache`, without measuring anything (the live preview, T32): by clip id
+ * for the clips that would be mixed, and under their ids for the music tracks and the sound overlays. What isn't cached
+ * (or whose file can't be read) is left out; the caller then plays it at its manual gain only.
+ */
+export async function getCachedLoudness({ project, musicTracks = [], sounds = [], deps = getElectronDeps() }: {
+  project: Pick<MixProject, 'clips' | 'sources' | 'loudnessCache'>,
+  musicTracks?: Pick<MixMusicTrack, 'id' | 'absolutePath'>[] | undefined,
+  sounds?: Pick<SoundOverlay, 'id' | 'absolutePath'>[] | undefined,
+  deps?: Pick<LoudnessDeps, 'stat'> | undefined,
+}): Promise<Record<string, LoudnessMeasurement>> {
+  const cache = project.loudnessCache ?? {};
+  const statsByPath = new Map<string, Promise<{ mtimeMs: number, size: number } | undefined>>();
+  const statOf = (filePath: string) => {
+    let statPromise = statsByPath.get(filePath);
+    if (statPromise == null) {
+      statPromise = deps.stat(filePath).catch(() => undefined);
+      statsByPath.set(filePath, statPromise);
+    }
+    return statPromise;
+  };
+  const sourcesById = new Map(project.sources.map((source) => [source.id, source]));
+  const result: Record<string, LoudnessMeasurement> = {};
+
+  await Promise.all(getClipsNeedingLoudness(project.clips).map(async (clip) => {
+    const source = sourcesById.get(clip.sourceId);
+    if (source == null) return;
+    const stat = await statOf(source.absolutePath);
+    if (stat == null) return;
+    const measurement = cache[await getLoudnessCacheKey({ absolutePath: source.absolutePath, ...stat, start: clip.start, end: clip.end })];
+    if (measurement != null) result[clip.id] = measurement;
+  }));
+  await Promise.all([...musicTracks, ...sounds].map(async ({ id, absolutePath }) => {
+    const stat = await statOf(absolutePath);
+    if (stat == null) return;
+    const measurement = cache[await getMusicLoudnessCacheKey({ absolutePath, ...stat })];
+    if (measurement != null) result[id] = measurement;
+  }));
+  return result;
+}

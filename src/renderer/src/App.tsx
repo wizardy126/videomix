@@ -44,6 +44,8 @@ import MixRenderButtons from './videomix/components/MixRenderButtons';
 import MixPlanView from './videomix/components/MixPlanView';
 import OverlayPanel from './videomix/components/OverlayPanel';
 import useMixOverlays from './videomix/hooks/useMixOverlays';
+import useMixLivePreview from './videomix/hooks/useMixLivePreview';
+import MixLivePreview from './videomix/components/MixLivePreview';
 import useClipThumbnails from './videomix/hooks/useClipThumbnails';
 import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
 import { isKeyboardActionRetired } from '../../common/videomix/legacyUi';
@@ -1611,6 +1613,12 @@ function App() {
   // VideoMix: overlays edited in the Mix view (T22): plan + resolved overlay times, selection, cursor and overlay actions
   const mixOverlays = useMixOverlays({ mixProject, enabled: videoMixMode && showMixPlan, withErrorHandling, onFileReplaced: mixWorkspace.clearMissingOverlayFile });
 
+  // VideoMix: approximate live preview of the mix in the player area while the Mix tab is shown (A1, T32). Its time
+  // follows the Mix view cursor, and the play/pause keys drive it instead of the source player (see mainActions)
+  const mixPreviewActive = videoMixMode && showMixPlan;
+  const mixLivePreview = useMixLivePreview({ mixProject, mixOverlays, enabled: mixPreviewActive, volume: playbackVolume, customOutDir });
+  const { togglePlay: toggleMixPreview, play: playMixPreview, pause: pauseMixPreview } = mixLivePreview;
+
   // VideoMix: clip thumbnails (A2, T31), shared by ClipList and MixPlanView so each clip is only generated once
   const mixThumbnails = useClipThumbnails({ clips: mixProject.project.clips, sources: mixProject.project.sources, enabled: videoMixMode });
 
@@ -2119,15 +2127,16 @@ function App() {
     const ret: Record<MainKeyboardAction, () => void> = {
       // NOTE: Do not change these keys because users have bound keys by these names in their config files
       // For actions, see also KeyboardShortcuts.jsx
-      togglePlayNoResetSpeed: () => togglePlay(),
-      togglePlayResetSpeed: () => togglePlay({ resetPlaybackRate: true }),
+      // VideoMix: in the Mix tab, play/pause drive the live preview (T32)
+      togglePlayNoResetSpeed: () => (mixPreviewActive ? toggleMixPreview() : togglePlay()),
+      togglePlayResetSpeed: () => (mixPreviewActive ? toggleMixPreview() : togglePlay({ resetPlaybackRate: true })),
       togglePlayOnlyCurrentSegment: () => togglePlay({ resetPlaybackRate: true, requestPlaybackMode: 'play-segment-once' }),
       toggleLoopOnlyCurrentSegment: () => togglePlay({ resetPlaybackRate: true, requestPlaybackMode: 'loop-segment' }),
       toggleLoopStartEndOnlyCurrentSegment: () => togglePlay({ resetPlaybackRate: true, requestPlaybackMode: 'loop-segment-start-end' }),
       togglePlaySelectedSegments,
       toggleLoopSelectedSegments,
-      play: () => play(),
-      pause,
+      play: () => (mixPreviewActive ? playMixPreview() : play()),
+      pause: () => (mixPreviewActive ? pauseMixPreview() : pause()),
       reducePlaybackRate: () => userChangePlaybackRate(-1),
       reducePlaybackRateMore: () => userChangePlaybackRate(-1, 2),
       increasePlaybackRate: () => userChangePlaybackRate(1),
@@ -2286,7 +2295,7 @@ function App() {
     }
 
     return ret;
-  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, mixRender, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState]);
+  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, mixRender, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState, mixPreviewActive, toggleMixPreview, playMixPreview, pauseMixPreview]);
 
   const getKeyboardAction = useCallback((action: MainKeyboardAction) => mainActions[action], [mainActions]);
 
@@ -2719,6 +2728,9 @@ function App() {
                       )}
                     </div>
 
+                    {/* VideoMix: live preview of the mix over the player while the Mix tab is shown (T32) */}
+                    {mixPreviewActive && <MixLivePreview preview={mixLivePreview} clips={mixProject.project.clips} />}
+
                     {bigWaveformEnabled && <BigWaveform waveforms={waveforms} relevantTime={relevantTime} playing={playing} fileDurationNonZero={fileDurationNonZero} zoom={zoomUnrounded} seekRel={seekRel} darkMode={darkMode} />}
 
                     {compatPlayerEnabled && (
@@ -2853,7 +2865,11 @@ function App() {
                         <button
                           key={tab}
                           type="button"
-                          onClick={() => setShowMixPlan(tab === 'mix')}
+                          onClick={() => {
+                            // VideoMix: the live preview replaces the source player in the Mix tab (T32)
+                            if (tab === 'mix') pause();
+                            setShowMixPlan(tab === 'mix');
+                          }}
                           style={{
                             font: 'inherit',
                             fontSize: '.75em',
