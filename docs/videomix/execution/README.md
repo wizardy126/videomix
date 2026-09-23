@@ -56,6 +56,7 @@
 | T10b | [T10b-ajuste-planificador.md](T10b-ajuste-planificador.md) |
 | T11 | [T11-grafo-video.md](T11-grafo-video.md) |
 | T12 | [T12-audio.md](T12-audio.md) |
+| T12b | [T12b-normalizar-musica.md](T12b-normalizar-musica.md) |
 | T13 | [T13-render.md](T13-render.md) |
 | T14 | [T14-ajustes-montaje.md](T14-ajustes-montaje.md) |
 | T15 | [T15-timeline-montaje.md](T15-timeline-montaje.md) |
