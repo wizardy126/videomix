@@ -138,7 +138,7 @@ Añadido tras la v1. Son capas que se dibujan o suenan **encima del vídeo final
   - *fade* de entrada y de salida configurables.
 - **Contador de cuenta atrás**:
   - cuenta desde su duración hasta 0 mientras está visible y, al llegar a 0, **desaparece** (con *fade* opcional);
-  - formato **automático**: `SS` por debajo de 60 s y `MM:SS` a partir de 60 s, con **0–3 decimales** y ceros a la izquierda opcionales;
+  - formato **automático**: `SS` si el contador dura menos de 60 s y `M:SS` si dura 60 s o más, en cuyo caso se mantiene durante toda la cuenta (`1:00` → `0:59`…); con **0–3 decimales** y ceros a la izquierda opcionales;
   - redondeo hacia arriba a la precisión elegida;
   - tamaño, color, **fuente** (fichero TTF/OTF, con una fuente libre incluida por defecto), **borde y sombra** configurables;
   - posición como las imágenes.
