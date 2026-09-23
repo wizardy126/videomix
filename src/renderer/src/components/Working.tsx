@@ -28,7 +28,7 @@ function Working({ text, progress, onAbortClick }: {
   }, 100);
 
   return (
-    <div className={styles['wrapper']} style={{ position: 'absolute', bottom: 0, top: 0, left: 0, right: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+    <div className={styles['wrapper']} data-testid="working" style={{ position: 'absolute', bottom: 0, top: 0, left: 0, right: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
       <motion.div
         className={styles['loader-box']}
         initial={{ opacity: 0, scale: 0 }}

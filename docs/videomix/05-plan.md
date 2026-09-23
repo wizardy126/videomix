@@ -61,7 +61,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T30 | v2: fijar clips a un momento y grupos (A4) | M8 | Opus | T29 | hecha |
 | T31 | v2: miniaturas (A2) | M8 | Sonnet | T29 | hecha |
 | T32 | v2: previsualización en vivo (A1) | M8 | Opus | T26, T27, T29 | hecha |
-| T33 | v2: tests end-to-end de la UI (E3) | M8 | Opus | T32 | pendiente |
+| T33 | v2: tests end-to-end de la UI (E3) | M8 | Opus | T32 | hecha |
 | T34 | v2: i18n, manual y cierre | M8 | Sonnet | T24–T33 | pendiente |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.

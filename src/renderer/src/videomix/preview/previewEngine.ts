@@ -1,6 +1,6 @@
 import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
 import type { MixClip, MixOverlay, MixSource } from '../types';
-import { createPreviewClock, getClockTime, getDriftCorrection, isClockAtEnd, pauseClock, playClock, seekClock, setClockDuration } from './previewClock';
+import { createPreviewClock, getClockTime, getDriftCorrection, getSeekLead, isClockAtEnd, pauseClock, playClock, seekClock, setClockDuration, smoothSeekDuration } from './previewClock';
 import type { PreviewClock } from './previewClock';
 import { getPreviewClipGain, getPreviewMusicGain, getPreviewSoundGain, getPreviewSoundStarts } from './previewAudio';
 import type { PreviewAudioClip, PreviewAudioModel, PreviewAudioMusic, PreviewAudioSound } from './previewAudio';
@@ -56,6 +56,19 @@ type SourceStatus = { kind: 'ok', url: string } | { kind: 'pending' } | { kind: 
 
 type Listener = () => void;
 
+/**
+ * Seeks done while playing, per element (T33): when the current one started (performance.now() ms) and the smoothed
+ * duration of the previous ones, for the seek lead (getSeekLead).
+ */
+const playingSeeks = new WeakMap<HTMLMediaElement, { startedAt?: number | undefined, duration?: number | undefined }>();
+
+function handleSeeked(el: HTMLMediaElement) {
+  const state = playingSeeks.get(el);
+  if (state?.startedAt == null) return;
+  state.duration = smoothSeekDuration(state.duration, (performance.now() - state.startedAt) / 1000);
+  state.startedAt = undefined;
+}
+
 /** Keeps a media element where the clock says: playing with drift correction, or paused at its position. */
 function syncElement(el: HTMLMediaElement, request: PreviewMediaRequest | undefined, playing: boolean) {
   const expectedTime = (r: PreviewMediaRequest) => (el.loop && Number.isFinite(el.duration) && el.duration > 0 ? r.mediaTime % el.duration : r.mediaTime);
@@ -70,9 +83,18 @@ function syncElement(el: HTMLMediaElement, request: PreviewMediaRequest | undefi
   }
   if (el.readyState < HTMLMediaElement.HAVE_METADATA) return;
   if (!el.seeking) {
-    const correction = getDriftCorrection({ expected: expectedTime(request), actual: el.currentTime, playing: true });
-    // eslint-disable-next-line no-param-reassign
-    if (correction.kind === 'seek') el.currentTime = correction.time;
+    const state = playingSeeks.get(el) ?? {};
+    const correction = getDriftCorrection({ expected: expectedTime(request), actual: el.currentTime, playing: true, seekLead: getSeekLead(state.duration) });
+    if (correction.kind === 'seek') {
+      playingSeeks.set(el, { ...state, startedAt: performance.now() });
+      // eslint-disable-next-line no-param-reassign
+      el.currentTime = correction.time;
+    }
+    // ahead after a slow seek: let the clock catch up (see getDriftCorrection)
+    if (correction.kind === 'wait') {
+      if (!el.paused) el.pause();
+      return;
+    }
     // eslint-disable-next-line no-param-reassign
     if (el.playbackRate !== correction.rate) el.playbackRate = correction.rate;
   }
@@ -336,6 +358,7 @@ export default class PreviewEngine {
     }
     const markDirty = () => { this.dirty = true; };
     el.addEventListener('seeked', markDirty);
+    el.addEventListener('seeked', () => handleSeeked(el));
     el.addEventListener('loadeddata', markDirty);
     return { id, el, gain, url: undefined };
   }
@@ -413,6 +436,8 @@ export default class PreviewEngine {
       if (url != null && url !== slot.url) {
         slot.url = url;
         slot.el.src = url;
+        // another file seeks at another speed
+        playingSeeks.delete(slot.el);
         if (tag === 'video' && path != null) {
           const { el } = slot;
           // (the element may have been given another file since)

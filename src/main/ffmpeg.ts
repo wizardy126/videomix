@@ -1,4 +1,4 @@
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { access } from 'node:fs/promises';
 import readline from 'node:readline';
 import stringToStream from 'string-to-stream';
@@ -136,7 +136,11 @@ function getExecaOptions<T extends ExecaOptions>({ env, cancelSignal, ...rest }:
     env: {
       ...env,
       // https://github.com/mifi/lossless-cut/issues/1143#issuecomment-1500883489
-      ...(isLinux && !isDev && !customFfPath && { LD_LIBRARY_PATH: process.resourcesPath }),
+      // The bundled Linux build is linked against the shared libs next to it (`ffmpeg/linux-x64/lib` in
+      // development, `resources` when packaged). T33: this used to be set only when `!isDev`, and to
+      // `process.resourcesPath` also when unpackaged, so neither `yarn dev` nor the built-but-unpackaged app
+      // (`yarn start`, the e2e tests) could run ffmpeg ("libavdevice.so.62: cannot open shared object file").
+      ...(isLinux && !customFfPath && { LD_LIBRARY_PATH: app.isPackaged ? process.resourcesPath : resolve(dirname(getFfmpegPath())) }),
     },
   };
   return execaOptions as T;

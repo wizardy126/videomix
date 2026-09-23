@@ -27,7 +27,7 @@ En desarrollo, la app busca ffmpeg en `ffmpeg/<platform>-<arch>/` (la carpeta es
 yarn download-ffmpeg-linux-x64      # o darwin-x64 / darwin-arm64 / win32-x64 / win32-arm64
 ```
 
-- En Linux los binarios quedan en `ffmpeg/linux-x64/lib/`, con las librerías compartidas. Para usarlos desde la terminal: `LD_LIBRARY_PATH=ffmpeg/linux-x64/lib ffmpeg/linux-x64/lib/ffmpeg …`.
+- En Linux los binarios quedan en `ffmpeg/linux-x64/lib/`, con las librerías compartidas. Para usarlos desde la terminal: `LD_LIBRARY_PATH=ffmpeg/linux-x64/lib ffmpeg/linux-x64/lib/ffmpeg …`. La app (sin empaquetar: `yarn dev`, `yarn start`, tests e2e) pone ella misma ese `LD_LIBRARY_PATH` al lanzar ffmpeg (T33).
 - También se puede indicar una ruta propia en los Ajustes de la app (`customFfPath`).
 
 ## Medios de prueba
@@ -73,8 +73,39 @@ temporal al terminar.
 | `yarn scan-i18n` | Extrae las claves nuevas a `locales/en/translation.json` |
 | `yarn check` | Todo lo anterior más licencias y docs |
 | `yarn generate-test-media` | Genera los vídeos y audios sintéticos de `test-media/` (ver arriba) |
+| `yarn test-e2e` | Tests end-to-end de la app (Playwright + Electron), solo en local (ver abajo) |
 
 **Definición de hecho de cada tarea**: `yarn tsc && yarn lint && yarn test run` en verde.
+
+## Tests end-to-end (T33)
+
+Playwright maneja la app de Electron real (`_electron.launch`) sobre el build de producción (`out/`). **Solo en local**:
+no forman parte de `yarn test run` ni de CI.
+
+```bash
+yarn generate-test-media           # una vez (usa los medios de T02)
+yarn test-e2e                      # compila (electron-vite build) y ejecuta e2e/*.e2e.ts
+E2E_SKIP_BUILD=1 yarn test-e2e     # sin volver a compilar (usa out/ tal cual)
+yarn test-e2e -g "Spanish"         # cualquier opción de `playwright test`
+```
+
+- `e2e/run.ts` (el script de `yarn test-e2e`): compila, comprueba que existen `test-media/` y ffmpeg y, en Linux sin
+  `$DISPLAY`, lanza Playwright dentro de `xvfb-run -a` (paquete `xvfb`). Con pantalla, la ventana se ve.
+- `e2e/app.ts`: lanzar la app con un directorio temporal de configuración (`--config-dir`) y de datos de usuario
+  (`--user-data-dir`: recuperación, caché de render de proyectos sin guardar), el idioma por `--settings-json`,
+  `--disable-networking`, y `--no-sandbox --disable-gpu` (en un contenedor no suele haber *sandbox* de Chromium ni GPU).
+  Los diálogos nativos de abrir/guardar no se pueden manejar: se sustituyen en el proceso main
+  (`dialog.showOpenDialog`/`showSaveDialog`) por respuestas fijas; los menús se simulan enviando su mensaje IPC.
+- `e2e/videomix.e2e.ts`: los escenarios, en orden y sobre la misma app (construyen un proyecto como lo haría un
+  usuario), más uno aparte con la interfaz en español.
+- Resultados en `test-results/` (ignorado por git): capturas de los estados clave en `test-results/e2e-screenshots/`
+  (y `failed-*.png` al fallar un escenario) y la traza de Playwright de los que fallan
+  (`npx playwright show-trace …/trace.zip`).
+- Los tests usan `data-testid` puestos en la UI solo para esto (`source-row`, `clip-row`, `rect-handle-max-e`,
+  `mix-live-preview`, `overlay-panel`, `working`…).
+- Los ficheros se llaman `*.e2e.ts` y `e2e/` está excluida en `vitest.config.ts`: vitest no los ejecuta. Su
+  comprobación de tipos es `tsconfig.e2e.json` (dentro de `yarn tsc`).
+- Duración: ~35 s (más ~15 s de compilación).
 
 ## Empaquetado (T18)
 
@@ -112,4 +143,4 @@ integraciones de escritorio/AppStream y quedan sincronizados a mano con la ident
 ## Notas
 
 - `yarn lint` imprime avisos `TSSatisfiesExpression could not be resolved` que vienen del as-built. Son inofensivos.
-- La app de Electron no se puede ejecutar con interfaz en el entorno de agentes (no hay display). La UI se valida con tests de la lógica y la revisa el usuario.
+- La app de Electron se puede ejecutar en el entorno de agentes con Xvfb (`xvfb-run`), sin GPU: así corren los tests e2e (T33). Para probar a mano, `xvfb-run -a node_modules/electron/dist/electron --no-sandbox --disable-gpu .` tras `yarn build`.

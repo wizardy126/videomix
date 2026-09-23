@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { DRIFT_SEEK_THRESHOLD, MAX_RATE_NUDGE, SEEK_LEAD, createPreviewClock, getClockTime, getDriftCorrection, isClockAtEnd, pauseClock, playClock, seekClock, setClockDuration } from './previewClock';
+import { DRIFT_SEEK_THRESHOLD, MAX_RATE_NUDGE, MAX_SEEK_LEAD, SEEK_LEAD, createPreviewClock, getClockTime, getDriftCorrection, getSeekLead, isClockAtEnd, pauseClock, playClock, seekClock, setClockDuration, smoothSeekDuration } from './previewClock';
 
 describe('preview clock', () => {
   test('runs in real time while playing and stops at the end', () => {
@@ -56,5 +56,51 @@ describe('getDriftCorrection', () => {
     expect(getDriftCorrection({ expected: 5, actual: 4, playing: true })).toEqual({ kind: 'seek', time: 5 + SEEK_LEAD, rate: 1 });
     expect(getDriftCorrection({ expected: 5, actual: 5.02, playing: false })).toEqual({ kind: 'seek', time: 5, rate: 1 });
     expect(getDriftCorrection({ expected: 5, actual: 5, playing: false })).toEqual({ kind: 'none', rate: 1 });
+  });
+});
+
+describe('seek lead (T33)', () => {
+  test('the measured seek duration, between SEEK_LEAD and MAX_SEEK_LEAD', () => {
+    expect(getSeekLead(undefined)).toBe(SEEK_LEAD);
+    expect(getSeekLead(0.02)).toBe(SEEK_LEAD);
+    expect(getSeekLead(1.2)).toBe(1.2);
+    expect(getSeekLead(10)).toBe(MAX_SEEK_LEAD);
+    expect(getSeekLead(Number.NaN)).toBe(SEEK_LEAD);
+  });
+
+  test('smoothed over the seeks', () => {
+    expect(smoothSeekDuration(undefined, 1)).toBe(1);
+    expect(smoothSeekDuration(1, 2)).toBe(1.5);
+  });
+
+  test('ahead by less than the lead: wait for the clock; with the default lead, never', () => {
+    expect(getDriftCorrection({ expected: 5, actual: 5.5, playing: true, seekLead: 1.2 })).toEqual({ kind: 'wait', rate: 1 });
+    expect(getDriftCorrection({ expected: 5, actual: 6.5, playing: true, seekLead: 1.2 })).toEqual({ kind: 'seek', time: 6.2, rate: 1 });
+    expect(getDriftCorrection({ expected: 5, actual: 5 + DRIFT_SEEK_THRESHOLD + 0.01, playing: true }).kind).toBe('seek');
+  });
+
+  test('a seek aims that far ahead', () => {
+    expect(getDriftCorrection({ expected: 5, actual: 4, playing: true, seekLead: 1.2 })).toEqual({ kind: 'seek', time: 6.2, rate: 1 });
+    // paused: exact
+    expect(getDriftCorrection({ expected: 5, actual: 4, playing: false, seekLead: 1.2 })).toEqual({ kind: 'seek', time: 5, rate: 1 });
+  });
+
+  test('a slow seek converges instead of seeking again forever', () => {
+    // An element whose seeks take 1.5 s: simulate the clock and the element (it plays in real time once seeked)
+    const seekTime = 1.5;
+    let seekDuration: number | undefined;
+    let clock = 3;
+    let actual = 0;
+    let seeks = 0;
+    for (let i = 0; i < 10; i += 1) {
+      const correction = getDriftCorrection({ expected: clock, actual, playing: true, seekLead: getSeekLead(seekDuration) });
+      if (correction.kind !== 'seek') break;
+      seeks += 1;
+      clock += seekTime;
+      actual = correction.time;
+      seekDuration = smoothSeekDuration(seekDuration, seekTime);
+    }
+    expect(seeks).toBe(2);
+    expect(Math.abs(actual - clock)).toBeLessThanOrEqual(DRIFT_SEEK_THRESHOLD);
   });
 });

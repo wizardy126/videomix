@@ -1,0 +1,16 @@
+{
+  // e2e/ (T33): Playwright tests of the Electron app. Node code, plus the functions they run in the page (DOM).
+  "extends": ["@tsconfig/strictest", "@tsconfig/node22/tsconfig.json"],
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["es2024", "DOM", "DOM.Iterable"],
+
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+  },
+  "include": [
+    "e2e/**/*",
+  ],
+}

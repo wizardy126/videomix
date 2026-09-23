@@ -46,6 +46,7 @@ const SourceRow = memo(({ source, index, isActive, isMissing, numClips, onActiva
     <div
       role="button"
       tabIndex={-1}
+      data-testid="source-row"
       title={isMissing ? source.absolutePath : source.path}
       onClick={handleClick}
       style={{ fontSize: 13, padding: '.3em .2em .3em .4em', display: 'flex', alignItems: 'center', gap: '.3em', cursor: 'pointer', background: isActive ? 'var(--gray-6)' : undefined, borderRight: `.3em solid ${isActive ? primaryColor : 'transparent'}` }}
@@ -94,12 +95,13 @@ function SourceList({ width, sources, currentSourceId, missingSourceIds, clipCou
   return (
     <div
       className="no-user-select"
+      data-testid="source-list"
       style={{ width, flexShrink: 0, background: controlsBackground, color: 'var(--gray-12)', borderRight: '1px solid var(--gray-7)', transition: darkModeTransition, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
       onDrop={onDrop}
     >
       <div style={{ padding: '.2em 0 .3em .5em', display: 'flex', alignItems: 'center', gap: '.2em' }}>
         <div style={{ fontSize: '.8em', flexGrow: 1 }}>{t('Sources')}{sources.length > 0 && ` (${sources.length})`}</div>
-        <FaPlus role="button" title={t('Add videos')} style={{ ...iconButtonStyle, color: 'white', background: primaryColor, borderRadius: '.5em', marginRight: '.3em' }} onClick={onAdd} />
+        <FaPlus role="button" data-testid="add-sources" title={t('Add videos')} style={{ ...iconButtonStyle, color: 'white', background: primaryColor, borderRadius: '.5em', marginRight: '.3em' }} onClick={onAdd} />
       </div>
 
       <div style={{ overflowX: 'hidden', overflowY: 'auto', flexGrow: 1 }}>

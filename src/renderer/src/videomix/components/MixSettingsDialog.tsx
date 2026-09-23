@@ -191,7 +191,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay />
-        <Dialog.Content style={{ width: '36em', maxHeight: '85vh', overflowY: 'auto' }} aria-describedby={undefined}>
+        <Dialog.Content data-testid="mix-settings" style={{ width: '36em', maxHeight: '85vh', overflowY: 'auto' }} aria-describedby={undefined}>
           <Dialog.Title>{t('Mix settings')}</Dialog.Title>
 
           <Section title={t('Output')}>

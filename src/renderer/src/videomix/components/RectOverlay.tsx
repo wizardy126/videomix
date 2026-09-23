@@ -169,6 +169,7 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
         y={y - HANDLE_SIZE / 2}
         width={HANDLE_SIZE}
         height={HANDLE_SIZE}
+        data-testid={`rect-handle-${target}-${handle}`}
         style={{ fill: target === 'max' ? color : 'white', stroke: 'black', strokeWidth: 1, cursor: handleCursors[handle], pointerEvents: 'all' }}
         onPointerDown={(e) => handlePointerDown(e, target, handle)}
       />
@@ -188,6 +189,7 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
   return (
     <svg
       ref={svgRef}
+      data-testid="rect-overlay"
       style={svgStyle}
       // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
       tabIndex={-1}
@@ -229,6 +231,7 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
       <g>{renderHandles(activeTarget, boxOf(activeTarget))}</g>
 
       <text
+        data-testid="rect-label"
         x={maxBox.x}
         y={labelY}
         style={{ fill: 'white', stroke: 'black', strokeWidth: 3, paintOrder: 'stroke', fontSize: labelFontSize, pointerEvents: 'none', userSelect: 'none' }}

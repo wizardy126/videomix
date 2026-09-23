@@ -152,7 +152,7 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
   const MuteIcon = clip.muted ? FaVolumeMute : FaVolumeUp;
 
   return (
-    <div ref={setRef} role="button" tabIndex={-1} onClick={handleClick} style={style}>
+    <div ref={setRef} role="button" tabIndex={-1} data-testid="clip-row" onClick={handleClick} style={style}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '.3em' }}>
         <div
           // eslint-disable-next-line react/jsx-props-no-spreading
@@ -161,6 +161,7 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
           {...sortable.listeners}
           role="button"
           tabIndex={-1}
+          data-testid="clip-drag-handle"
           style={{ cursor: dragging ? 'grabbing' : 'grab', display: 'flex', alignItems: 'center', opacity: 0.5 }}
         >
           <FaGripVertical style={{ fontSize: '.8em' }} />
@@ -306,7 +307,7 @@ function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClip
   const hasSelection = selectedClipId != null;
 
   return (
-    <div style={{ width, flexShrink: 0, background: controlsBackground, borderLeft: '1px solid var(--gray-7)', color: 'var(--gray-11)', transition: darkModeTransition, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div data-testid="clip-list" style={{ width, flexShrink: 0, background: controlsBackground, borderLeft: '1px solid var(--gray-7)', color: 'var(--gray-11)', transition: darkModeTransition, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div className="no-user-select" style={{ padding: '.2em .5em', color: 'var(--gray-12)', display: 'flex', alignItems: 'center', gap: '.5em', fontSize: '.8em' }}>
         <span style={{ flexGrow: 1 }}>{t('Clips')}{clips.length > 0 && ` (${clips.length})`}</span>
         {clips.length > 0 && <span title={t('Total duration of the clips')}>{formatDuration({ seconds: totalDuration, shorten: true, showFraction: false })}</span>}

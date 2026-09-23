@@ -17,6 +17,7 @@ node_modules
 /build-resources
 /notes
 /ffmpeg
+/test-results
 /app*.log
 /main-ts-dist
 /common-ts-dist

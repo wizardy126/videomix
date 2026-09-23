@@ -184,6 +184,8 @@ const OverlayBlock = memo(({ overlay, item, duration, isSelected, canMove, canRe
     <div
       role="button"
       tabIndex={-1}
+      data-testid="overlay-block"
+      data-overlay-type={overlay.type}
       title={tooltip}
       onPointerDown={handleMovePointerDown}
       onPointerMove={onPointerMove}
@@ -561,7 +563,7 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
   }
 
   return (
-    <div style={{ flexGrow: 1, display: 'flex', overflow: 'hidden', background: controlsBackground, transition: darkModeTransition, padding: '.3em .5em', gap: '.5em', boxSizing: 'border-box' }}>
+    <div data-testid="mix-plan-view" style={{ flexGrow: 1, display: 'flex', overflow: 'hidden', background: controlsBackground, transition: darkModeTransition, padding: '.3em .5em', gap: '.5em', boxSizing: 'border-box' }}>
       <div style={{ width: Math.min(FRAME_MAX_WIDTH, FRAME_MAX_HEIGHT * (plan.width / plan.height)), flexShrink: 0 }}>
         <div ref={frameRef}>
           <FramePreview plan={plan} tl={tl} time={frameTime} clipsById={clipsById} getColor={getColor}>

@@ -29,6 +29,7 @@ import { appName } from './common.js';
 import attachContextMenu from './contextMenu.js';
 import HttpServer from './httpServer.js';
 import isDev from './isDev.js';
+import getArgsWithoutAppName from './cliArgs.js';
 import isStoreBuild from './isStoreBuild.js';
 import { getAboutPanelOptions } from './aboutPanel.js';
 import { checkNewVersion } from './updateChecker.js';
@@ -255,10 +256,9 @@ function openFilesEventually(paths: string[]) {
 // https://github.com/mifi/lossless-cut/issues/639
 // https://github.com/mifi/lossless-cut/issues/591
 function parseCliArgs(rawArgv = process.argv) {
-  const ignoreFirstArgs = process.defaultApp ? 2 : 1;
   // production: First arg is the VideoMix executable
-  // dev: First 2 args are electron and the index.js
-  const argsWithoutAppName = rawArgv.length > ignoreFirstArgs ? rawArgv.slice(ignoreFirstArgs) : [];
+  // dev: electron, maybe some switches, and the app path (see getArgsWithoutAppName)
+  const argsWithoutAppName = getArgsWithoutAppName(rawArgv, process.defaultApp === true);
 
   return yargsParser(argsWithoutAppName, {
     boolean: ['disable-networking'],

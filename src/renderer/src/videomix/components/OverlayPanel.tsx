@@ -362,7 +362,7 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
   const warnings = times?.warnings ?? [];
 
   return (
-    <div className="consistent-scrollbar" style={{ width, flexShrink: 0, overflowY: 'auto', background: controlsBackground, transition: darkModeTransition, padding: '.5em .6em', boxSizing: 'border-box', borderLeft: '1px solid var(--gray-6)' }}>
+    <div className="consistent-scrollbar" data-testid="overlay-panel" style={{ width, flexShrink: 0, overflowY: 'auto', background: controlsBackground, transition: darkModeTransition, padding: '.5em .6em', boxSizing: 'border-box', borderLeft: '1px solid var(--gray-6)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '.3em' }}>
         <span style={{ fontSize: '.75em', color: 'var(--gray-11)', flexGrow: 1 }}>{getOverlayTypeLabel(overlay.type)}</span>
         <button type="button" style={{ ...iconButtonStyle, border: 'none', background: 'transparent' }} title={t('Close')} onClick={() => setSelectedOverlayId(undefined)}><FaTimes /></button>
