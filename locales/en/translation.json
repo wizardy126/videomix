@@ -948,6 +948,7 @@
   "Something went wrong": "Something went wrong",
   "Sort items": "Sort items",
   "Sound": "Sound",
+  "Sound overlay \"{{overlay}}\": couldn't measure its loudness, so it will play at its manual gain only, without normalization.": "Sound overlay \"{{overlay}}\": couldn't measure its loudness, so it will play at its manual gain only, without normalization.",
   "Sounds": "Sounds",
   "Source": "Source",
   "Source code": "Source code",

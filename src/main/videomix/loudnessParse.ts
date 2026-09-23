@@ -14,7 +14,17 @@ export type LoudnessAnalysis = ({
   /** Of the analyzed audio stream, for getFixChannelLayoutFilter when mixing. */
   channels?: number | undefined,
   channelLayout?: string | undefined,
-} | { hasAudio: false }) & {
+} | {
+  hasAudio: false,
+  /**
+   * T21b: a whole-file measurement (music, sound overlay) that failed outright (not just a parseable `-inf`, which
+   * is confirmed silence, see `SILENCE_LOUDNESS`) instead of taking down the whole render: `buildAudioGraph` plays
+   * the sound at its manual gain, unnormalized, and the UI warns instead of silencing it without saying why. Never
+   * set for a clip's ranged measurement (that still throws, out of this task's scope) or for a real "no audio
+   * stream" file.
+   */
+  unmeasured?: true | undefined,
+}) & {
   /**
    * File duration (s), only set for a whole-file measurement (T12b music, T21 sound overlays: `start`/`end` omitted):
    * `resolveOverlayTimes` needs a sound overlay's duration. Absent on a clip's (ranged) measurement, and on cached
@@ -28,6 +38,21 @@ export type LoudnessAnalysis = ({
  * `-inf` (or values around the gate) when no block is above it.
  */
 export const SILENCE_LOUDNESS = -70;
+
+/**
+ * T21b: below this (s), a whole-file measurement (music, T12b; sound overlays, T21) loops the input to this length
+ * before running `loudnorm` on it. `loudnorm`'s EBU R128 windowing needs more than the ~0.4 s absolute-gate block to
+ * report a finite value, so a short effect (e.g. a 0.15 s countdown beep) otherwise always measures as `-inf` and is
+ * then silenced as if it had no audio at all. Looping repeats the same signal, so its integrated loudness equals the
+ * original's: checked empirically (see the T21b task notes) with 0.15 s/0.3 s/2 s tones of the same level, looped to
+ * this length, which all measured within 1.5 LU (in fact identical, being the same synthetic tone).
+ */
+export const LOOP_MEASURE_DURATION = 3;
+
+/** Whether a whole-file measurement should loop the input first (T21b): only when its duration is known and short. */
+export function shouldLoopForMeasurement({ isWholeFile, duration }: { isWholeFile: boolean, duration: number | undefined }) {
+  return isWholeFile && duration != null && duration < LOOP_MEASURE_DURATION;
+}
 
 function parseLoudnormNumber(value: unknown) {
   if (typeof value !== 'string' && typeof value !== 'number') return undefined;

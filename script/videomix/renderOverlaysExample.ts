@@ -26,7 +26,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import registerRendererImports from './rendererImports.ts';
-import { parseFfprobeAudioStream, parseFfprobeDuration as parseProbedDuration, parseLoudnormOutput, toLoudnessAnalysis } from '../../src/main/videomix/loudnessParse.ts';
+import { LOOP_MEASURE_DURATION, parseFfprobeAudioStream, parseFfprobeDuration as parseProbedDuration, parseLoudnormOutput, shouldLoopForMeasurement, toLoudnessAnalysis } from '../../src/main/videomix/loudnessParse.ts';
 import type { LoudnessAnalysis } from '../../src/main/videomix/loudnessParse.ts';
 import { getFixChannelLayoutFilter } from '../../src/common/util.ts';
 
@@ -122,21 +122,27 @@ const ffmpeg = async (args: string[]) => (await run(ffmpegPath, ['-loglevel', 'e
 const ffprobe = async (args: string[]) => (await run(ffprobePath, ['-v', 'error', ...args])).stdout;
 
 /**
- * Loudness measurement (T21's algorithm, src/main/videomix/loudness.ts#measureLoudness) run directly with the dev
- * ffmpeg, so this script doesn't need Electron/main to normalize the clip and the sound effect.
+ * Loudness measurement (T21/T21b's algorithm, src/main/videomix/loudness.ts#measureLoudness) run directly with the
+ * dev ffmpeg, so this script doesn't need Electron/main to normalize the clip and the sound effect. A whole-file
+ * measurement (range omitted) shorter than LOOP_MEASURE_DURATION loops the input first (T21b), so the countdown
+ * beep (0.2 s, generateTestMedia.ts) measures a finite value instead of loudnorm's -inf for very short inputs.
  */
 async function measureLoudnessCli(filePath: string, range?: { start: number, end: number }): Promise<LoudnessAnalysis> {
   const probeOut = await ffprobe(['-select_streams', 'a:0', '-show_entries', 'format=duration:stream=index,channels,channel_layout', '-of', 'json', '-i', filePath]);
   const stream = parseFfprobeAudioStream(probeOut);
   const duration = parseProbedDuration(probeOut);
-  const wholeFileDuration = range == null ? duration : undefined;
+  const isWholeFile = range == null;
+  const wholeFileDuration = isWholeFile ? duration : undefined;
   if (stream == null) return { hasAudio: false, ...(wholeFileDuration != null && { duration: wholeFileDuration }) };
+  const loop = shouldLoopForMeasurement({ isWholeFile, duration });
   const filters = [getFixChannelLayoutFilter(stream), 'loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json'].filter((f): f is string => f != null);
   const { stderr } = await run(ffmpegPath, [
     '-hide_banner', '-nostats',
+    ...(loop ? ['-stream_loop', '-1'] : []),
     ...(range != null ? ['-ss', String(range.start), '-t', String(range.end - range.start)] : []),
     '-i', filePath,
     '-map', '0:a:0',
+    ...(loop ? ['-t', String(LOOP_MEASURE_DURATION)] : []),
     '-af', filters.join(','),
     '-f', 'null', '-',
   ]);
@@ -283,8 +289,8 @@ for (const [name, t] of Object.entries(frameTimes)) {
 // --- verify the beep's position with ffmpeg (astats levels, before vs. during) ---
 const beepStart = countdownTimes?.rawEnd ?? COUNTDOWN_DURATION;
 const before = await measureSlice(outPath, Math.max(0, beepStart - 0.4), 0.3);
-// the first part of the tone, before its own fade-out tail (afade st=0.35 in generateTestMedia.ts)
-const during = await measureSlice(outPath, beepStart + 0.02, 0.2);
+// the first part of the tone, before its own fade-out tail (afade st=0.15 in generateTestMedia.ts, a 0.2 s beep)
+const during = await measureSlice(outPath, beepStart + 0.02, 0.1);
 console.log(`audio level before the beep (background only): RMS ${before.rmsDb.toFixed(1)} dB, peak ${before.peakDb.toFixed(1)} dB`);
 console.log(`audio level during the beep: RMS ${during.rmsDb.toFixed(1)} dB, peak ${during.peakDb.toFixed(1)} dB`);
 const RMS_MARGIN_DB = 2;

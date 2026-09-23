@@ -1186,6 +1186,7 @@
   "Shadow": "Sombra",
   "Shadow (px)": "Sombra (px)",
   "Sound": "Sonido",
+  "Sound overlay \"{{overlay}}\": couldn't measure its loudness, so it will play at its manual gain only, without normalization.": "Efecto de sonido \"{{overlay}}\": no se ha podido medir su sonoridad, así que sonará solo con su ganancia manual, sin normalizar.",
   "Sounds": "Sonidos",
   "Takes the start and duration of \"{{name}}\"": "Toma el inicio y la duración de \"{{name}}\"",
   "Text": "Texto",

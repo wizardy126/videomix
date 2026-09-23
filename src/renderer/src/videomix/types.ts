@@ -139,7 +139,16 @@ export const loudnessMeasurementSchema = z.discriminatedUnion('hasAudio', [
     channelLayout: z.string().optional(),
     ...loudnessDurationSchema,
   }),
-  z.object({ hasAudio: z.literal(false), ...loudnessDurationSchema }),
+  z.object({
+    hasAudio: z.literal(false),
+    /**
+     * T21b: a whole-file measurement (music, sound overlay) that failed outright, as opposed to a confirmed silent
+     * (`-inf`) result. `buildAudioGraph` plays the sound at its manual gain, unnormalized, and the UI warns instead
+     * of silencing it without saying why.
+     */
+    unmeasured: z.literal(true).optional(),
+    ...loudnessDurationSchema,
+  }),
 ]);
 
 export type LoudnessMeasurement = z.infer<typeof loudnessMeasurementSchema>;

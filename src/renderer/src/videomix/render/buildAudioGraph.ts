@@ -181,8 +181,10 @@ export interface AudioPass {
  *   normalized to `LOUDNESS_TARGET` plus its `gainDb`, delayed to its resolved start and trimmed to its resolved end
  *   (already cut to the video's duration), then summed in **after** the simultaneity compensation and **before** the
  *   `alimiter` — the global fade doesn't reach them. An overlay missing from `overlayTimes`, resolved to zero
- *   duration (`start === end`), or without a loudness measurement with audio, is left out. Both optional and left
- *   out together: existing callers (without overlays) are unaffected.
+ *   duration (`start === end`), or confirmed silent (`hasAudio: false`, no `unmeasured`), is left out. One flagged
+ *   `unmeasured` (T21b: its whole-file measurement failed outright) is still mixed in, at `gainDb` alone (no
+ *   normalization gain, since none could be measured) — the caller should have already warned about it. Both
+ *   optional and left out together: existing callers (without overlays) are unaffected.
  */
 export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, loudness, overlays, overlayTimes }: {
   plan: Pick<MixPlan, 'duration' | 'placements' | 'layouts'>,
@@ -277,7 +279,9 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
     if (times == null || times.end <= times.start) return;
     const measurement = loudness[overlay.id];
     invariant(measurement != null, `Missing loudness of sound overlay ${overlay.id}`);
-    if (!measurement.hasAudio) return;
+    // Confirmed silence (T21) is dropped; unmeasured (T21b) still plays, at gainDb alone (no normalization gain).
+    if (!measurement.hasAudio && measurement.unmeasured !== true) return;
+    const gainDb = measurement.hasAudio ? getNormalizationGain(measurement) + overlay.gainDb : overlay.gainDb;
 
     const soundDuration = times.end - times.start;
     const inputIndex = inputs.length;
@@ -286,11 +290,11 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
     const label = `s${inputIndex}`;
     const chain = [
       'asetpts=PTS-STARTPTS',
-      getFixChannelLayoutFilter(measurement),
+      getFixChannelLayoutFilter(measurement.hasAudio ? measurement : {}),
       `aresample=${AUDIO_SAMPLE_RATE}`,
       'aformat=sample_fmts=fltp:channel_layouts=stereo',
       `atrim=duration=${fmt(soundDuration)}`,
-      `volume=${fmt(getNormalizationGain(measurement) + overlay.gainDb)}dB`,
+      `volume=${fmt(gainDb)}dB`,
       `adelay=${Math.round(times.start * AUDIO_SAMPLE_RATE)}S:all=1`,
     ].filter((filter) => filter != null);
     filters.push(`[${inputIndex}:a:0]${chain.join(',')}[${label}]`);

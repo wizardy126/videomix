@@ -14,13 +14,14 @@ import { validateMixProject } from '../project';
 import type { MixProjectIssue } from '../project';
 import { getOverlayFiles } from '../projectFile';
 import { ensureLoudness, getSoundDurations } from '../loudness';
+import type { LoudnessMeasurement } from '../types';
 import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
 import { getOverlayTimeWarningText } from '../overlayTexts';
 import { getKnownSoundDurations } from './useOverlaySoundDurations';
 import { buildRenderJob, getChunkConcurrency } from '../render/buildRenderJob';
 import { buildAudioGraph } from '../render/buildAudioGraph';
 import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
-import { runRenderJob } from '../render/runRenderJob';
+import { RenderAbortedError, runRenderJob } from '../render/runRenderJob';
 import type { RenderRunnerDeps } from '../render/runRenderJob';
 import { askForRenderWarnings, getIssueText, getRenderWarningText, showRenderProblems } from '../renderDialogs';
 import { showMixPreviewDialog } from '../components/MixPreviewDialog';
@@ -175,6 +176,15 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       setProgress(0);
       // Measures only what isn't cached yet; the new measurements are stored in the project (also when cancelled)
       const loudness = await ensureLoudness({ project, music: project.settings.music, sounds: soundOverlays, onProgress: setProgress, abortSignal: abortController.signal, onCacheEntries: setLoudnessCache });
+
+      // T21b: a sound overlay whose level couldn't be measured (very short or otherwise unusual file) still plays
+      // (buildAudioGraph, at its manual gain only), but warn about it here instead of doing that silently.
+      const isUnmeasured = (measurement: LoudnessMeasurement | undefined) => measurement != null && !measurement.hasAudio && measurement.unmeasured === true;
+      const unmeasuredSounds = soundOverlays.filter((overlay) => isUnmeasured(loudness[overlay.id]));
+      if (unmeasuredSounds.length > 0) {
+        const lines = unmeasuredSounds.map((overlay) => i18n.t('Sound overlay "{{overlay}}": couldn\'t measure its loudness, so it will play at its manual gain only, without normalization.', { overlay: overlay.name }));
+        if (!(await askForRenderWarnings({ lines, preview }))) throw new RenderAbortedError();
+      }
 
       setWorking({ text: preview ? i18n.t('Rendering preview') : i18n.t('Rendering mix'), abortController });
       setProgress(0);

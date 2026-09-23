@@ -1,6 +1,6 @@
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { describe, expect, test } from 'vitest';
-import { parseFfprobeAudioStream, parseFfprobeDuration, parseLoudnormOutput, toLoudnessAnalysis } from './loudnessParse';
+import { LOOP_MEASURE_DURATION, parseFfprobeAudioStream, parseFfprobeDuration, parseLoudnormOutput, shouldLoopForMeasurement, toLoudnessAnalysis } from './loudnessParse';
 
 // Real ffmpeg 8 output (`-nostats`, stderr tail)
 const stderr = `  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono, fltp, 69 kb/s (default)
@@ -100,5 +100,25 @@ describe('parseFfprobeDuration', () => {
     expect(parseFfprobeDuration('{"format":{}}')).toBeUndefined();
     expect(parseFfprobeDuration('{"format":{"duration":"N/A"}}')).toBeUndefined();
     expect(parseFfprobeDuration('{"format":{"duration":"-1"}}')).toBeUndefined();
+  });
+});
+
+describe('shouldLoopForMeasurement (T21b)', () => {
+  test('loops a whole-file measurement shorter than LOOP_MEASURE_DURATION', () => {
+    expect(shouldLoopForMeasurement({ isWholeFile: true, duration: 0.15 })).toBe(true);
+    expect(shouldLoopForMeasurement({ isWholeFile: true, duration: LOOP_MEASURE_DURATION - 0.01 })).toBe(true);
+  });
+
+  test('doesn\'t loop a whole-file measurement at or above LOOP_MEASURE_DURATION', () => {
+    expect(shouldLoopForMeasurement({ isWholeFile: true, duration: LOOP_MEASURE_DURATION })).toBe(false);
+    expect(shouldLoopForMeasurement({ isWholeFile: true, duration: 10 })).toBe(false);
+  });
+
+  test('doesn\'t loop when the duration is unknown (can\'t tell if it\'s short)', () => {
+    expect(shouldLoopForMeasurement({ isWholeFile: true, duration: undefined })).toBe(false);
+  });
+
+  test('never loops a ranged (per-clip) measurement, even if short', () => {
+    expect(shouldLoopForMeasurement({ isWholeFile: false, duration: 0.15 })).toBe(false);
   });
 });

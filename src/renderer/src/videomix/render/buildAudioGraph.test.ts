@@ -218,6 +218,15 @@ describe('buildAudioGraph: sound overlays (T21)', () => {
     expect(audioPass.inputs).not.toContainEqual(['-vn', '-i', '/media/beep.wav']);
   });
 
+  test('an unmeasured overlay (T21b) still plays, at gainDb alone (no normalization)', () => {
+    const overlays = [sound('beep', '/media/beep.wav', -3)];
+    const overlayTimes = times([['beep', { start: 1, end: 2 }]]);
+    const loudness = { ...twoColumnLoudness, beep: { hasAudio: false as const, unmeasured: true as const } };
+    const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings(), loudness, overlays, overlayTimes });
+    expect(audioPass.inputs).toContainEqual(['-vn', '-i', '/media/beep.wav']);
+    expect(audioPass.filterComplex).toContain('volume=-3dB'); // gainDb alone, no getNormalizationGain
+  });
+
   test('missing loudness of a sounding overlay throws', () => {
     const overlays = [sound('beep', '/media/beep.wav')];
     const overlayTimes = times([['beep', { start: 1, end: 2 }]]);

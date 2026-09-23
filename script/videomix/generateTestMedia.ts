@@ -208,11 +208,13 @@ await generate('overlay-logo.png', [
   '-vf', String.raw`format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte(pow(X-200\,2)+pow(Y-200\,2)\,200*200)\,255\,0)'`,
   '-frames:v', '1',
 ]);
-// 0.5 s: short enough to read as a "beep", but long enough for ffmpeg's loudnorm gating to measure it (it reports
-// -inf for very short clips, e.g. 0.3 s, which the loudness normalization then treats as silence).
+// 0.2 s: short enough to read as a countdown "beep" (and short enough that, pre-T21b, ffmpeg's loudnorm gating
+// couldn't measure it at all — it reported -inf for any whole file under ~0.4 s, which the loudness normalization
+// then treated as silence). T21b fixes this by measuring a looped copy of the file instead (measureLoudness), so
+// this can now be as short as an actual countdown beep and still be normalized and heard.
 await generate('overlay-beep.wav', [
-  '-f', 'lavfi', '-i', 'sine=frequency=880:duration=0.5',
-  '-af', 'afade=t=out:st=0.35:d=0.15',
+  '-f', 'lavfi', '-i', 'sine=frequency=880:duration=0.2',
+  '-af', 'afade=t=out:st=0.15:d=0.05',
   '-c:a', 'pcm_s16le',
 ]);
 
