@@ -2267,6 +2267,7 @@ function App() {
       showMixSettings: () => setMixSettingsOpen(true),
       previewMix: () => { mixRender.userPreviewMix(); },
       renderMix: () => { mixRender.userRenderMix(); },
+      clearRenderCache: () => { mixRender.userClearRenderCache(); },
     };
 
     // VideoMix: retired LosslessCut actions do nothing, also when an older config binds them or the HTTP API calls them (T16)

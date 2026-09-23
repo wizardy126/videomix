@@ -16,7 +16,7 @@ describe('retired LosslessCut actions', () => {
       'captureSnapshot', 'toggleWaveformMode', 'toggleShowThumbnails', 'toggleShowKeyframes', 'toggleSettings', 'toggleKeyboardShortcuts',
       'openFilesDialog', 'export', 'html5ify',
       'newProject', 'openProject', 'saveProject', 'saveProjectAs', 'addSourcesDialog', 'addClip', 'duplicateCurrentClip', 'removeCurrentClip',
-      'showMixSettings', 'previewMix', 'renderMix',
+      'showMixSettings', 'previewMix', 'renderMix', 'clearRenderCache',
     ];
     expect(kept.filter((action) => isKeyboardActionRetired(action))).toEqual([]);
   });

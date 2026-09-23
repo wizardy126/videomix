@@ -304,6 +304,12 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
             mainWindow.webContents.send('renderMix');
           },
         },
+        {
+          label: esc(t('Clear render cache')),
+          click() {
+            mainWindow.webContents.send('clearRenderCache');
+          },
+        },
       ],
     },
 

@@ -50,12 +50,23 @@ export const buildSilentAudioGraph: BuildAudioGraph = ({ duration }) => ({
   outLabel: 'aout',
 });
 
+export interface RenderStepCache {
+  path: string,
+  /** How far (s) the probed duration of a cached file can be from `duration` for it to be reused. */
+  tolerance: number,
+}
+
 /** One ffmpeg invocation. `args` exclude the ffmpeg binary. */
 export interface RenderStep {
   args: string[],
   outPath: string,
   /** Seconds of media the step produces (for progress). */
   duration: number,
+  /**
+   * Render cache (T28, set by `applyRenderCache`): the step's output is reused from `path` when it's there and valid;
+   * otherwise ffmpeg writes to `outPath` (a partial name next to it) and the runner renames it to `path`.
+   */
+  cache?: RenderStepCache | undefined,
 }
 
 export interface RenderChunkStep extends RenderStep {
@@ -81,6 +92,8 @@ export interface RenderJob {
   concat: RenderStep,
   /** Every temporary file (written files and step outputs except the final one), to delete when done or cancelled. */
   tempPaths: string[],
+  /** Render cache dir of the cached steps (T28, `applyRenderCache`), created by the runner. */
+  cacheDir?: string | undefined,
 }
 
 export interface EncodingOptions {

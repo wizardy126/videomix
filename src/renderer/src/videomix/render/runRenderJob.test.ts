@@ -146,3 +146,74 @@ describe('runRenderJob', () => {
     expect([...fake.files.keys()]).toEqual(['/out/mix.id.part.mp4']);
   });
 });
+
+describe('runRenderJob with the render cache (T28)', () => {
+  // fakeJob with its chunks and audio cached in /cache (what applyRenderCache does)
+  function cachedJob(numChunks: number): RenderJob {
+    const job = fakeJob(numChunks);
+    return {
+      ...job,
+      cacheDir: '/cache',
+      chunks: job.chunks.map((c, i) => ({ ...c, outPath: `/cache/v-${i}.run.part.mp4`, args: ['chunk', String(i)], cache: { path: `/cache/v-${i}.mp4`, tolerance: 0.04 } })),
+      audio: { ...job.audio, outPath: '/cache/a.run.part.m4a', cache: { path: '/cache/a.m4a', tolerance: 0.1 } },
+    };
+  }
+  // the fake ffmpeg writes chunk i to /work/chunk-i.mp4: move it to the partial name
+  function withCacheDeps(fake: ReturnType<typeof fakeDeps>, cached: Set<string>) {
+    const deps: RenderRunnerDeps = {
+      ...fake.deps,
+      runFfmpeg: async (params) => {
+        await fake.deps.runFfmpeg(params);
+        const [kind, index] = params.args;
+        if (kind === 'chunk') {
+          fake.files.delete(`/work/chunk-${index}.mp4`);
+          fake.files.set(`/cache/v-${index}.run.part.mp4`, 'chunk');
+        } else if (kind === 'audio') {
+          fake.files.delete('/work/audio.m4a');
+          fake.files.set('/cache/a.run.part.m4a', 'audio');
+        }
+      },
+      verifyCached: async (filePath) => cached.has(filePath) || fake.files.has(filePath),
+    };
+    return deps;
+  }
+
+  test('renders only the missing steps into the cache; cached ones count as done at once', async () => {
+    const fake = fakeDeps();
+    const deps = withCacheDeps(fake, new Set(['/cache/v-0.mp4', '/cache/v-2.mp4', '/cache/a.m4a']));
+    const progress: number[] = [];
+    const result = await runRenderJob({ job: cachedJob(4), workDir: '/work', outPath: '/out/mix.mp4', concurrency: 2, deps, onProgress: (p) => progress.push(p) });
+
+    expect(result).toEqual({ renderedChunks: 2, reusedChunks: 2, audioReused: true });
+    expect(fake.log.filter((l) => l.startsWith('run'))).toEqual(['run chunk 1', 'run chunk 3', 'run concat']);
+    expect(fake.log).toContain('mkdir /cache');
+    expect(fake.log).toContain('rename /cache/v-1.run.part.mp4 /cache/v-1.mp4');
+    expect([...fake.files.keys()].sort()).toEqual(['/cache/v-1.mp4', '/cache/v-3.mp4', '/out/mix.mp4']);
+    // audio, chunk 0 and chunk 2 before anything runs: half of the frames (+ the audio's small weight)
+    expect(progress[2]).toBeCloseTo(0.5, 2);
+    expect(progress.at(-1)).toBe(1);
+  });
+
+  test('a second run reuses everything', async () => {
+    const fake = fakeDeps();
+    const deps = withCacheDeps(fake, new Set());
+    expect(await runRenderJob({ job: cachedJob(3), workDir: '/work', outPath: '/out/mix.mp4', concurrency: 2, deps })).toEqual({ renderedChunks: 3, reusedChunks: 0, audioReused: false });
+    fake.log.length = 0;
+    expect(await runRenderJob({ job: cachedJob(3), workDir: '/work', outPath: '/out/mix.mp4', concurrency: 2, deps })).toEqual({ renderedChunks: 0, reusedChunks: 3, audioReused: true });
+    expect(fake.log.filter((l) => l.startsWith('run'))).toEqual(['run concat']);
+  });
+
+  test('a failure removes the partials but keeps the finished cache files', async () => {
+    const fake = fakeDeps({ failOn: 'chunk 2' });
+    const deps = withCacheDeps(fake, new Set());
+    await expect(runRenderJob({ job: cachedJob(4), workDir: '/work', outPath: '/out/mix.mp4', concurrency: 1, deps })).rejects.toThrow('chunk 2 failed');
+    expect([...fake.files.keys()].sort()).toEqual(['/cache/a.m4a', '/cache/v-0.mp4', '/cache/v-1.mp4']);
+    expect(fake.log).toContain('rm /cache/v-2.run.part.mp4');
+  });
+
+  test('without verifyCached, cached steps are rendered anyway', async () => {
+    const fake = fakeDeps();
+    const deps = { ...withCacheDeps(fake, new Set(['/cache/v-0.mp4'])), verifyCached: undefined };
+    expect(await runRenderJob({ job: cachedJob(2), workDir: '/work', outPath: '/out/mix.mp4', concurrency: 2, deps })).toEqual({ renderedChunks: 2, reusedChunks: 0, audioReused: false });
+  });
+});

@@ -5,7 +5,8 @@ import { nanoid } from 'nanoid';
 
 import mainApi from '../../mainApi';
 import { UserFacingError } from '../../../errors';
-import { abortFfmpegs, getDefaultOverlayFontPath, runFfmpegWithProgress } from '../../ffmpeg';
+import { abortFfmpegs, getDefaultOverlayFontPath, getDuration, runFfmpegWithProgress } from '../../ffmpeg';
+import getSwal from '../../swal';
 import type { SetWorking } from '../../hooks/useLoading';
 import type { WithErrorHandling } from '../../hooks/useErrorHandling';
 import type { ShowGenericDialog } from '../../components/GenericDialog';
@@ -24,6 +25,8 @@ import { buildAudioGraph } from '../render/buildAudioGraph';
 import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
 import { RenderAbortedError, runRenderJob } from '../render/runRenderJob';
 import type { RenderRunnerDeps } from '../render/runRenderJob';
+import type { CacheDirEntry, RenderCacheFsDeps } from '../render/renderCache';
+import { DEFAULT_RENDER_CACHE_MAX_BYTES, applyRenderCache, getFileIdentity, getProjectCacheRoot, getRenderCacheDir, getRenderCacheFileNames, getRenderCacheKeys, getStaleUnsavedCaches, getUnsavedCacheParent, pruneRenderCache } from '../render/renderCache';
 import { askForRenderWarnings, getIssueText, getRenderWarningText, showHardwareEncoderFallbackWarning, showRenderProblems } from '../renderDialogs';
 import { showMixPreviewDialog } from '../components/MixPreviewDialog';
 import { detectEncoders } from '../encoders';
@@ -32,6 +35,7 @@ import { resolveEncoderHardware } from '../../../../common/videomix/encoder';
 const path = window.require('node:path');
 const fs = window.require('node:fs/promises');
 const remote = window.require('@electron/remote');
+const { configStore } = remote.require('./index.js');
 
 const rmQuiet = async (filePath: string) => {
   try {
@@ -50,7 +54,80 @@ const runnerDeps: RenderRunnerDeps = {
   runFfmpeg: async ({ args, duration, onProgress }) => { await runFfmpegWithProgress({ ffmpegArgs: args, duration, onProgress }); },
   // There's no per-process kill through remote: this kills every running ffmpeg, like the Working dialog's abort
   abortAll: () => abortFfmpegs(),
+  // T28: a cache file is reused if it isn't empty and ffprobe (header only, fast) gives the expected duration
+  verifyCached: async (filePath, { duration, tolerance }) => {
+    try {
+      const stats = await fs.stat(filePath);
+      if (!stats.isFile() || stats.size === 0) return false;
+    } catch {
+      return false;
+    }
+    const probed = await getDuration(filePath);
+    if (probed == null || Math.abs(probed - duration) > tolerance) {
+      console.warn('Invalid render cache file, rendering it again', filePath, probed, duration);
+      return false;
+    }
+    // least recently used goes first when the cache is over its size limit
+    const now = new Date();
+    await fs.utimes(filePath, now, now);
+    return true;
+  },
 };
+
+const cacheFsDeps: RenderCacheFsDeps = {
+  list: async (dir) => {
+    let names: string[];
+    try {
+      names = await fs.readdir(dir);
+    } catch {
+      return [];
+    }
+    const entries = await Promise.all(names.map(async (name): Promise<CacheDirEntry | undefined> => {
+      try {
+        const stats = await fs.lstat(path.join(dir, name));
+        return { name, size: stats.size, mtimeMs: stats.mtimeMs, isDirectory: stats.isDirectory() };
+      } catch {
+        return undefined;
+      }
+    }));
+    return entries.filter((entry) => entry != null);
+  },
+  rm: async (filePath) => fs.rm(filePath, { recursive: true, force: true }),
+};
+
+function getRenderCacheMaxBytes() {
+  try {
+    const value: unknown = configStore.get('renderCacheMaxBytes');
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : DEFAULT_RENDER_CACHE_MAX_BYTES;
+  } catch (err) {
+    console.warn('Failed to read renderCacheMaxBytes', err);
+    return DEFAULT_RENDER_CACHE_MAX_BYTES;
+  }
+}
+
+/** Identity (size + mtime) of each file the render reads, for the cache keys. */
+async function getFileIdentities(filePaths: string[]) {
+  const entries = await Promise.all([...new Set(filePaths)].map(async (filePath) => {
+    try {
+      return [filePath, getFileIdentity(await fs.stat(filePath))] as const;
+    } catch {
+      return [filePath, 'missing'] as const;
+    }
+  }));
+  return Object.fromEntries(entries);
+}
+
+/** Caches of unsaved projects of earlier sessions (userData/videomix-cache/<id>) that weren't used for a week. */
+async function removeStaleUnsavedCaches() {
+  try {
+    const parent = getUnsavedCacheParent(path, remote.app.getPath('userData'));
+    const stale = getStaleUnsavedCaches(await cacheFsDeps.list(parent), Date.now());
+    if (stale.length > 0) console.log('Removing stale render caches', stale);
+    await Promise.all(stale.map(async (name) => rmQuiet(path.join(parent, name))));
+  } catch (err) {
+    console.warn('Failed to clean up stale render caches', err);
+  }
+}
 
 /** Remove the temp dirs/files of renders and previews that were never cleaned up (app closed or crashed meanwhile). */
 async function removeOrphanTempEntries() {
@@ -106,7 +183,16 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
   useEffect(() => () => { removePreview(); }, [removePreview]);
 
   // Once at startup (T16). Only old entries, so it can't touch a render running in another instance
-  useEffect(() => { removeOrphanTempEntries(); }, []);
+  useEffect(() => {
+    removeOrphanTempEntries();
+    removeStaleUnsavedCaches();
+  }, []);
+
+  // Render cache (T28, D1): next to the project, or per session in userData while it's unsaved
+  const unsavedCacheIdRef = useRef(nanoid(8));
+  const getCacheRoot = useCallback(() => (projectPath != null
+    ? getProjectCacheRoot(path, projectPath)
+    : path.join(getUnsavedCacheParent(path, remote.app.getPath('userData')), unsavedCacheIdRef.current)), [projectPath]);
 
   /** Validation, missing files and plan warnings. Returns the plan, or undefined if the user can't or won't go on. */
   const prepare = useCallback(async ({ preview }: { preview: boolean }) => {
@@ -200,11 +286,22 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       const available = await detectEncoders();
       const hardware = resolveEncoderHardware({ encoder: settings.encoder, available });
 
+      const cacheMaxBytes = getRenderCacheMaxBytes();
+      const cacheRoot = getCacheRoot();
+      const cacheDir = getRenderCacheDir(path, cacheRoot, { preview, width: plan.width, height: plan.height });
+      const sourcePaths = Object.fromEntries(project.sources.map((source) => [source.id, source.absolutePath]));
+      const fileIdentities = cacheMaxBytes > 0 ? await getFileIdentities([
+        ...Object.values(sourcePaths),
+        ...project.settings.musicPlaylist.tracks.map((track) => track.absolutePath),
+        ...project.overlays.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => file.absolutePath)),
+        getDefaultOverlayFontPath(),
+      ]) : {};
+
       const runWithEncoder = async (resolvedEncoder: ResolvedEncoder) => {
-        const job = buildRenderJob({
+        const uncachedJob = buildRenderJob({
           plan,
           clips: project.clips,
-          sourcePaths: Object.fromEntries(project.sources.map((source) => [source.id, source.absolutePath])),
+          sourcePaths,
           settings,
           encoding,
           resolvedEncoder,
@@ -216,16 +313,30 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
           // images, countdowns and progress bars (T20)
           overlays: { overlays: project.overlays, times: overlayTimes, defaultFontPath: getDefaultOverlayFontPath() },
         });
-        await runRenderJob({
+        const job = cacheMaxBytes > 0
+          ? applyRenderCache(uncachedJob, { dir: cacheDir, keys: await getRenderCacheKeys(uncachedJob, { fileIdentities }), runId: nanoid(8), join: path.join, fps: settings.fps })
+          : uncachedJob;
+        const result = await runRenderJob({
           job,
           workDir,
           outPath,
-          concurrency: getChunkConcurrency({ height: plan.height, cpuCount: navigator.hardwareConcurrency }),
+          // by the short side (T29): a 1080×1920 output has the pixels of 1080p, not of 2160p
+          concurrency: getChunkConcurrency({ height: Math.min(plan.width, plan.height), cpuCount: navigator.hardwareConcurrency }),
           deps: runnerDeps,
           onProgress: setProgress,
           onCommand: appendFfmpegCommandLog,
           abortSignal: abortController.signal,
         });
+        console.log('Render done:', result);
+        if (job.cacheDir == null) return;
+        // Chunks the render didn't use go, and the cache is kept under its size limit (failures are only logged: the
+        // render itself succeeded)
+        try {
+          const pruned = await pruneRenderCache({ root: cacheRoot, dir: job.cacheDir, keep: getRenderCacheFileNames(job, path.basename), maxBytes: cacheMaxBytes, now: Date.now(), deps: cacheFsDeps, join: path.join });
+          console.log('Render cache:', pruned);
+        } catch (err) {
+          console.warn('Failed to clean up the render cache', err);
+        }
       };
 
       try {
@@ -244,7 +355,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       setWorking(undefined);
       setProgress(undefined);
     }
-  }, [appendFfmpegCommandLog, project, setLoudnessCache, setProgress, setWorking]);
+  }, [appendFfmpegCommandLog, getCacheRoot, project, setLoudnessCache, setProgress, setWorking]);
 
   const userRenderMix = useCallback(async () => {
     if (workingRef.current) return;
@@ -317,9 +428,25 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     }, i18n.t('Failed to preview the mix'));
   }, [prepare, removePreview, render, showGenericDialog, withErrorHandling, workingRef]);
 
+  /** Project → Clear render cache: this project's cache and those of unsaved projects. */
+  const userClearRenderCache = useCallback(async () => {
+    if (workingRef.current) return;
+    await withErrorHandling(async () => {
+      const unsavedParent = getUnsavedCacheParent(path, remote.app.getPath('userData'));
+      const roots = [...(projectPath != null ? [getProjectCacheRoot(path, projectPath)] : []), unsavedParent];
+      const sizeOf = async (dir: string): Promise<number> => (await Promise.all((await cacheFsDeps.list(dir)).map(async (entry) => (
+        entry.isDirectory ? sizeOf(path.join(dir, entry.name)) : entry.size
+      )))).reduce((acc, size) => acc + size, 0);
+      const bytes = (await Promise.all(roots.map(async (root) => sizeOf(root)))).reduce((acc, size) => acc + size, 0);
+      await Promise.all(roots.map(async (root) => fs.rm(root, { recursive: true, force: true })));
+      getSwal().toast.fire({ icon: 'success', timer: 4000, title: i18n.t('Render cache cleared ({{size}} MB freed)', { size: Math.round(bytes / 1024 ** 2) }) });
+    }, i18n.t('Failed to clear the render cache'));
+  }, [projectPath, withErrorHandling, workingRef]);
+
   return {
     userRenderMix,
     userPreviewMix,
+    userClearRenderCache,
   };
 }
 

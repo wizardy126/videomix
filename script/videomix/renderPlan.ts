@@ -12,6 +12,8 @@
 //   --concurrency N     chunks in parallel (default 2)
 //   --max-chunk S       longest stable chunk in seconds (default 15)
 //   --keep              keep the chunks, graphs and audio pass
+//   --cache DIR         incremental render (T28): reuse/store the chunks and the audio pass in DIR (like the app's
+//                       .<project>.vmx.cache/render) and print how many chunks were encoded and reused
 //   --fixture NAME      render a hand-written plan of render/renderTestFixtures.ts instead (static, substitutions,
 //                       relayout = the ADR-001 example, fills, removal), scaled to --size
 //
@@ -40,7 +42,7 @@ interface MixSettings { fps: number, gap: { width: number, color: string }, tran
 interface MixProject { version: 1, sources: MixSource[], clips: MixClip[], settings: MixSettings }
 interface MixPlan { width: number, height: number, duration: number, warnings: unknown[] }
 interface PlanMixInput { clips: unknown[], settings: { width: number, height: number, gap: number } & Record<string, unknown> }
-interface RenderStep { args: string[], outPath: string, duration: number }
+interface RenderStep { args: string[], outPath: string, duration: number, cache?: { path: string, tolerance: number } }
 interface RenderJob {
   totalFrames: number,
   duration: number,
@@ -49,6 +51,7 @@ interface RenderJob {
   audio: RenderStep,
   concat: RenderStep,
   tempPaths: string[],
+  cacheDir?: string,
 }
 
 const importRenderer = async <T>(file: string) => await import(pathToFileURL(path.join(rendererDir, file)).href) as T;
@@ -69,6 +72,15 @@ const { getPlannerInput } = await importRenderer<{ getPlannerInput: (p: MixProje
 const { planMix } = await importRenderer<{ planMix: (input: PlanMixInput) => MixPlan }>('videomix/planner/planMix.ts');
 const { formatPlan } = await importRenderer<{ formatPlan: (plan: MixPlan) => string }>('videomix/planner/formatPlan.ts');
 const { buildRenderJob } = await importRenderer<{ buildRenderJob: (options: Record<string, unknown>) => RenderJob }>('videomix/render/buildRenderJob.ts');
+interface RenderCacheModule {
+  getFileIdentity: (s: { size: number, mtimeMs: number }) => string,
+  getRenderCacheKeys: (job: RenderJob, o: { fileIdentities: Record<string, string> }) => Promise<unknown>,
+  applyRenderCache: (job: RenderJob, o: { dir: string, keys: unknown, runId: string, join: (a: string, b: string) => string, fps: number }) => RenderJob,
+  getRenderCacheFileNames: (job: RenderJob, basename: (p: string) => string) => string[],
+  pruneRenderCache: (o: Record<string, unknown>) => Promise<{ removedFiles: number, removedBytes: number, totalBytes: number }>,
+}
+const renderCache = await importRenderer<RenderCacheModule>('videomix/render/renderCache.ts');
+const { runRenderJob } = await importRenderer<{ runRenderJob: (o: Record<string, unknown>) => Promise<{ renderedChunks: number, reusedChunks: number, audioReused: boolean }> }>('videomix/render/runRenderJob.ts');
 
 const { values: opts, positionals } = parseArgs({
   allowPositionals: true,
@@ -82,6 +94,7 @@ const { values: opts, positionals } = parseArgs({
     'max-chunk': { type: 'string', default: '15' },
     keep: { type: 'boolean', default: false },
     fixture: { type: 'string' },
+    cache: { type: 'string' },
   },
 });
 
@@ -206,26 +219,78 @@ const job = buildRenderJob({
   maxChunkSeconds: Number(opts['max-chunk']),
   join: path.join,
 });
-for (const file of job.files) await writeFile(file.path, file.content);
 
-const started = performance.now();
-let done = 0;
-let next = 0;
-await Promise.all(Array.from({ length: Number(opts.concurrency) }, async () => {
-  while (next < job.chunks.length) {
-    const step = job.chunks[next]!;
-    const index = next;
-    next += 1;
-    const t0 = performance.now();
-    // eslint-disable-next-line no-await-in-loop
-    await ffmpeg(step.args);
-    done += step.frames;
-    console.log(`chunk ${index} [${step.chunk.f0}, ${step.chunk.f1})${step.chunk.animated ? ' animated' : ''}: ${((performance.now() - t0) / 1000).toFixed(2)} s, progress ${Math.round((100 * done) / job.totalFrames)} %`);
-  }
-}));
-await ffmpeg(job.audio.args);
-await ffmpeg(job.concat.args);
-console.log(`rendered ${outPath} (${job.chunks.length} chunks) in ${((performance.now() - started) / 1000).toFixed(1)} s`);
+// --cache: the app's path (renderCache + runRenderJob), timed as a whole
+if (opts.cache != null) {
+  const cacheDir = path.resolve(opts.cache);
+  const { stat, rename, readdir, utimes } = await import('node:fs/promises');
+  const inputPaths = [...new Set(Object.values(sourcePaths))];
+  const fileIdentities = Object.fromEntries(await Promise.all(inputPaths.map(async (p) => [p, renderCache.getFileIdentity(await stat(p))] as const)));
+  const t0 = performance.now();
+  const cachedJob = renderCache.applyRenderCache(job, { dir: cacheDir, keys: await renderCache.getRenderCacheKeys(job, { fileIdentities }), runId: String(process.pid), join: path.join, fps: settings.fps });
+  const result = await runRenderJob({
+    job: cachedJob,
+    workDir,
+    outPath,
+    concurrency: Number(opts.concurrency),
+    deps: {
+      mkdir: async (dir: string) => { await mkdir(dir, { recursive: true }); },
+      writeFile: async (p: string, c: string) => writeFile(p, c),
+      rm: async (p: string) => rm(p, { recursive: true, force: true }),
+      rename: async (a: string, b: string) => rename(a, b),
+      runFfmpeg: async ({ args }: { args: string[] }) => { await ffmpeg(args); },
+      abortAll: () => undefined,
+      verifyCached: async (p: string, { duration, tolerance }: { duration: number, tolerance: number }) => {
+        try {
+          if ((await stat(p)).size === 0) return false;
+          const probed = Number((await run(ffprobePath, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', p])).trim());
+          if (!(Math.abs(probed - duration) <= tolerance)) return false;
+          await utimes(p, new Date(), new Date());
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    },
+  });
+  const pruned = await renderCache.pruneRenderCache({
+    root: path.dirname(cacheDir),
+    dir: cacheDir,
+    keep: renderCache.getRenderCacheFileNames(cachedJob, path.basename),
+    maxBytes: Infinity,
+    now: Date.now(),
+    deps: {
+      list: async (dir: string) => Promise.all((await readdir(dir).catch(() => [] as string[])).map(async (name) => {
+        const s = await stat(path.join(dir, name));
+        return { name, size: s.size, mtimeMs: s.mtimeMs, isDirectory: s.isDirectory() };
+      })),
+      rm: async (p: string) => rm(p, { recursive: true, force: true }),
+    },
+    join: path.join,
+  });
+  console.log(`rendered ${outPath} with the cache in ${((performance.now() - t0) / 1000).toFixed(2)} s: ${result.renderedChunks} chunk(s) encoded, ${result.reusedChunks} reused, audio ${result.audioReused ? 'reused' : 'encoded'}; removed ${pruned.removedFiles} unused cache file(s), cache ${(pruned.totalBytes / 1e6).toFixed(1)} MB`);
+} else {
+  for (const file of job.files) await writeFile(file.path, file.content);
+
+  const started = performance.now();
+  let done = 0;
+  let next = 0;
+  await Promise.all(Array.from({ length: Number(opts.concurrency) }, async () => {
+    while (next < job.chunks.length) {
+      const step = job.chunks[next]!;
+      const index = next;
+      next += 1;
+      const t0 = performance.now();
+      // eslint-disable-next-line no-await-in-loop
+      await ffmpeg(step.args);
+      done += step.frames;
+      console.log(`chunk ${index} [${step.chunk.f0}, ${step.chunk.f1})${step.chunk.animated ? ' animated' : ''}: ${((performance.now() - t0) / 1000).toFixed(2)} s, progress ${Math.round((100 * done) / job.totalFrames)} %`);
+    }
+  }));
+  await ffmpeg(job.audio.args);
+  await ffmpeg(job.concat.args);
+  console.log(`rendered ${outPath} (${job.chunks.length} chunks) in ${((performance.now() - started) / 1000).toFixed(1)} s`);
+}
 console.log(await run(ffprobePath, ['-v', 'error', '-count_frames', '-show_entries', 'stream=codec_type,width,height,nb_read_frames,duration', '-of', 'compact', outPath]));
 
 if (opts.frames != null) {

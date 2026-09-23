@@ -5,7 +5,7 @@ export type KeyboardAction = 'addSegment' | 'togglePlayResetSpeed' | 'togglePlay
   // VideoMix
   | 'newProject' | 'openProject' | 'saveProject' | 'saveProjectAs' | 'addSourcesDialog'
   | 'addClip' | 'duplicateCurrentClip' | 'removeCurrentClip'
-  | 'showMixSettings' | 'previewMix' | 'renderMix';
+  | 'showMixSettings' | 'previewMix' | 'renderMix' | 'clearRenderCache';
 
 export interface KeyBinding {
   keys: string,
@@ -123,6 +123,8 @@ export interface Config {
   ffmpegHwaccel: FfmpegHwAccel,
   /** VideoMix: global style presets of the text, countdown and progress bar overlays (B2, T26). */
   overlayStylePresets: OverlayStylePreset[],
+  /** VideoMix: maximum size in bytes of a project's render cache (D1, T28); 0 disables the cache. */
+  renderCacheMaxBytes: number,
 }
 
 export interface ApiActionRequest {

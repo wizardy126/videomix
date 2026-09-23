@@ -803,6 +803,10 @@ const KeyboardShortcuts = memo(({
         name: t('Render mix'),
         category: mixProjectCategory,
       },
+      clearRenderCache: {
+        name: t('Clear render cache'),
+        category: mixProjectCategory,
+      },
     };
 
     // eslint-disable-next-line no-shadow
