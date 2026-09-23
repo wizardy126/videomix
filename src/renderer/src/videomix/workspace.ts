@@ -4,7 +4,7 @@ import { getRealVideoStreams } from '../util/streams';
 import { getOrientedSize, getStreamRotation } from './overlayMath';
 import { mixProjectExtension } from './projectFile';
 import { DEFAULT_MUSIC_VOLUME_DB } from './types';
-import type { MixMusic, MixSource } from './types';
+import type { MixMusicPlaylist, MixMusicTrack, MixSource } from './types';
 
 // Pure helpers for the multi-source workspace in App.tsx (T05). No React/Electron here, so they can be tested with vitest.
 
@@ -74,9 +74,22 @@ export function getSourceMeta({ streams, format }: {
 export const isSourceMetaChanged = (source: MixSource, meta: SourceMeta) => (['width', 'height', 'duration'] as const)
   .some((key) => meta[key] != null && meta[key] !== source[key]);
 
-/** Music settings for a new music file, keeping the volume/loop of the music it replaces. */
-export function createMusic(filePath: string, previous: MixMusic | undefined): MixMusic {
-  return { path: filePath, absolutePath: filePath, volumeDb: previous?.volumeDb ?? DEFAULT_MUSIC_VOLUME_DB, loop: previous?.loop ?? false };
+/** A music track for a file, at the default background volume (T12b). `filePath` must be absolute. */
+export function createMusicTrack({ id, filePath, volumeDb = DEFAULT_MUSIC_VOLUME_DB }: { id: string, filePath: string, volumeDb?: number | undefined }): MixMusicTrack {
+  return { id, path: filePath, absolutePath: filePath, volumeDb };
+}
+
+/**
+ * The playlist with `filePath` as its only track, for the single-music flows that predate the playlist UI (T27): keeps
+ * the volume of the first track it replaces, and `loop` if there was music (else `loopIfNew`).
+ */
+export function replaceMusic(playlist: MixMusicPlaylist, { id, filePath, loopIfNew }: { id: string, filePath: string, loopIfNew: boolean }): MixMusicPlaylist {
+  const [previous] = playlist.tracks;
+  return {
+    ...playlist,
+    tracks: [createMusicTrack({ id, filePath, volumeDb: previous?.volumeDb })],
+    loop: previous != null ? playlist.loop : loopIfNew,
+  };
 }
 
 /** Window title part for the project: file name without extension (or `untitledName`), plus `*` if there are unsaved changes. */

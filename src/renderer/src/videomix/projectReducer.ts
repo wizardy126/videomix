@@ -1,6 +1,6 @@
 import isEqual from 'lodash/isEqual';
 
-import type { LoudnessMeasurement, MixClip, MixOverlay, MixProject, MixSettings, MixSource } from './types';
+import type { LoudnessMeasurement, MixClip, MixMusicPlaylist, MixMusicTrack, MixOverlay, MixProject, MixSettings, MixSource } from './types';
 import { detachOverlayReferences } from './overlays/anchors';
 import type { OverlayTimeRange } from './overlays/anchors';
 import { isVisualOverlay } from './overlays/factories';
@@ -13,6 +13,12 @@ export type MixSourceRelink = Pick<MixSource, 'path' | 'absolutePath'> & Partial
 
 /** Editable fields of an overlay (of its own type: the reducer doesn't check that the patch matches it). */
 export type MixOverlayPatch = { [T in MixOverlay as T['type']]: Partial<Omit<T, 'id' | 'type'>> }[MixOverlay['type']];
+
+/** Editable fields of a music track. */
+export type MixMusicTrackPatch = Partial<Omit<MixMusicTrack, 'id'>>;
+
+/** Playlist fields other than the tracks (which have their own actions). */
+export type MixMusicPlaylistPatch = Partial<Omit<MixMusicPlaylist, 'tracks'>>;
 
 /** Layer moves. Visual overlays move past the next/previous visual overlay (sounds aren't layered), sounds past sounds. */
 export type OverlayLayerMove = 'up' | 'down' | 'front' | 'back';
@@ -40,7 +46,23 @@ export type MixProjectAction =
   | { type: 'duplicateClip', clipId: string, newId: string, name?: string | undefined }
   /** New list order. Ids not listed keep their relative order at the end; unknown ids are ignored. */
   | { type: 'reorderClips', ids: string[] }
+  /** Pins the clip at a time of the final video (A4), or unpins it (`undefined`). */
+  | { type: 'setClipPinTime', clipId: string, pinTime: number | undefined }
+  /**
+   * The clips (at least 2 existing ones, else nothing happens) start together (A4). They leave their previous groups;
+   * a group left with a single clip is dissolved.
+   */
+  | { type: 'groupClips', clipIds: string[], groupId: string }
+  /** The clips leave their groups; a group left with a single clip is dissolved. */
+  | { type: 'ungroupClips', clipIds: string[] }
   | { type: 'updateSettings', patch: Partial<MixSettings> }
+  /** Music playlist (C2). Inserted at `index`, or appended. */
+  | { type: 'addMusicTracks', tracks: MixMusicTrack[], index?: number | undefined }
+  | { type: 'updateMusicTrack', trackId: string, patch: MixMusicTrackPatch }
+  | { type: 'removeMusicTrack', trackId: string }
+  /** New play order. Ids not listed keep their relative order at the end; unknown ids are ignored. */
+  | { type: 'reorderMusicTracks', ids: string[] }
+  | { type: 'updateMusicPlaylist', patch: MixMusicPlaylistPatch }
   | { type: 'setLoudnessCache', loudnessCache: Record<string, LoudnessMeasurement> | undefined }
   /** Inserted at `index` (layer order), or appended (on top). */
   | { type: 'addOverlay', overlay: MixOverlay, index?: number | undefined }
@@ -59,6 +81,37 @@ function withoutUndefined<T extends object>(obj: T, keys: (keyof T & string)[]):
 }
 
 const hasChanges = <T extends object>(obj: T, patch: Partial<T>) => (Object.keys(patch) as (keyof T)[]).some((key) => !isEqual(obj[key], patch[key]));
+
+/** `items` in the order of `ids` (unknown ids ignored), then the rest in their order. The same array if nothing moves. */
+function reorderById<T extends { id: string }>(items: T[], ids: string[]): T[] {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const listed = new Set<string>();
+  const ordered: T[] = [];
+  ids.forEach((id) => {
+    const item = byId.get(id);
+    if (item == null || listed.has(id)) return;
+    listed.add(id);
+    ordered.push(item);
+  });
+  const ret = [...ordered, ...items.filter((item) => !listed.has(item.id))];
+  return ret.every((item, i) => item === items[i]) ? items : ret;
+}
+
+/** Removes `groupId` from the clips whose group has a single clip (A4: a group needs 2). The same array if none. */
+export function dissolveSingleClipGroups(clips: MixClip[]): MixClip[] {
+  const counts = new Map<string, number>();
+  clips.forEach(({ groupId }) => {
+    if (groupId != null) counts.set(groupId, (counts.get(groupId) ?? 0) + 1);
+  });
+  if (![...counts.values()].includes(1)) return clips;
+  return clips.map((clip) => (clip.groupId != null && counts.get(clip.groupId) === 1 ? withoutUndefined({ ...clip, groupId: undefined }, ['groupId']) : clip));
+}
+
+const clipOptionalKeys: (keyof MixClip)[] = ['minRect', 'pinTime', 'groupId'];
+
+function updateMusicPlaylist(project: MixProject, musicPlaylist: MixMusicPlaylist): MixProject {
+  return { ...project, settings: { ...project.settings, musicPlaylist } };
+}
 
 export function mixProjectReducer(project: MixProject, action: MixProjectAction): MixProject {
   switch (action.type) {
@@ -80,7 +133,7 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
       return {
         ...project,
         sources: project.sources.filter((s) => s.id !== action.sourceId),
-        clips: project.clips.filter((c) => c.sourceId !== action.sourceId),
+        clips: dissolveSingleClipGroups(project.clips.filter((c) => c.sourceId !== action.sourceId)),
         overlays: detachOverlayReferences(project.overlays, { clipIds, resolved: action.resolved }),
       };
     }
@@ -106,7 +159,7 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
       const clip = project.clips[index];
       if (clip == null || !hasChanges(clip, action.patch)) return project;
       const clips = [...project.clips];
-      clips[index] = withoutUndefined({ ...clip, ...action.patch }, ['minRect']);
+      clips[index] = withoutUndefined({ ...clip, ...action.patch }, clipOptionalKeys);
       return { ...project, clips };
     }
 
@@ -114,7 +167,7 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
       if (!project.clips.some((c) => c.id === action.clipId)) return project;
       return {
         ...project,
-        clips: project.clips.filter((c) => c.id !== action.clipId),
+        clips: dissolveSingleClipGroups(project.clips.filter((c) => c.id !== action.clipId)),
         overlays: detachOverlayReferences(project.overlays, { clipIds: new Set([action.clipId]), resolved: action.resolved }),
       };
     }
@@ -125,28 +178,78 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
       if (clip == null) return project;
       if (project.clips.some((c) => c.id === action.newId)) throw new Error(`Duplicate clip id ${action.newId}`);
       const clips = [...project.clips];
-      clips.splice(index + 1, 0, { ...structuredClone(clip), id: action.newId, name: action.name ?? clip.name });
+      // The copy is neither pinned nor grouped: it would start at the same time as the original
+      const copy = { ...structuredClone(clip), id: action.newId, name: action.name ?? clip.name, pinTime: undefined, groupId: undefined };
+      clips.splice(index + 1, 0, withoutUndefined(copy, ['pinTime', 'groupId']));
       return { ...project, clips };
     }
 
     case 'reorderClips': {
-      const byId = new Map(project.clips.map((c) => [c.id, c]));
-      const listed = new Set<string>();
-      const ordered: MixClip[] = [];
-      action.ids.forEach((id) => {
-        const clip = byId.get(id);
-        if (clip == null || listed.has(id)) return;
-        listed.add(id);
-        ordered.push(clip);
-      });
-      const clips = [...ordered, ...project.clips.filter((c) => !listed.has(c.id))];
-      if (clips.every((c, i) => c === project.clips[i])) return project;
-      return { ...project, clips };
+      const clips = reorderById(project.clips, action.ids);
+      return clips === project.clips ? project : { ...project, clips };
+    }
+
+    case 'setClipPinTime': {
+      return mixProjectReducer(project, { type: 'updateClip', clipId: action.clipId, patch: { pinTime: action.pinTime } });
+    }
+
+    case 'groupClips': {
+      const ids = new Set(action.clipIds);
+      if (project.clips.filter((c) => ids.has(c.id)).length < 2) return project;
+      const clips = dissolveSingleClipGroups(project.clips.map((c) => (ids.has(c.id) && c.groupId !== action.groupId ? { ...c, groupId: action.groupId } : c)));
+      return clips.every((c, i) => c === project.clips[i]) ? project : { ...project, clips };
+    }
+
+    case 'ungroupClips': {
+      const ids = new Set(action.clipIds);
+      const clips = dissolveSingleClipGroups(project.clips.map((c) => (ids.has(c.id) && c.groupId != null ? withoutUndefined({ ...c, groupId: undefined }, ['groupId']) : c)));
+      return clips.every((c, i) => c === project.clips[i]) ? project : { ...project, clips };
     }
 
     case 'updateSettings': {
       if (!hasChanges(project.settings, action.patch)) return project;
-      return { ...project, settings: withoutUndefined({ ...project.settings, ...action.patch }, ['music']) };
+      return { ...project, settings: { ...project.settings, ...action.patch } };
+    }
+
+    case 'addMusicTracks': {
+      const { musicPlaylist } = project.settings;
+      if (action.tracks.length === 0) return project;
+      const ids = new Set(musicPlaylist.tracks.map((t) => t.id));
+      action.tracks.forEach(({ id }) => {
+        if (ids.has(id)) throw new Error(`Duplicate music track id ${id}`);
+        ids.add(id);
+      });
+      const tracks = [...musicPlaylist.tracks];
+      tracks.splice(action.index ?? tracks.length, 0, ...action.tracks);
+      return updateMusicPlaylist(project, { ...musicPlaylist, tracks });
+    }
+
+    case 'updateMusicTrack': {
+      const { musicPlaylist } = project.settings;
+      const index = musicPlaylist.tracks.findIndex((t) => t.id === action.trackId);
+      const track = musicPlaylist.tracks[index];
+      if (track == null || !hasChanges(track, action.patch)) return project;
+      const tracks = [...musicPlaylist.tracks];
+      tracks[index] = { ...track, ...action.patch };
+      return updateMusicPlaylist(project, { ...musicPlaylist, tracks });
+    }
+
+    case 'removeMusicTrack': {
+      const { musicPlaylist } = project.settings;
+      if (!musicPlaylist.tracks.some((t) => t.id === action.trackId)) return project;
+      return updateMusicPlaylist(project, { ...musicPlaylist, tracks: musicPlaylist.tracks.filter((t) => t.id !== action.trackId) });
+    }
+
+    case 'reorderMusicTracks': {
+      const { musicPlaylist } = project.settings;
+      const tracks = reorderById(musicPlaylist.tracks, action.ids);
+      return tracks === musicPlaylist.tracks ? project : updateMusicPlaylist(project, { ...musicPlaylist, tracks });
+    }
+
+    case 'updateMusicPlaylist': {
+      const { musicPlaylist } = project.settings;
+      if (!hasChanges(musicPlaylist, action.patch)) return project;
+      return updateMusicPlaylist(project, { ...musicPlaylist, ...action.patch });
     }
 
     case 'setLoudnessCache': {

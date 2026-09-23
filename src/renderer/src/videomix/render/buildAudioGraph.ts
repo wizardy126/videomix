@@ -23,12 +23,6 @@ export const LIMITER_CEILING = -1;
 export const DECLICK_DURATION = 0.01;
 /** The music fades out over max(this, D) at the end of the video (04-diseno §5.2). */
 export const MUSIC_FADE_OUT = 2;
-/**
- * Key of the music's loudness measurement in the `loudness` map (T12b): a clip id can never be this, so it's a safe
- * sentinel to piggyback the music's measurement on `buildAudioGraph`'s existing `loudness` parameter (additive: no new
- * parameter). Set by `ensureLoudness` when called with `music`.
- */
-export const MUSIC_LOUDNESS_KEY = '__music__';
 export const AUDIO_SAMPLE_RATE = 48000;
 
 // Extra input duration read after the clip (s), trimmed exactly in the graph (ADR-001 §6)
@@ -162,8 +156,9 @@ export interface AudioPass {
  * - per audible clip (not muted, with audio): `-vn -ss/-t` input → stereo 48 kHz → `volume` (normalization + gainDb)
  *   → equal-power `afade` in/out (see getPlacementFades) → `adelay` to its start;
  * - `amix` (normalize=0) → simultaneity compensation (getCompensationExpr) → pad to the video duration;
- * - optional music: looped with `-stream_loop -1`, trimmed, normalized like a clip plus `volumeDb` (T12b: 0 dB means
- *   as loud as the clips) and faded out;
+ * - optional music (the first track of `musicPlaylist`; the whole playlist is T27): looped with `-stream_loop -1` if
+ *   the playlist loops, trimmed, normalized like a clip plus the track's `volumeDb` (T12b: 0 dB means as loud as the
+ *   clips) and faded out;
  * - `alimiter` at `LIMITER_CEILING`, then the global fade in/out if `fadeInOut`.
  *
  * Without any audible clip the clips' mix is silence, so the output always has an audio track of the video's duration.
@@ -175,7 +170,7 @@ export interface AudioPass {
  * @param sourcePaths `sourceId` → media path (the same paths the loudness was measured on, `MixSource.absolutePath`).
  * @param duration exact output duration (frames / fps); defaults to `plan.duration`.
  * @param loudness measurements by clip id, from `ensureLoudness`. Every audible clip of the plan must have one. The
- *   music's measurement (T12b), if any, is under `MUSIC_LOUDNESS_KEY`; without one, only `volumeDb` applies. A sound
+ *   music track's measurement (T12b), if any, is under its track id; without one, only `volumeDb` applies. A sound
  *   overlay's (T21) is under its own overlay id, like a clip's.
  * @param overlays sound overlays to mix in (T21), with `overlayTimes` (`resolveOverlayTimes`'s result): each one is
  *   normalized to `LOUDNESS_TARGET` plus its `gainDb`, delayed to its resolved start and trimmed to its resolved end
@@ -190,7 +185,7 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
   plan: Pick<MixPlan, 'duration' | 'placements' | 'layouts'>,
   clips: AudioClip[],
   sourcePaths: Record<string, string>,
-  settings: Pick<MixSettings, 'transition' | 'fadeInOut' | 'music'>,
+  settings: Pick<MixSettings, 'transition' | 'fadeInOut' | 'musicPlaylist'>,
   duration?: number | undefined,
   loudness: Record<string, LoudnessMeasurement>,
   overlays?: Pick<SoundOverlay, 'id' | 'absolutePath' | 'gainDb'>[] | undefined,
@@ -249,14 +244,15 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
   }
 
   let mix = 'clips';
-  const { music } = settings;
+  const { musicPlaylist } = settings;
+  const [music] = musicPlaylist.tracks;
   if (music != null) {
     const inputIndex = inputs.length;
-    inputs.push([...(music.loop ? ['-stream_loop', '-1'] : []), '-vn', '-i', music.absolutePath]);
+    inputs.push([...(musicPlaylist.loop ? ['-stream_loop', '-1'] : []), '-vn', '-i', music.absolutePath]);
     const fadeOut = Math.min(Math.max(MUSIC_FADE_OUT, settings.transition.duration), totalDuration);
     // Normalized like the clips (T12b), so 0 dB means "as loud as the clips"; without a measurement (shouldn't happen
     // once ensureLoudness is called with the music), only volumeDb applies.
-    const musicMeasurement = loudness[MUSIC_LOUDNESS_KEY];
+    const musicMeasurement = loudness[music.id];
     const musicGain = musicMeasurement?.hasAudio === true ? getNormalizationGain(musicMeasurement) + music.volumeDb : music.volumeDb;
     filters.push(
       `[${inputIndex}:a:0]${[

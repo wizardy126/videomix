@@ -12,6 +12,7 @@ export function getOverlayTypeLabel(type: MixOverlayType) {
     case 'countdown': { return i18n.t('Countdown'); }
     case 'progressBar': { return i18n.t('Progress bar'); }
     case 'sound': { return i18n.t('Sound'); }
+    case 'text': { return i18n.t('Text'); }
     default: { return type; }
   }
 }

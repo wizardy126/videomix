@@ -8,7 +8,7 @@ import { readFileFfprobeMeta } from '../../ffmpeg';
 import type { WithErrorHandling } from '../../hooks/useErrorHandling';
 import type { EditOptions, UseMixProject } from './useMixProject';
 import useOverlaySoundDurations from './useOverlaySoundDurations';
-import { mixResolutions } from '../types';
+import { getOutputSize } from '../types';
 import type { MixOverlay } from '../types';
 import type { MixOverlayPatch, OverlayLayerMove } from '../projectReducer';
 import type { OverlayFileKind } from '../projectFile';
@@ -72,7 +72,7 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
   // Mix view cursor (s in the final video): where new overlays are placed, and the frame shown when not hovering
   const [cursorTime, setCursorTime] = useState(0);
 
-  const outputSize = mixResolutions[settings.resolution];
+  const outputSize = getOutputSize(settings.output);
 
   const add = useCallback((overlay: MixOverlay) => {
     addOverlay(overlay);
@@ -133,7 +133,7 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
       let fileKind: keyof typeof overlayFileExtensions = 'font';
       if (kind === 'media') fileKind = overlay.type === 'sound' ? 'sound' : 'image';
       let current: string | undefined;
-      if (kind === 'font') current = overlay.type === 'countdown' ? overlay.font?.absolutePath : undefined;
+      if (kind === 'font') current = overlay.type === 'countdown' || overlay.type === 'text' ? overlay.font?.absolutePath : undefined;
       else if (overlay.type === 'image' || overlay.type === 'sound') current = overlay.absolutePath;
       const filePath = await askForFile(fileKind, current != null ? dirname(current) : undefined);
       if (filePath == null) return;

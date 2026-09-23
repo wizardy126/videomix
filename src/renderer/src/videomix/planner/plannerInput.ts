@@ -1,6 +1,6 @@
 import { getAspectRange } from '../geometry';
 import { getClipDuration } from '../project';
-import { mixResolutions } from '../types';
+import { getOutputSize } from '../types';
 import type { MixClip, MixSettings } from '../types';
 import type { PlanMixInput, PlannerClip, PlannerSettings } from './types';
 
@@ -14,7 +14,7 @@ export function toPlannerClip(clip: MixClip): PlannerClip {
 }
 
 export function toPlannerSettings(settings: MixSettings): PlannerSettings {
-  const { width, height } = mixResolutions[settings.resolution];
+  const { width, height } = getOutputSize(settings.output);
   return {
     width,
     height,

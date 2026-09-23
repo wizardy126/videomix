@@ -21,6 +21,7 @@ import type { OverlayFrameBox, OverlayLaneItem } from '../overlayTimeline';
 import { getOverlayLaneLabel, getOverlayTimeWarningText } from '../overlayTexts';
 import { getLinkedCountdown } from '../overlays/anchors';
 import { getCountdownTextAt, getOverlayFrames } from '../overlays/overlayFrames';
+import { getTextOverlayFontSize } from '../overlays/factories';
 
 const { pathToFileURL } = window.require('@electron/remote').require('./index.js');
 
@@ -51,6 +52,7 @@ const overlayColors: Record<MixOverlay['type'], string> = {
   countdown: 'var(--orange-9)',
   progressBar: 'var(--grass-9)',
   sound: 'var(--purple-9)',
+  text: 'var(--amber-9)',
 };
 
 const toolbarButtonStyle: CSSProperties = { font: 'inherit', fontSize: '.75em', padding: '.1em .5em', border: '1px solid var(--gray-7)', borderRadius: '.3em', background: 'var(--gray-3)', color: 'var(--gray-12)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '.3em', whiteSpace: 'nowrap' };
@@ -190,6 +192,17 @@ const OverlayBoxContent = memo(({ frameBox, fps }: { frameBox: OverlayFrameBox, 
     return (
       <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: { left: 'flex-start', center: 'center', right: 'flex-end' }[overlay.align], color: overlay.color, fontSize: `${overlay.box.height * 100}cqh`, lineHeight: 1, whiteSpace: 'nowrap', fontWeight: 600, textShadow: overlay.border.width > 0 ? `0 0 1px ${overlay.border.color}, 0 0 1px ${overlay.border.color}` : undefined }}>
         {text}
+      </div>
+    );
+  }
+  if (overlay.type === 'text') {
+    // Approximate (no fades or entry animation): the render is T26's
+    return (
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', textAlign: overlay.align, color: overlay.color, fontSize: `${getTextOverlayFontSize(overlay) * 100}cqh`, lineHeight: 1, gap: `${overlay.lineSpacing}em`, whiteSpace: 'pre', fontWeight: 600, textShadow: overlay.border.width > 0 ? `0 0 1px ${overlay.border.color}, 0 0 1px ${overlay.border.color}` : undefined }}>
+        {overlay.text.split('\n').map((line, i) => (
+          // eslint-disable-next-line react/no-array-index-key
+          <div key={i}>{line}</div>
+        ))}
       </div>
     );
   }

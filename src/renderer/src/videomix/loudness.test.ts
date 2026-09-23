@@ -2,7 +2,6 @@ import { describe, expect, test, vi } from 'vitest';
 
 import { ensureLoudness, getLoudnessCacheKey, getSoundDurations } from './loudness';
 import type { LoudnessDeps } from './loudness';
-import { MUSIC_LOUDNESS_KEY } from './render/buildAudioGraph';
 import { createEmptyMixProject } from './types';
 import type { LoudnessMeasurement, MixClip, MixProject } from './types';
 
@@ -88,14 +87,14 @@ describe('ensureLoudness', () => {
     expect(deps2.measureLoudness).toHaveBeenCalledTimes(1);
   });
 
-  test('measures the music too, whole file, when asked (T12b)', async () => {
+  test('measures the music tracks too, whole file, under their track ids (T12b, T24)', async () => {
     const deps = makeDeps();
     const onCacheEntries = vi.fn();
     const project = makeProject([clip('c1', 's1', 0, 5)]);
-    const music = { absolutePath: '/media/m.mp3' };
-    const result = await ensureLoudness({ project, music, deps, onCacheEntries });
+    const musicTracks = [{ id: 'm1', absolutePath: '/media/m.mp3' }];
+    const result = await ensureLoudness({ project, musicTracks, deps, onCacheEntries });
 
-    expect(result[MUSIC_LOUDNESS_KEY]).toEqual(measurement(-20)); // start defaults to 0 in the mock
+    expect(result['m1']).toEqual(measurement(-20)); // start defaults to 0 in the mock
     expect(deps.measureLoudness).toHaveBeenCalledTimes(2);
     expect(deps.measureLoudness).toHaveBeenCalledWith({ filePath: '/media/m.mp3', abortSignal: undefined });
     expect(deps.stat).toHaveBeenCalledTimes(2); // one clip's file, one music file
@@ -103,7 +102,7 @@ describe('ensureLoudness', () => {
     // cached the second time
     const entries = onCacheEntries.mock.calls[0]![0] as Record<string, LoudnessMeasurement>;
     const deps2 = makeDeps();
-    const result2 = await ensureLoudness({ project: { ...project, loudnessCache: entries }, music, deps: deps2 });
+    const result2 = await ensureLoudness({ project: { ...project, loudnessCache: entries }, musicTracks, deps: deps2 });
     expect(result2).toEqual(result);
     expect(deps2.measureLoudness).not.toHaveBeenCalled();
   });

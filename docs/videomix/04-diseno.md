@@ -41,13 +41,16 @@ interface MixClip {
   minRect?: Rect | undefined,   // opcional; si falta, mín = máx
   muted: boolean,
   gainDb: number,          // ganancia manual adicional (0 por defecto)
+  pinTime?: number | undefined,  // v3 (A4): inicio fijado en el vídeo final (s)
+  groupId?: string | undefined,  // v3 (A4): los clips con el mismo id empiezan juntos (≥ 2 clips)
 }
 
 type TransitionType = 'fade' | 'dissolve' | 'fadeblack' | 'wipeleft' | 'wiperight' | 'wipeup' | 'wipedown'
   | 'slideleft' | 'slideright' | 'slideup' | 'slidedown' | 'smoothleft' | 'smoothright' | 'smoothup' | 'smoothdown' | 'circleopen';
 
 interface MixSettings {
-  resolution: '720p' | '1080p' | '2160p',   // 1080p
+  output: { aspect: '16:9' | '9:16' | '1:1', resolution: '720' | '1080' | '2160' },  // v3; 16:9, 1080 (lado corto, getOutputSize)
+  encoder: { codec: 'h264' | 'h265', hardware: 'auto' | 'none' | 'nvenc' | 'qsv' | 'videotoolbox' | 'vaapi' },  // v3; h264, auto
   fps: 24 | 25 | 30 | 50 | 60,              // 30
   crf: number,                              // 20
   preset: 'ultrafast' | 'veryfast' | 'fast' | 'medium' | 'slow',  // medium
@@ -58,11 +61,16 @@ interface MixSettings {
   transition: { type: TransitionType, duration: number },  // fade, 0.5
   fadeInOut: boolean,                       // true
   fill: { mode: 'blur' | 'color', color: string },          // blur, '#000000'
-  music?: { path: string, absolutePath: string, volumeDb: number, loop: boolean } | undefined,
+  musicPlaylist: {                                          // v3 (sustituye a `music?`, ver §9)
+    tracks: { id: string, path: string, absolutePath: string, volumeDb: number }[],  // [] = sin música
+    crossfade: number,                                      // 2 s
+    loop: boolean,                                          // true
+    ducking: { enabled: boolean, amountDb: number },        // false, −10 dB
+  },
 }
 
 interface MixProject {
-  version: 2,              // v1 (sin overlays) se migra al abrir, ver §8.1
+  version: 3,              // v1 (sin overlays) y v2 se migran al abrir, ver §8.1 y §9
   sources: MixSource[],
   clips: MixClip[],        // el orden del array es el orden de la lista
   settings: MixSettings,
@@ -325,11 +333,11 @@ Implementado en T12 (detalles y medidas en [T12](execution/T12-audio.md)); la no
   - **Silencio** (`input_i = -inf` o ≤ −70 LUFS, la puerta absoluta de EBU R128): `{ hasAudio: false }`.
   - **Sin `dual_mono`**: la mezcla convierte mono en estéreo con la matriz por defecto de swresample (−3 dB por canal), que conserva la sonoridad medida en un canal. Comprobado con el script de demo.
   - La medida guarda además `channels` y `channelLayout` (opcionales en el esquema) para aplicar `getFixChannelLayoutFilter` también al mezclar.
-- **Renderer**: `ensureLoudness({ project, music?, onProgress?, abortSignal?, onCacheEntries?, deps?, concurrency = 2 })` en `videomix/loudness.ts`.
+- **Renderer**: `ensureLoudness({ project, musicTracks?, sounds?, onProgress?, abortSignal?, onCacheEntries?, deps?, concurrency = 2 })` en `videomix/loudness.ts`.
   - Mide solo los clips no silenciados con duración > 0 cuya clave no está en `loudnessCache`; los clips con el mismo fichero y rango comparten medida.
-  - `music` (T12b, opcional, aditivo): `{ absolutePath }` de la música del proyecto. Si se pasa, mide también el fichero completo (clave propia, `getMusicLoudnessCacheKey`, con el rango centinela `[0, Infinity)` de `getLoudnessCacheKey`, que ningún clip real puede producir) y añade esa medida al mapa de salida bajo `MUSIC_LOUDNESS_KEY` (exportada por `render/buildAudioGraph.ts`). El tipo de retorno no cambia (`Record<string, LoudnessMeasurement>`), así que sigue encajando sin cambios en el cierre de T13 sobre `buildAudioGraph`.
+  - `musicTracks` (T12b; por pista desde T24): `{ id, absolutePath }[]` de las pistas de música. Mide cada fichero completo (clave de cache propia por fichero, `getMusicLoudnessCacheKey`, con el rango centinela `[0, Infinity)` de `getLoudnessCacheKey`, que ningún clip real puede producir) y añade cada medida al mapa de salida **bajo el id de su pista**. El tipo de retorno no cambia (`Record<string, LoudnessMeasurement>`).
   - `onCacheEntries` recibe las entradas nuevas (pasar `setLoudnessCache` de `useMixProject`), también las ya medidas si se cancela o falla.
-  - Devuelve las medidas **por id de clip** (más la de la música, si se pidió), la entrada de `buildAudioGraph`.
+  - Devuelve las medidas **por id de clip** (más las de las pistas de música y los sonidos, si se pidieron), la entrada de `buildAudioGraph`.
   - Cancelación: `abortSignal` llega a `runFfmpeg` como `cancelSignal`; `abortFfmpegs` también sirve.
 - **Clave de cache**: `sha1(absolutePath \n mtimeMs \n size \n start \n end)` en hexadecimal (`getLoudnessCacheKey`, Web Crypto), con `fs.stat` de `MixSource.absolutePath`.
 
@@ -342,7 +350,7 @@ buildAudioGraph({ plan, clips, sourcePaths, settings, duration?, loudness }): Au
 // clips: Pick<MixClip, 'id' | 'sourceId' | 'start' | 'muted' | 'gainDb'>[]
 // sourcePaths: sourceId → ruta (MixSource.absolutePath, la misma que se midió)
 // duration: duración exacta del vídeo (fotogramas / fps); por defecto plan.duration
-// loudness: medidas por id de clip (ensureLoudness); la de la música (T12b), si la hay, bajo MUSIC_LOUDNESS_KEY
+// loudness: medidas por id de clip (ensureLoudness); las de las pistas de música, bajo el id de cada pista (T24)
 // AudioPass = { inputs: string[][], filterComplex: string, outLabel: 'aout' }, igual que AudioGraph de T11
 ```
 
@@ -364,7 +372,7 @@ El `RenderClip` del *hook* no lleva `muted` ni `gainDb`, así que el llamador (T
    - Un clip cuenta desde la mitad de su fundido de entrada hasta la mitad del de salida: en una sustitución el entrante empieza a contar justo cuando el saliente deja de hacerlo, así que la ganancia no cambia. Con fundidos de potencia constante, la potencia se mantiene.
    - Cada cambio es una rampa lineal centrada en ese instante y tan larga como el fundido que lo causa. Se escribe como suma plana `g0 ± Δ·clip((t−a)/r,0,1) …`, sin `if()` anidados.
    - Se descartó la compensación por clip: exigiría también ganancias variables por clip.
-4. **Música**: `-stream_loop -1` si `loop`; `aresample`/`aformat`, `atrim` a la duración, `volume=<normalización + volumeDb>dB` (T12b: **normalizada como un clip** —mismos topes—, así que 0 dB suena tan alto como los clips; sin medida, solo `volumeDb`, con aviso en el código), `afade=t=out` final de `max(2 s, D)`; `amix` de 2 entradas con `normalize=0:duration=first`. Valor por defecto de `volumeDb` al elegir un fichero: −12 dB (`DEFAULT_MUSIC_VOLUME_DB`).
+4. **Música** (hasta T27, solo la primera pista de `musicPlaylist`): `-stream_loop -1` si `musicPlaylist.loop`; `aresample`/`aformat`, `atrim` a la duración, `volume=<normalización + volumeDb>dB` (T12b: **normalizada como un clip** —mismos topes—, así que 0 dB suena tan alto como los clips; sin medida, solo `volumeDb`, con aviso en el código), `afade=t=out` final de `max(2 s, D)`; `amix` de 2 entradas con `normalize=0:duration=first`. Valor por defecto de `volumeDb` al elegir un fichero: −12 dB (`DEFAULT_MUSIC_VOLUME_DB`).
 5. **Salida**: `atrim` a la duración, `alimiter=limit=−1 dBFS:level=disabled:latency=1` (`latency=1` compensa el retardo del *lookahead*: sin él, el audio llega 5 ms tarde), `afade` in/out global de `getGlobalFadeDuration(settings)` (= `D` si `fadeInOut`; el vídeo debe usar la misma) y `aformat` final estéreo 48 kHz.
 
 **Demo**: `node script/videomix/audioDemo.ts [--music] [--columns n]` mezcla los medios de T02 con el planificador real y mide la sonoridad integrada de cada tramo. Para cargar módulos del renderer desde Node, `script/videomix/rendererImports.ts` registra un *hook* de resolución (imports sin extensión e `import.meta.env`).
@@ -469,7 +477,7 @@ Requisitos: [01-requisitos §9](01-requisitos.md). Tareas: T19–T23.
 
 ### 8.1 Modelo (T19)
 
-`MixProject` pasa a **`version: 2`**, con migración automática desde v1 (`overlays: []`). Se guarda siempre en v2. Esquemas zod en `videomix/types.ts`; la lógica, en `videomix/overlays/`. Detalle completo y API en las notas de [T19](execution/T19-overlays-modelo.md).
+`MixProject` pasa a **`version: 2`**, con migración automática desde v1 (`overlays: []`). Desde T24 se guarda en v3 (§9). Esquemas zod en `videomix/types.ts`; la lógica, en `videomix/overlays/`. Detalle completo y API en las notas de [T19](execution/T19-overlays-modelo.md).
 
 ```ts
 type OverlayAnchor =
@@ -499,7 +507,8 @@ interface ProgressBarOverlay extends OverlayBase {
 }
 interface SoundOverlay extends OverlayBase { type: 'sound', path: string, absolutePath: string, gainDb: number }
 
-type MixOverlay = ImageOverlay | CountdownOverlay | ProgressBarOverlay | SoundOverlay;
+// v3 (T24, §9): TextOverlay { type: 'text', text, duration, box, align, color, font?, border, shadow?, lineSpacing, fadeIn, fadeOut, entry }
+type MixOverlay = ImageOverlay | CountdownOverlay | ProgressBarOverlay | SoundOverlay | TextOverlay;
 // MixProject.overlays: MixOverlay[]  (el orden es el orden de capas: el último va encima)
 ```
 
@@ -541,14 +550,14 @@ Implementado en `render/overlayFilters.ts` (grafo) y `overlays/overlayFrames.ts`
 
 Requisitos: [01-requisitos §10](01-requisitos.md). Resumen técnico; cada task-doc concreta los detalles.
 
-- **Formato v3** (T24): todos los cambios de modelo en una sola migración v2 → v3.
-  - `settings.output = { aspect: '16:9' | '9:16' | '1:1', resolution }` sustituye a `resolution`.
-  - `settings.encoder = { codec: 'h264' | 'h265', hardware: 'auto' | 'none' | 'nvenc' | 'qsv' | 'videotoolbox' | 'vaapi' }`.
-  - `settings.music` pasa a ser `settings.musicPlaylist = { tracks: { path, absolutePath, volumeDb }[], crossfade, loop, ducking: { enabled, amountDb } }`.
-  - Nuevo overlay `type: 'text'`.
-  - En los clips, `pinTime?: number` (fijar a un momento) y `groupId?: string` (agrupar).
+- **Formato v3** (T24, implementado): todos los cambios de modelo en una sola migración v2 → v3 (v1 → v2 → v3 encadenada). Se guarda siempre en v3. Detalle, API y decisiones en las notas de [T24](execution/T24-v2-modelo.md).
+  - `settings.output = { aspect: '16:9' | '9:16' | '1:1', resolution: '720' | '1080' | '2160' }` sustituye a `resolution` (`'1080p'` → `{ aspect: '16:9', resolution: '1080' }`). La resolución es el **lado corto**; tamaños exactos en `mixOutputSizes` y `getOutputSize(output)` (1280×720, 720×1280, 720×720…).
+  - `settings.encoder = { codec: 'h264' | 'h265', hardware: 'auto' | 'none' | 'nvenc' | 'qsv' | 'videotoolbox' | 'vaapi' }`, por defecto `h264` / `auto` (esquema en `src/common/videomix/encoder.ts`, para main). Hasta T25 el render usa siempre libx264.
+  - `settings.music?` pasa a ser `settings.musicPlaylist = { tracks: { id, path, absolutePath, volumeDb }[], crossfade: 2, loop, ducking: { enabled: false, amountDb: -10 } }`. La música de v2 se migra a una pista (id `'music'`) y conserva `loop`; sin música, `tracks: []`. La medida de sonoridad va por pista (clave de cache por fichero; en el mapa de `ensureLoudness`, bajo el id de la pista). Hasta T27, `buildAudioGraph` usa solo la primera pista.
+  - Nuevo overlay `type: 'text'`: `text` (multilínea con `\n`), `duration`, `box`, `align`, `color`, `font?`, `border`, `shadow?`, `lineSpacing` (fracción del tamaño de letra), `fadeIn`, `fadeOut` y `entry: { kind: 'none' | 'slide' | 'typewriter', from?: 'left' | 'right' | 'top' | 'bottom', duration }`. Las líneas y su separación llenan el alto de la caja (`getTextOverlayFontSize`). Lo dibuja T26; hasta entonces el render lo ignora y la mini vista lo muestra aproximado.
+  - En los clips, `pinTime?: number` (fijar a un momento) y `groupId?: string` (agrupar; un grupo necesita ≥ 2 clips: el reducer disuelve los grupos que se quedan con uno).
 
-  Los presets (B2) no van en el proyecto: se guardan en la configuración global (`configStore`).
+  Los presets (B2) no van en el proyecto: se guardan en la configuración global (`configStore`, T26). Su tipo, `OverlayStylePreset` (`src/common/videomix/overlayStyles.ts`), guarda solo propiedades de estilo; los esquemas de los overlays de texto, contador y barra se construyen a partir de los mismos esquemas de estilo.
 - **Salida vertical** (T29): el planificador trabaja en un **eje principal**.
   - En 9:16 se trasponen las proporciones (`a → 1/a`) y los recortes; el resultado son filas.
   - En 1:1 se prueban ambas disposiciones y se elige la de menor puntuación, o se fija por proyecto si hiciera falta.

@@ -7,7 +7,8 @@ import { showOpenDialog } from '../../dialogs';
 import { createEmptyMixProject } from '../types';
 import type { LoudnessMeasurement, MixClip, MixOverlay, MixProject, MixSettings } from '../types';
 import { createMixSource, mixProjectReducer } from '../projectReducer';
-import type { MixClipPatch, MixOverlayPatch, MixProjectAction, MixSourceRelink, OverlayLayerMove, ResolvedOverlayTimesForRemoval } from '../projectReducer';
+import type { MixClipPatch, MixMusicPlaylistPatch, MixMusicTrackPatch, MixOverlayPatch, MixProjectAction, MixSourceRelink, OverlayLayerMove, ResolvedOverlayTimesForRemoval } from '../projectReducer';
+import { createMusicTrack } from '../workspace';
 import * as history from '../projectHistory';
 import type { History } from '../projectHistory';
 import { loadMixProject, mixProjectExtension, saveMixProject } from '../projectFile';
@@ -111,6 +112,31 @@ export default function useMixProject() {
   }, [dispatch]);
   const reorderClips = useCallback((ids: string[]) => dispatch({ type: 'reorderClips', ids }), [dispatch]);
   const updateSettings = useCallback((patch: Partial<MixSettings>, options?: EditOptions) => dispatch({ type: 'updateSettings', patch }, options), [dispatch]);
+
+  // Pinned and grouped clips (A4, T30)
+  /** `undefined` unpins it. */
+  const setClipPinTime = useCallback((clipId: string, pinTime: number | undefined, options?: EditOptions) => dispatch({ type: 'setClipPinTime', clipId, pinTime }, options), [dispatch]);
+  /** Returns the new group id (nothing happens with fewer than 2 existing clips). */
+  const groupClips = useCallback((clipIds: string[]) => {
+    const groupId = nanoid();
+    dispatch({ type: 'groupClips', clipIds, groupId });
+    return groupId;
+  }, [dispatch]);
+  const ungroupClips = useCallback((clipIds: string[]) => dispatch({ type: 'ungroupClips', clipIds }), [dispatch]);
+
+  // Music playlist (C2, T27)
+  /** Adds audio files (absolute paths) as tracks, at `index` or at the end. Returns the new track ids. */
+  const addMusicTracks = useCallback((filePaths: string[], index?: number) => {
+    const tracks = filePaths.map((filePath) => createMusicTrack({ id: nanoid(), filePath }));
+    dispatch({ type: 'addMusicTracks', tracks, index });
+    return tracks.map((t) => t.id);
+  }, [dispatch]);
+  const updateMusicTrack = useCallback((trackId: string, patch: MixMusicTrackPatch, options?: EditOptions) => dispatch({ type: 'updateMusicTrack', trackId, patch }, options), [dispatch]);
+  const removeMusicTrack = useCallback((trackId: string) => dispatch({ type: 'removeMusicTrack', trackId }), [dispatch]);
+  const reorderMusicTracks = useCallback((ids: string[]) => dispatch({ type: 'reorderMusicTracks', ids }), [dispatch]);
+  const updateMusicPlaylist = useCallback((patch: MixMusicPlaylistPatch, options?: EditOptions) => dispatch({ type: 'updateMusicPlaylist', patch }, options), [dispatch]);
+  /** Points a track to a new file (e.g. a missing file located again), keeping its volume and place. */
+  const relinkMusicTrack = useCallback((trackId: string, filePath: string) => dispatch({ type: 'updateMusicTrack', trackId, patch: { path: filePath, absolutePath: filePath } }), [dispatch]);
 
   /** `overlay` comes from a `create*Overlay` factory (overlays/factories.ts), with e.g. `nanoid()` as id. */
   const addOverlay = useCallback((overlay: MixOverlay, index?: number) => dispatch({ type: 'addOverlay', overlay, index }), [dispatch]);
@@ -232,8 +258,8 @@ export default function useMixProject() {
   }, [clearRecovery, confirmDiscardChanges, resetProject]);
 
   /**
-   * Opens `filePath`, or asks for a .vmx. Returns undefined if canceled, else the missing sources/music,
-   * which the caller asks the user to locate (`relinkSource`).
+   * Opens `filePath`, or asks for a .vmx. Returns undefined if canceled, else the missing sources/music tracks/overlay
+   * files, which the caller asks the user to locate (`relinkSource`, `relinkMusicTrack`, `relinkOverlayFile`).
    */
   const userOpenProject = useCallback(async (filePath?: string): Promise<LoadedMixProject | undefined> => {
     if (!(await confirmDiscardChanges())) return undefined;
@@ -290,6 +316,15 @@ export default function useMixProject() {
     duplicateClip,
     reorderClips,
     updateSettings,
+    setClipPinTime,
+    groupClips,
+    ungroupClips,
+    addMusicTracks,
+    updateMusicTrack,
+    removeMusicTrack,
+    reorderMusicTracks,
+    updateMusicPlaylist,
+    relinkMusicTrack,
     addOverlay,
     updateOverlay,
     removeOverlay,

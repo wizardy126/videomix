@@ -19,7 +19,7 @@ const clip = (id: string, start: number, end: number): MixClip => ({
 
 test('getPlannerInput', () => {
   const project = { ...createEmptyMixProject(), clips: [clip('a', 1, 11), clip('bad', 5, 5)] };
-  project.settings.resolution = '720p';
+  project.settings.output = { aspect: '16:9', resolution: '720' };
   const input = getPlannerInput(project);
   expect(input.settings).toEqual({
     width: 1280, height: 720, maxColumns: 3, gap: 0, reorderWindow: 3, order: { mode: 'list', seed: 0 }, transitionDuration: 0.5,

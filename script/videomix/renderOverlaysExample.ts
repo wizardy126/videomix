@@ -59,9 +59,11 @@ interface ColumnPlacement { clipId: string, column: number, startTime: number, e
 interface LayoutKeyframe { time: number, transitionDuration: number, columns: { column: number, x: number, width: number }[], fills: { x: number, width: number }[] }
 interface MixPlan { width: number, height: number, duration: number, placements: ColumnPlacement[], layouts: LayoutKeyframe[], warnings: unknown[] }
 interface MixSettings {
-  resolution: string, fps: number, crf: number, preset: string, maxColumns: number, gap: { width: number, color: string },
+  output: { aspect: string, resolution: string }, fps: number, crf: number, preset: string, maxColumns: number, gap: { width: number, color: string },
   reorderWindow: number, order: { mode: string, seed: number }, transition: { type: string, duration: number }, fadeInOut: boolean,
   fill: { mode: string, color: string },
+  encoder: { codec: string, hardware: string },
+  musicPlaylist: { tracks: unknown[], crossfade: number, loop: boolean, ducking: { enabled: boolean, amountDb: number } },
 }
 interface RenderClip { id: string, sourceId: string, start: number, maxRect: Rect }
 interface AudioClip { id: string, sourceId: string, start: number, muted: boolean, gainDb: number }
@@ -196,7 +198,8 @@ const plan: MixPlan = {
 };
 
 const settings: MixSettings = {
-  resolution: '1080p',
+  output: { aspect: '16:9', resolution: '1080' },
+  encoder: { codec: 'h264', hardware: 'auto' },
   fps: FPS,
   crf: 23,
   preset: 'veryfast',
@@ -207,6 +210,7 @@ const settings: MixSettings = {
   transition: { type: 'fade', duration: 0.5 },
   fadeInOut: false,
   fill: { mode: 'color', color: '#000000' },
+  musicPlaylist: { tracks: [], crossfade: 2, loop: true, ducking: { enabled: false, amountDb: -10 } },
 };
 
 // Countdown: the factory's default box (top-right, 20%×10%). Progress bar: linked, so it takes the countdown's

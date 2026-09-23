@@ -1,7 +1,7 @@
 import { getPlannerInput } from '../planner/plannerInput';
 import { planMix } from '../planner/planMix';
 import type { MixPlan } from '../planner/types';
-import { mixResolutions } from '../types';
+import { getOutputSize } from '../types';
 import type { MixClip, MixProject, MixSettings } from '../types';
 import type { EncodingOptions } from './buildRenderJob';
 
@@ -99,7 +99,7 @@ export function planRender({ clips, settings }: Pick<MixProject, 'clips' | 'sett
   if (!preview) return { plan: planMix(input), settings };
 
   const { width, height } = PREVIEW_SIZE;
-  const gap = scaleGap(settings.gap.width, mixResolutions[settings.resolution].height, height);
+  const gap = scaleGap(settings.gap.width, getOutputSize(settings.output).height, height);
   const plan = planMix({ ...input, settings: { ...input.settings, width, height, gap } });
   return {
     plan,

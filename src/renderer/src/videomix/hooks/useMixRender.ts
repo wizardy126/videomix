@@ -123,11 +123,11 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     const usedSourceIds = new Set(project.clips.map((clip) => clip.sourceId));
     const filesToCheck = [
       ...project.sources.filter((source) => usedSourceIds.has(source.id)).map((source) => ({ name: source.name, filePath: source.absolutePath })),
-      ...(project.settings.music != null ? [{ name: path.basename(project.settings.music.absolutePath), filePath: project.settings.music.absolutePath }] : []),
+      ...project.settings.musicPlaylist.tracks.map((track) => ({ name: path.basename(track.absolutePath), filePath: track.absolutePath })),
       // overlay images, sounds and countdown fonts (T20)
       ...project.overlays.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => ({ name: overlay.name, filePath: file.absolutePath }))),
       // the bundled font, if used (a broken install would otherwise fail inside ffmpeg)
-      ...(project.overlays.some((overlay) => overlay.type === 'countdown' && overlay.font == null) ? [{ name: 'OpenSans-Bold.ttf', filePath: getDefaultOverlayFontPath() }] : []),
+      ...(project.overlays.some((overlay) => (overlay.type === 'countdown' || overlay.type === 'text') && overlay.font == null) ? [{ name: 'OpenSans-Bold.ttf', filePath: getDefaultOverlayFontPath() }] : []),
     ];
     const missing = (await Promise.all(filesToCheck.map(async (file) => ((await mainApi.pathExists(file.filePath)) ? undefined : file)))).filter((file) => file != null);
 
@@ -175,7 +175,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       setWorking({ text: i18n.t('Analyzing audio loudness'), abortController });
       setProgress(0);
       // Measures only what isn't cached yet; the new measurements are stored in the project (also when cancelled)
-      const loudness = await ensureLoudness({ project, music: project.settings.music, sounds: soundOverlays, onProgress: setProgress, abortSignal: abortController.signal, onCacheEntries: setLoudnessCache });
+      const loudness = await ensureLoudness({ project, musicTracks: project.settings.musicPlaylist.tracks, sounds: soundOverlays, onProgress: setProgress, abortSignal: abortController.signal, onCacheEntries: setLoudnessCache });
 
       // T21b: a sound overlay whose level couldn't be measured (very short or otherwise unusual file) still plays
       // (buildAudioGraph, at its manual gain only), but warn about it here instead of doing that silently.

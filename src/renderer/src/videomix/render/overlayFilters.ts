@@ -157,9 +157,13 @@ export function buildOverlayFilters({ overlays, times, defaultFontPath }: VideoG
     const hi = Math.min(frames.end, f1) - f0;
     if (hi <= lo) return;
     const raw = { start: frames.rawStart, end: frames.rawEnd };
-    if (overlay.type === 'image') addImage(overlay, raw, lo, hi);
-    else if (overlay.type === 'countdown') addCountdown(overlay, raw, lo, hi);
-    else addProgressBar(overlay, raw, lo, hi);
+    switch (overlay.type) {
+      case 'image': { addImage(overlay, raw, lo, hi); break; }
+      case 'countdown': { addCountdown(overlay, raw, lo, hi); break; }
+      case 'progressBar': { addProgressBar(overlay, raw, lo, hi); break; }
+      // todo text overlays (v3): rendered by T26
+      default:
+    }
   });
 
   return { inputs, filters, cv: out };

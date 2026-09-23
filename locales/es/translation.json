@@ -1208,5 +1208,13 @@
   "{{count}} overlay(s) anchored to what was removed now start at a fixed time_one": "{{count}} elemento anclado a lo que se ha borrado empieza ahora en un tiempo fijo",
   "{{count}} overlay(s) anchored to what was removed now start at a fixed time_other": "{{count}} elementos anclados a lo que se ha borrado empiezan ahora en un tiempo fijo",
   "{{numMissing}} overlay file(s) not found. Select the overlay in the Mix view and use \"Locate...\".": "No se encuentran {{numMissing}} fichero(s) de elementos. Selecciona el elemento en la vista \"Montaje\" y usa \"Localizar...\".",
-  "{{start}} to {{end}}": "De {{start}} a {{end}}"
+  "{{start}} to {{end}}": "De {{start}} a {{end}}",
+  "A group has clips fixed at different times": "Un grupo tiene clips fijados en momentos distintos",
+  "Clip \"{{clip}}\" is fixed after the end of the other clips: there will be a gap before it": "El clip \"{{clip}}\" está fijado después del final de los demás clips: habrá un hueco antes de él",
+  "Clip \"{{clip}}\" is the only clip of its group: it is not grouped": "El clip \"{{clip}}\" es el único de su grupo: no se agrupa",
+  "Clip \"{{clip}}\": its fixed start time is not valid": "Clip \"{{clip}}\": su momento fijado no es válido",
+  "Text \"{{overlay}}\" is empty": "El texto \"{{overlay}}\" está vacío",
+  "Text \"{{overlay}}\": choose the side it slides in from": "Texto \"{{overlay}}\": elige el lado desde el que entra",
+  "Text \"{{overlay}}\": its entry animation is longer than its duration": "Texto \"{{overlay}}\": su animación de entrada dura más que el texto",
+  "The project has duplicate music track ids": "El proyecto tiene ids de pista de música duplicados"
 }

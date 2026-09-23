@@ -1,5 +1,5 @@
 import { OVERLAY_REFERENCE_HEIGHT } from '../types';
-import type { CountdownOverlay, ImageOverlay, OverlayAnchor, OverlayBox, ProgressBarOverlay, SoundOverlay } from '../types';
+import type { CountdownOverlay, ImageOverlay, OverlayAnchor, OverlayBox, ProgressBarOverlay, SoundOverlay, TextOverlay } from '../types';
 
 // Defaults for new overlays (T22 places them at the Mix view cursor with an absolute anchor).
 
@@ -8,6 +8,7 @@ export const OVERLAY_MARGIN = 0.03;
 
 export const DEFAULT_IMAGE_DURATION = 5;
 export const DEFAULT_COUNTDOWN_DURATION = 10;
+export const DEFAULT_TEXT_DURATION = 5;
 
 export type OverlayBoxPreset = 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight' | 'center' | 'fullScreen';
 
@@ -93,6 +94,35 @@ export function createProgressBarOverlay({ id, name, start = 0, linkedCountdownI
     direction: 'ltr',
     mode: 'fill',
   };
+}
+
+/** Centered white text with a black border and the bundled font, fading in and out, without an entry animation. */
+export function createTextOverlay({ id, name, start = 0, text }: CommonParams & { text: string }): TextOverlay {
+  return {
+    id,
+    name,
+    type: 'text',
+    anchor: absoluteAnchor(start),
+    text,
+    duration: DEFAULT_TEXT_DURATION,
+    box: getOverlayBoxPreset('center', { width: 0.6, height: 0.1 }),
+    align: 'center',
+    color: '#ffffff',
+    border: { width: 4, color: '#000000' },
+    lineSpacing: 0.2,
+    fadeIn: 0.5,
+    fadeOut: 0.5,
+    entry: { kind: 'none', duration: 0.5 },
+  };
+}
+
+/**
+ * Font size of a text overlay, as a fraction of the output height: its lines (and the `lineSpacing` between them) fill
+ * the box height, so one line is as high as the box (like the countdown).
+ */
+export function getTextOverlayFontSize({ text, box, lineSpacing }: Pick<TextOverlay, 'text' | 'box' | 'lineSpacing'>) {
+  const lines = text.split('\n').length;
+  return box.height / (lines + (lines - 1) * lineSpacing);
 }
 
 /** 0 dB = as loud as the clips (after normalization). */

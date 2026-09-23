@@ -2,10 +2,10 @@ import { describe, test, expect } from 'vitest';
 import JSON5 from 'json5';
 import { ZodError } from 'zod';
 
-import { clipsBySource, getClipDuration, parseMixProject, validateMixProject } from './project';
-import { createEmptyMixProject, defaultMixSettings, transitionTypes } from './types';
-import type { MixClip, MixOverlay, MixProject } from './types';
-import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay } from './overlays/factories';
+import { MIGRATED_MUSIC_TRACK_ID, clipsBySource, getClipDuration, parseMixProject, validateMixProject } from './project';
+import { createEmptyMixProject, defaultMixSettings, defaultMusicPlaylist, getOutputSize, mixOutputAspects, mixOutputResolutions, transitionTypes } from './types';
+import type { MixClip, MixOverlay, MixProject, MixSettings, TextOverlay } from './types';
+import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay, createTextOverlay } from './overlays/factories';
 
 function makeClip(overrides: Partial<MixClip> = {}): MixClip {
   return {
@@ -33,13 +33,42 @@ function makeProject(clips: MixClip[] = [makeClip()]): MixProject {
   };
 }
 
+// Settings as saved by v1/v2 builds (before T24): `resolution` and an optional single `music`
+const { output, encoder, musicPlaylist, ...unchangedSettings } = defaultMixSettings;
+const legacySettings = { ...unchangedSettings, resolution: '1080p' };
+const migratedSettings = (overrides: Partial<MixSettings> = {}): MixSettings => ({ ...defaultMixSettings, ...overrides });
+
 describe('types', () => {
   test('createEmptyMixProject', () => {
     const project = createEmptyMixProject();
-    expect(project).toEqual({ version: 2, sources: [], clips: [], settings: defaultMixSettings, overlays: [] });
+    expect(project).toEqual({ version: 3, sources: [], clips: [], settings: defaultMixSettings, overlays: [] });
     // must not share nested objects with the defaults
     project.settings.gap.width = 10;
+    project.settings.musicPlaylist.ducking.amountDb = 0;
+    project.settings.encoder.codec = 'h265';
     expect(defaultMixSettings.gap.width).toBe(0);
+    expect(defaultMusicPlaylist.ducking.amountDb).toBe(-10);
+    expect(defaultMixSettings.encoder.codec).toBe('h264');
+  });
+
+  test('defaults: 16:9 1080p, H.264 with automatic encoder, no music', () => {
+    expect(output).toEqual({ aspect: '16:9', resolution: '1080' });
+    expect(encoder).toEqual({ codec: 'h264', hardware: 'auto' });
+    expect(musicPlaylist).toEqual({ tracks: [], crossfade: 2, loop: true, ducking: { enabled: false, amountDb: -10 } });
+  });
+
+  test('output sizes: the resolution is the short side', () => {
+    expect(getOutputSize({ aspect: '16:9', resolution: '720' })).toEqual({ width: 1280, height: 720 });
+    expect(getOutputSize({ aspect: '16:9', resolution: '2160' })).toEqual({ width: 3840, height: 2160 });
+    expect(getOutputSize({ aspect: '9:16', resolution: '1080' })).toEqual({ width: 1080, height: 1920 });
+    expect(getOutputSize({ aspect: '1:1', resolution: '720' })).toEqual({ width: 720, height: 720 });
+    mixOutputAspects.forEach((aspect) => mixOutputResolutions.forEach((resolution) => {
+      const { width, height } = getOutputSize({ aspect, resolution });
+      expect(Math.min(width, height)).toBe(Number(resolution));
+      expect([width % 2, height % 2]).toEqual([0, 0]);
+      const [w, h] = aspect.split(':').map(Number);
+      expect(width / height).toBeCloseTo(w! / h!, 10);
+    }));
   });
 
   test('transition list', () => {
@@ -57,7 +86,19 @@ describe('parseMixProject', () => {
         k2: { hasAudio: false },
       },
     };
-    project.settings.music = { path: 'm.mp3', absolutePath: '/m.mp3', volumeDb: -6, loop: true };
+    project.settings.musicPlaylist = {
+      tracks: [{ id: 't1', path: 'm.mp3', absolutePath: '/m.mp3', volumeDb: -6 }, { id: 't2', path: 'n.mp3', absolutePath: '/n.mp3', volumeDb: 0 }],
+      crossfade: 3,
+      loop: false,
+      ducking: { enabled: true, amountDb: -12 },
+    };
+    project.settings.output = { aspect: '9:16', resolution: '720' };
+    project.settings.encoder = { codec: 'h265', hardware: 'nvenc' };
+    expect(parseMixProject(JSON5.parse(JSON5.stringify(project)))).toEqual(project);
+  });
+
+  test('round trip with pinned and grouped clips', () => {
+    const project = makeProject([makeClip({ pinTime: 12.5 }), makeClip({ id: 'c2', groupId: 'g' }), makeClip({ id: 'c3', groupId: 'g', pinTime: 0 })]);
     expect(parseMixProject(JSON5.parse(JSON5.stringify(project)))).toEqual(project);
   });
 
@@ -70,17 +111,54 @@ describe('parseMixProject', () => {
         shadowed,
         createProgressBarOverlay({ id: 'o3', name: 'Bar', linkedCountdownId: 'o2' }),
         { ...createSoundOverlay({ id: 'o4', name: 'Beep', filePath: '/beep.wav' }), anchor: { kind: 'element', elementId: 'o2', edge: 'end', offset: 0 } },
+        createTextOverlay({ id: 'o5', name: 'Title', text: 'Line 1\nLine 2' }),
+        {
+          ...createTextOverlay({ id: 'o6', name: 'Styled', text: 'Hi', start: 2 }),
+          font: { path: 'f.ttf', absolutePath: '/f.ttf' },
+          shadow: { x: 3, y: 3, color: '#000000' },
+          align: 'left',
+          entry: { kind: 'slide', from: 'left', duration: 0.8 },
+        },
       ],
     };
     expect(parseMixProject(JSON5.parse(JSON5.stringify(project)))).toEqual(project);
   });
 
-  test('migrates v1 to v2 without losing anything', () => {
+  test('migrates v1 to v3 without losing anything', () => {
     const { overlays, ...rest } = makeProject();
     expect(overlays).toEqual([]);
-    const v1 = { ...structuredClone(rest), version: 1, loudnessCache: { k: { hasAudio: false } } };
+    const v1 = { ...structuredClone(rest), version: 1, settings: { ...legacySettings, resolution: '2160p' }, loudnessCache: { k: { hasAudio: false } } };
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v1)));
-    expect(parsed).toEqual({ ...v1, version: 2, overlays: [] });
+    expect(parsed).toEqual({ ...v1, version: 3, settings: migratedSettings({ output: { aspect: '16:9', resolution: '2160' } }), overlays: [] });
+  });
+
+  test('migrates v2 to v3 without losing anything: 16:9, H.264, the music as a single track', () => {
+    const project = makeProject([makeClip(), makeClip({ id: 'c2' })]);
+    const v2 = {
+      ...structuredClone(project),
+      version: 2,
+      settings: { ...legacySettings, resolution: '720p', music: { path: 'm.mp3', absolutePath: '/m.mp3', volumeDb: -6, loop: false } },
+      loudnessCache: { k: { hasAudio: false } },
+      overlays: [createImageOverlay({ id: 'o1', name: 'Logo', filePath: '/logo.png' }), createCountdownOverlay({ id: 'o2', name: 'Countdown' })],
+    };
+    const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v2)));
+    expect(parsed).toEqual({
+      ...v2,
+      version: 3,
+      settings: migratedSettings({
+        output: { aspect: '16:9', resolution: '720' },
+        musicPlaylist: { ...defaultMusicPlaylist, tracks: [{ id: MIGRATED_MUSIC_TRACK_ID, path: 'm.mp3', absolutePath: '/m.mp3', volumeDb: -6 }], loop: false },
+      }),
+    });
+    expect('resolution' in parsed.settings || 'music' in parsed.settings).toBe(false);
+
+    // without music: an empty playlist
+    const noMusic: Record<string, unknown> = { ...v2.settings };
+    delete noMusic['music'];
+    expect(parseMixProject({ ...v2, settings: noMusic }).settings).toEqual(migratedSettings({ output: { aspect: '16:9', resolution: '720' } }));
+    // a v2 file without `resolution` (older build): the default output
+    delete noMusic['resolution'];
+    expect(parseMixProject({ ...v2, settings: noMusic }).settings.output).toEqual(defaultMixSettings.output);
   });
 
   test('opens a v1 file saved by an older build', () => {
@@ -92,13 +170,17 @@ describe('parseMixProject', () => {
         order: { mode: 'random', seed: 7 }, transition: { type: 'dissolve', duration: 0.3 }, fadeInOut: false, fill: { mode: 'color', color: '#000000' } },
     }`;
     const json = JSON5.parse(text);
-    expect(parseMixProject(json)).toEqual({ ...json, version: 2, overlays: [] });
+    const { resolution, ...settings } = json.settings;
+    expect(resolution).toBe('720p');
+    expect(parseMixProject(json)).toEqual({ ...json, version: 3, settings: { ...settings, output: { aspect: '16:9', resolution: '720' }, encoder: defaultMixSettings.encoder, musicPlaylist: defaultMusicPlaylist }, overlays: [] });
   });
 
   test('fills missing settings from defaults', () => {
     const settings: Record<string, unknown> = { ...defaultMixSettings, fps: 60 };
     delete settings['fadeInOut'];
-    const parsed = parseMixProject({ version: 1, sources: [], clips: [], settings });
+    delete settings['encoder'];
+    const parsed = parseMixProject({ version: 3, sources: [], clips: [], settings, overlays: [] });
+    expect(parsed.settings.encoder).toEqual({ codec: 'h264', hardware: 'auto' });
     expect(parsed.settings.fadeInOut).toBe(true);
     expect(parsed.settings.fps).toBe(60);
   });
@@ -109,7 +191,7 @@ describe('parseMixProject', () => {
     expect(() => parseMixProject({ sources: [] })).toThrow('missing version');
     expect(() => parseMixProject({ version: '1' })).toThrow('missing version');
     expect(() => parseMixProject({ version: 0 })).toThrow('missing version');
-    expect(() => parseMixProject({ ...createEmptyMixProject(), version: 3 })).toThrow('newer than supported');
+    expect(() => parseMixProject({ ...createEmptyMixProject(), version: 4 })).toThrow('newer than supported');
   });
 
   // Each case returns a copy of a valid project with one thing broken.
@@ -128,7 +210,18 @@ describe('parseMixProject', () => {
     ['negative rect', broken((p) => Object.assign(p.clips[0]!.maxRect, { x: -2 }))],
     ['missing clip field', broken((p) => Reflect.deleteProperty(p.clips[0]!, 'muted'))],
     ['bad loudness', broken((p) => Object.assign(p, { loudnessCache: { k: { hasAudio: true } } }))],
-    ['v2 without overlays', broken((p) => Reflect.deleteProperty(p, 'overlays'))],
+    ['without overlays', broken((p) => Reflect.deleteProperty(p, 'overlays'))],
+    ['unknown aspect', broken((p) => Object.assign(p.settings.output, { aspect: '4:3' }))],
+    ['unknown resolution', broken((p) => Object.assign(p.settings.output, { resolution: '1440' }))],
+    ['unknown resolution (v2)', () => ({ ...makeProject(), version: 2, settings: { ...legacySettings, resolution: '1440p' } })],
+    ['unknown codec', broken((p) => Object.assign(p.settings.encoder, { codec: 'av1' }))],
+    ['unknown hardware encoder', broken((p) => Object.assign(p.settings.encoder, { hardware: 'amf' }))],
+    ['music track without id', broken((p) => p.settings.musicPlaylist.tracks.push({ path: 'm.mp3', absolutePath: '/m.mp3', volumeDb: 0 } as never))],
+    ['negative crossfade', broken((p) => Object.assign(p.settings.musicPlaylist, { crossfade: -1 }))],
+    ['empty group id', broken((p) => Object.assign(p.clips[0]!, { groupId: '' }))],
+    ['bad text entry', broken((p) => p.overlays.push({ ...createTextOverlay({ id: 'o', name: '', text: 'a' }), entry: { kind: 'bounce', duration: 1 } } as unknown as MixOverlay))],
+    ['bad text entry side', broken((p) => p.overlays.push({ ...createTextOverlay({ id: 'o', name: '', text: 'a' }), entry: { kind: 'slide', from: 'center', duration: 1 } } as unknown as MixOverlay))],
+    ['negative line spacing', broken((p) => p.overlays.push({ ...createTextOverlay({ id: 'o', name: '', text: 'a' }), lineSpacing: -1 }))],
     ['unknown overlay type', broken((p) => p.overlays.push({ ...createSoundOverlay({ id: 'o', name: '', filePath: '/a' }), type: 'video' } as unknown as MixOverlay))],
     ['bad overlay color', broken((p) => p.overlays.push({ ...createCountdownOverlay({ id: 'o', name: '' }), color: 'white' }))],
     ['bad countdown decimals', broken((p) => p.overlays.push({ ...createCountdownOverlay({ id: 'o', name: '' }), decimals: 4 } as unknown as MixOverlay))],
@@ -202,6 +295,33 @@ describe('validateMixProject', () => {
     expect(codes(project)).toEqual(['odd-gap']);
   });
 
+  test('pinned clips (v3)', () => {
+    // c1 lasts 4 s, c2 6 s: c1 can start at most at 6 s without a gap before it
+    const withPin = (pinTime: number) => makeProject([makeClip({ pinTime }), makeClip({ id: 'c2', start: 0, end: 6 })]);
+    expect(codes(withPin(0))).toEqual([]);
+    expect(codes(withPin(6))).toEqual([]);
+    expect(validateMixProject(withPin(6.5))).toMatchObject([{ level: 'warning', code: 'pin-time-after-end', clipId: 'c1' }]);
+    expect(validateMixProject(withPin(-1))).toMatchObject([{ level: 'error', code: 'pin-time-out-of-range', clipId: 'c1' }]);
+    expect(codes(withPin(Number.NaN))).toEqual(['pin-time-out-of-range']);
+  });
+
+  test('grouped clips (v3)', () => {
+    const clips = [makeClip({ groupId: 'g' }), makeClip({ id: 'c2', groupId: 'g' }), makeClip({ id: 'c3', groupId: 'h' })];
+    expect(validateMixProject(makeProject(clips))).toMatchObject([{ level: 'warning', code: 'group-too-small', groupId: 'h', clipId: 'c3' }]);
+    expect(codes(makeProject(clips.slice(0, 2)))).toEqual([]);
+    // pinned at different times
+    const pinned = [makeClip({ groupId: 'g', pinTime: 1 }), makeClip({ id: 'c2', groupId: 'g', pinTime: 2 })];
+    expect(validateMixProject(makeProject(pinned))).toMatchObject([{ level: 'warning', code: 'group-pin-conflict', groupId: 'g' }]);
+    expect(codes(makeProject([makeClip({ groupId: 'g', pinTime: 1 }), makeClip({ id: 'c2', groupId: 'g' })]))).toEqual([]);
+  });
+
+  test('music tracks (v3)', () => {
+    const project = makeProject();
+    const track = { id: 't', path: '/m.mp3', absolutePath: '/m.mp3', volumeDb: 0 };
+    project.settings.musicPlaylist = { ...project.settings.musicPlaylist, tracks: [track, { ...track, path: '/n.mp3', absolutePath: '/n.mp3' }] };
+    expect(validateMixProject(project)).toMatchObject([{ level: 'error', code: 'duplicate-music-track-id', trackId: 't' }]);
+  });
+
   describe('overlays', () => {
     const withOverlays = (...overlays: MixOverlay[]) => ({ ...makeProject(), overlays });
     const countdown = (overrides: Partial<MixOverlay> = {}) => ({ ...createCountdownOverlay({ id: 'cd', name: 'Countdown' }), ...overrides }) as MixOverlay;
@@ -212,6 +332,7 @@ describe('validateMixProject', () => {
         countdown(),
         createProgressBarOverlay({ id: 'b', name: 'Bar', linkedCountdownId: 'cd' }),
         createSoundOverlay({ id: 's', name: 'Sound', filePath: '/a.wav' }),
+        createTextOverlay({ id: 't', name: 'Text', text: 'Hello' }),
       ))).toEqual([]);
     });
 
@@ -264,6 +385,21 @@ describe('validateMixProject', () => {
       // a linked bar's own duration is not used
       expect(codes(withOverlays(countdown(), { ...createProgressBarOverlay({ id: 'b', name: '', linkedCountdownId: 'cd' }), duration: 0 }))).toEqual([]);
       expect(codes(withOverlays({ ...createProgressBarOverlay({ id: 'b', name: '' }), duration: 0 }))).toEqual(['overlay-invalid-duration']);
+    });
+
+    test('texts (v3)', () => {
+      const text = (overrides: Partial<TextOverlay> = {}) => ({ ...createTextOverlay({ id: 't', name: 'Text', text: 'Hello' }), ...overrides });
+      expect(validateMixProject(withOverlays(text({ text: ' \n ' })))).toMatchObject([{ level: 'warning', code: 'overlay-empty-text', overlayId: 't' }]);
+      expect(validateMixProject(withOverlays(text({ entry: { kind: 'slide', duration: 1 } })))).toMatchObject([{ level: 'error', code: 'overlay-invalid-entry' }]);
+      expect(codes(withOverlays(text({ entry: { kind: 'slide', from: 'top', duration: 1 } })))).toEqual([]);
+      expect(codes(withOverlays(text({ entry: { kind: 'typewriter', duration: 1 } })))).toEqual([]);
+      expect(codes(withOverlays(text({ duration: 2, entry: { kind: 'typewriter', duration: 3 } })))).toEqual(['overlay-entry-too-long']);
+      // no entry animation: its duration doesn't matter
+      expect(codes(withOverlays(text({ duration: 2, entry: { kind: 'none', duration: 3 } })))).toEqual([]);
+      expect(codes(withOverlays(text({ duration: 1, fadeIn: 0.6, fadeOut: 0.6 })))).toEqual(['overlay-fades-too-long']);
+      expect(codes(withOverlays(text({ duration: 0 })))).toEqual(['overlay-invalid-duration']);
+      expect(codes(withOverlays(text({ box: { x: 0.5, y: 0, width: 0.6, height: 0.1 } })))).toEqual(['overlay-box-out-of-range']);
+      expect(codes(withOverlays(text({ shadow: { x: 1, y: 1, color: 'black' } })))).toEqual(['overlay-invalid-color']);
     });
 
     test('colors (for projects not built by the schema)', () => {

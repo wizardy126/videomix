@@ -31,6 +31,14 @@ export function getIssueText(issue: MixProjectIssue, clipName: string | undefine
     case 'overlay-invalid-duration': { return i18n.t('Overlay "{{overlay}}": the duration must be greater than 0', { overlay }); }
     case 'overlay-invalid-color': { return i18n.t('Overlay "{{overlay}}": invalid color', { overlay }); }
     case 'overlay-fades-too-long': { return i18n.t('Overlay "{{overlay}}": its fades are longer than its duration', { overlay }); }
+    case 'overlay-empty-text': { return i18n.t('Text "{{overlay}}" is empty', { overlay }); }
+    case 'overlay-invalid-entry': { return i18n.t('Text "{{overlay}}": choose the side it slides in from', { overlay }); }
+    case 'overlay-entry-too-long': { return i18n.t('Text "{{overlay}}": its entry animation is longer than its duration', { overlay }); }
+    case 'pin-time-out-of-range': { return i18n.t('Clip "{{clip}}": its fixed start time is not valid', { clip }); }
+    case 'pin-time-after-end': { return i18n.t('Clip "{{clip}}" is fixed after the end of the other clips: there will be a gap before it', { clip }); }
+    case 'group-too-small': { return i18n.t('Clip "{{clip}}" is the only clip of its group: it is not grouped', { clip }); }
+    case 'group-pin-conflict': { return i18n.t('A group has clips fixed at different times'); }
+    case 'duplicate-music-track-id': { return i18n.t('The project has duplicate music track ids'); }
     default: { return issue.message; }
   }
 }

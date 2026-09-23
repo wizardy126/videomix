@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import i18n from 'i18next';
+import { nanoid } from 'nanoid';
 
 import mainApi from '../../mainApi';
 import getSwal, { errorToast } from '../../swal';
@@ -13,7 +14,7 @@ import type { UseMixProject } from './useMixProject';
 import type { LoadedMixProject, MissingOverlayFile, OverlayFileKind } from '../projectFile';
 import { getOverlayFiles } from '../projectFile';
 import { askForRecoverProject } from '../dialogs';
-import { classifyOpenedPaths, countClipsBySource, createMusic, getMixProjectTitle, getSourceMeta, isSourceMetaChanged } from '../workspace';
+import { classifyOpenedPaths, countClipsBySource, getMixProjectTitle, getSourceMeta, isSourceMetaChanged, replaceMusic } from '../workspace';
 
 const { basename, dirname } = window.require('node:path');
 
@@ -36,7 +37,7 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   withErrorHandling: WithErrorHandling,
   confirmDialog: ConfirmDialog,
 }) {
-  const { project, addSources, removeSource, relinkSource, updateSettings, setSourceMeta, relinkOverlayFile } = mixProject;
+  const { project, addSources, removeSource, relinkSource, updateSettings, setSourceMeta, relinkOverlayFile, relinkMusicTrack } = mixProject;
 
   // Sources whose file wasn't found (when opening/recovering the project or activating the source)
   const [missingSourceIds, setMissingSourceIds] = useState<ReadonlySet<string>>(new Set());
@@ -154,33 +155,39 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     setSourceMissing(sourceId, false);
   }, [clipCountBySource, closeMedia, confirmDialog, currentSourceId, project.sources, removeSource, setSourceMissing, workingRef]);
 
+  // Until the playlist UI (T27), an opened audio file replaces the whole music (as when there was a single music file)
   const askToUseAsMusic = useCallback(async (musicPath: string) => {
-    const { music } = project.settings;
+    const { musicPlaylist } = project.settings;
     const name = basename(musicPath);
     const confirmed = await confirmDialog({
       title: i18n.t('Project music'),
-      description: music != null
+      description: musicPlaylist.tracks.length > 0
         ? i18n.t('Replace the project music with "{{name}}"?', { name })
         : i18n.t('Use "{{name}}" as the project music? It will be mixed with the audio of the clips.', { name }),
       confirmButtonText: i18n.t('Use as music'),
       focusConfirm: true,
     });
-    if (confirmed) updateSettings({ music: createMusic(musicPath, music) });
+    if (confirmed) updateSettings({ musicPlaylist: replaceMusic(musicPlaylist, { id: nanoid(), filePath: musicPath, loopIfNew: false }) });
   }, [confirmDialog, project.settings, updateSettings]);
 
+  // One question per missing track, in play order
   const askToLocateMusic = useCallback(async (loaded: LoadedMixProject) => {
-    const { music } = loaded.project.settings;
-    if (!loaded.missingMusic || music == null) return;
-    if (!(await confirmDialog({
-      title: i18n.t('Project music'),
-      description: i18n.t('The music file of the project was not found: {{path}}. Do you want to locate it?', { path: music.absolutePath }),
-      confirmButtonText: i18n.t('Locate...'),
-    }))) return;
-    const { canceled, filePaths } = await showOpenDialog({ properties: ['openFile'], defaultPath: dirname(music.absolutePath), title: i18n.t('Project music') });
-    const [newPath] = filePaths;
-    if (canceled || newPath == null) return;
-    updateSettings({ music: createMusic(newPath, music) });
-  }, [confirmDialog, updateSettings]);
+    const missingIds = new Set(loaded.missingMusicTrackIds);
+    for (const track of loaded.project.settings.musicPlaylist.tracks.filter((t) => missingIds.has(t.id))) {
+      // eslint-disable-next-line no-await-in-loop
+      const confirmed = await confirmDialog({
+        title: i18n.t('Project music'),
+        description: i18n.t('The music file of the project was not found: {{path}}. Do you want to locate it?', { path: track.absolutePath }),
+        confirmButtonText: i18n.t('Locate...'),
+      });
+      if (confirmed) {
+        // eslint-disable-next-line no-await-in-loop
+        const { canceled, filePaths } = await showOpenDialog({ properties: ['openFile'], defaultPath: dirname(track.absolutePath), title: i18n.t('Project music') });
+        const [newPath] = filePaths;
+        if (!canceled && newPath != null) relinkMusicTrack(track.id, newPath);
+      }
+    }
+  }, [confirmDialog, relinkMusicTrack]);
 
   // After new/open/recover: the old file isn't part of the new project, so unload it, then show the first source found
   const handleProjectReplaced = useCallback(async (loaded: LoadedMixProject | undefined) => {

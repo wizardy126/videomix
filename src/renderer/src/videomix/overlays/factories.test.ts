@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
 
-import { OVERLAY_MARGIN, createCountdownOverlay, createProgressBarOverlay, getOverlayBoxPreset, overlayPxToOutput } from './factories';
+import { OVERLAY_MARGIN, createCountdownOverlay, createProgressBarOverlay, createTextOverlay, getOverlayBoxPreset, getTextOverlayFontSize, overlayPxToOutput } from './factories';
 import { mixOverlaySchema } from '../types';
 
 describe('overlay factories', () => {
@@ -28,5 +28,20 @@ describe('overlay factories', () => {
   test('reference px', () => {
     expect(overlayPxToOutput(4, 1080)).toBe(4);
     expect(overlayPxToOutput(4, 720)).toBeCloseTo(2.667, 3);
+  });
+
+  test('text (v3)', () => {
+    const text = createTextOverlay({ id: 't', name: 'Title', start: -2, text: 'Hello' });
+    expect(mixOverlaySchema.parse(text)).toEqual(text);
+    expect(text).toMatchObject({ anchor: { kind: 'absolute', time: 0 }, align: 'center', entry: { kind: 'none' } });
+    expect('font' in text || 'shadow' in text).toBe(false);
+  });
+
+  test('text font size: the lines and their spacing fill the box height', () => {
+    const box = { x: 0, y: 0, width: 1, height: 0.1 };
+    expect(getTextOverlayFontSize({ text: 'one line', box, lineSpacing: 0.2 })).toBeCloseTo(0.1, 10);
+    // 3 lines + 2 gaps of 0.25 = 3.5 font sizes
+    expect(getTextOverlayFontSize({ text: 'a\nb\nc', box, lineSpacing: 0.25 })).toBeCloseTo(0.1 / 3.5, 10);
+    expect(getTextOverlayFontSize({ text: '', box, lineSpacing: 0.2 })).toBeCloseTo(0.1, 10);
   });
 });

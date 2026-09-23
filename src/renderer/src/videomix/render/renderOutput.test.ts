@@ -88,7 +88,7 @@ function testProject(): MixProject {
     clip('c', 's1', 1080, 1920, 5),
     clip('d', 's3', 320, 180, 4), // small: upscaled
   ];
-  project.settings = { ...project.settings, resolution: '1080p', fps: 60, gap: { width: 8, color: '#101010' } };
+  project.settings = { ...project.settings, output: { aspect: '16:9', resolution: '1080' }, fps: 60, gap: { width: 8, color: '#101010' } };
   return project;
 }
 

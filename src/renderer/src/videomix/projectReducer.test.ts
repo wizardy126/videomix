@@ -1,9 +1,9 @@
 import { describe, test, expect } from 'vitest';
 
-import { createMixSource, mixProjectReducer } from './projectReducer';
+import { createMixSource, dissolveSingleClipGroups, mixProjectReducer } from './projectReducer';
 import { createEmptyMixProject } from './types';
-import type { MixClip, MixOverlay, MixProject } from './types';
-import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay } from './overlays/factories';
+import type { MixClip, MixMusicTrack, MixOverlay, MixProject } from './types';
+import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay, createTextOverlay } from './overlays/factories';
 import { resolveOverlayTimes } from './overlays/resolveOverlayTimes';
 
 function makeClip(id: string, overrides: Partial<MixClip> = {}): MixClip {
@@ -115,12 +115,129 @@ describe('mixProjectReducer', () => {
 
   test('updateSettings', () => {
     const project = makeProject();
-    const music = { path: '/m.mp3', absolutePath: '/m.mp3', volumeDb: -3, loop: true };
-    const next = mixProjectReducer(project, { type: 'updateSettings', patch: { maxColumns: 2, music } });
-    expect(next.settings).toEqual({ ...project.settings, maxColumns: 2, music });
-    const noMusic = mixProjectReducer(next, { type: 'updateSettings', patch: { music: undefined } });
-    expect('music' in noMusic.settings).toBe(false);
+    const output = { aspect: '9:16' as const, resolution: '720' as const };
+    const next = mixProjectReducer(project, { type: 'updateSettings', patch: { maxColumns: 2, output } });
+    expect(next.settings).toEqual({ ...project.settings, maxColumns: 2, output });
     expect(mixProjectReducer(project, { type: 'updateSettings', patch: { maxColumns: 3 } })).toBe(project);
+    expect(mixProjectReducer(project, { type: 'updateSettings', patch: { encoder: { codec: 'h264', hardware: 'auto' } } })).toBe(project);
+  });
+
+  describe('pinned and grouped clips (v3)', () => {
+    const groups = (project: MixProject) => project.clips.map((c) => c.groupId);
+
+    test('setClipPinTime', () => {
+      const project = makeProject();
+      const pinned = mixProjectReducer(project, { type: 'setClipPinTime', clipId: 'c2', pinTime: 12 });
+      expect(pinned.clips[1]).toEqual({ ...project.clips[1], pinTime: 12 });
+      expect(pinned.clips[0]).toBe(project.clips[0]);
+      expect(mixProjectReducer(pinned, { type: 'setClipPinTime', clipId: 'c2', pinTime: 12 })).toBe(pinned);
+      const unpinned = mixProjectReducer(pinned, { type: 'setClipPinTime', clipId: 'c2', pinTime: undefined });
+      expect('pinTime' in unpinned.clips[1]!).toBe(false);
+      expect(mixProjectReducer(project, { type: 'setClipPinTime', clipId: 'c2', pinTime: undefined })).toBe(project);
+    });
+
+    test('groupClips / ungroupClips', () => {
+      const project = makeProject();
+      const grouped = mixProjectReducer(project, { type: 'groupClips', clipIds: ['c1', 'c3', 'nope'], groupId: 'g' });
+      expect(groups(grouped)).toEqual(['g', undefined, 'g']);
+      // fewer than 2 existing clips: nothing
+      expect(mixProjectReducer(project, { type: 'groupClips', clipIds: ['c1', 'nope'], groupId: 'g' })).toBe(project);
+      expect(mixProjectReducer(grouped, { type: 'groupClips', clipIds: ['c1', 'c3'], groupId: 'g' })).toBe(grouped);
+
+      // regrouping c3 with c2 leaves c1 alone in g: g is dissolved
+      const regrouped = mixProjectReducer(grouped, { type: 'groupClips', clipIds: ['c2', 'c3'], groupId: 'h' });
+      expect(groups(regrouped)).toEqual([undefined, 'h', 'h']);
+      expect('groupId' in regrouped.clips[0]!).toBe(false);
+
+      // ungrouping one of two dissolves the group
+      const ungrouped = mixProjectReducer(grouped, { type: 'ungroupClips', clipIds: ['c1'] });
+      expect(groups(ungrouped)).toEqual([undefined, undefined, undefined]);
+      expect(ungrouped.clips.every((c) => !('groupId' in c))).toBe(true);
+      expect(mixProjectReducer(project, { type: 'ungroupClips', clipIds: ['c1'] })).toBe(project);
+
+      // a group of three keeps two
+      const three = mixProjectReducer(project, { type: 'groupClips', clipIds: ['c1', 'c2', 'c3'], groupId: 'g' });
+      expect(groups(mixProjectReducer(three, { type: 'ungroupClips', clipIds: ['c2'] }))).toEqual(['g', undefined, 'g']);
+    });
+
+    test('removing clips dissolves groups left with one clip', () => {
+      const grouped = mixProjectReducer(makeProject(), { type: 'groupClips', clipIds: ['c1', 'c2'], groupId: 'g' });
+      expect(groups(mixProjectReducer(grouped, { type: 'removeClip', clipId: 'c2' }))).toEqual([undefined, undefined]);
+      // c2 is the only clip of s2
+      expect(groups(mixProjectReducer(grouped, { type: 'removeSource', sourceId: 's2' }))).toEqual([undefined, undefined]);
+      const three = mixProjectReducer(makeProject(), { type: 'groupClips', clipIds: ['c1', 'c2', 'c3'], groupId: 'g' });
+      expect(groups(mixProjectReducer(three, { type: 'removeClip', clipId: 'c2' }))).toEqual(['g', 'g']);
+    });
+
+    test('a duplicate is neither pinned nor grouped', () => {
+      const project = mixProjectReducer(makeProject(), {
+        type: 'batch',
+        actions: [{ type: 'groupClips', clipIds: ['c1', 'c2'], groupId: 'g' }, { type: 'setClipPinTime', clipId: 'c1', pinTime: 3 }],
+      });
+      const next = mixProjectReducer(project, { type: 'duplicateClip', clipId: 'c1', newId: 'c9' });
+      const { pinTime, groupId, ...rest } = project.clips[0]!;
+      expect(pinTime).toBe(3);
+      expect(groupId).toBe('g');
+      expect(next.clips[1]).toEqual({ ...rest, id: 'c9' });
+    });
+
+    test('dissolveSingleClipGroups keeps the array when nothing changes', () => {
+      const clips = [makeClip('a', { groupId: 'g' }), makeClip('b', { groupId: 'g' }), makeClip('c')];
+      expect(dissolveSingleClipGroups(clips)).toBe(clips);
+    });
+  });
+
+  describe('music playlist (v3)', () => {
+    const track = (id: string, overrides: Partial<MixMusicTrack> = {}): MixMusicTrack => ({ id, path: `/${id}.mp3`, absolutePath: `/${id}.mp3`, volumeDb: -12, ...overrides });
+    const trackIds = (project: MixProject) => project.settings.musicPlaylist.tracks.map((t) => t.id);
+    const withTracks = () => mixProjectReducer(makeProject(), { type: 'addMusicTracks', tracks: [track('a'), track('b'), track('c')] });
+
+    test('addMusicTracks', () => {
+      const project = withTracks();
+      expect(trackIds(project)).toEqual(['a', 'b', 'c']);
+      expect(trackIds(mixProjectReducer(project, { type: 'addMusicTracks', tracks: [track('d'), track('e')], index: 1 }))).toEqual(['a', 'd', 'e', 'b', 'c']);
+      expect(() => mixProjectReducer(project, { type: 'addMusicTracks', tracks: [track('a')] })).toThrow('Duplicate music track id');
+      expect(() => mixProjectReducer(project, { type: 'addMusicTracks', tracks: [track('d'), track('d')] })).toThrow('Duplicate music track id');
+      expect(mixProjectReducer(project, { type: 'addMusicTracks', tracks: [] })).toBe(project);
+      // the rest of the settings is kept
+      expect(project.settings.musicPlaylist.crossfade).toBe(2);
+    });
+
+    test('updateMusicTrack', () => {
+      const project = withTracks();
+      const next = mixProjectReducer(project, { type: 'updateMusicTrack', trackId: 'b', patch: { volumeDb: -3, path: '/x.mp3', absolutePath: '/x.mp3' } });
+      expect(next.settings.musicPlaylist.tracks[1]).toEqual({ id: 'b', path: '/x.mp3', absolutePath: '/x.mp3', volumeDb: -3 });
+      expect(next.settings.musicPlaylist.tracks[0]).toBe(project.settings.musicPlaylist.tracks[0]);
+      expect(mixProjectReducer(project, { type: 'updateMusicTrack', trackId: 'b', patch: { volumeDb: -12 } })).toBe(project);
+      expect(mixProjectReducer(project, { type: 'updateMusicTrack', trackId: 'nope', patch: { volumeDb: 0 } })).toBe(project);
+    });
+
+    test('removeMusicTrack', () => {
+      const project = withTracks();
+      expect(trackIds(mixProjectReducer(project, { type: 'removeMusicTrack', trackId: 'b' }))).toEqual(['a', 'c']);
+      expect(mixProjectReducer(project, { type: 'removeMusicTrack', trackId: 'nope' })).toBe(project);
+    });
+
+    test('reorderMusicTracks', () => {
+      const project = withTracks();
+      expect(trackIds(mixProjectReducer(project, { type: 'reorderMusicTracks', ids: ['c', 'a', 'b'] }))).toEqual(['c', 'a', 'b']);
+      expect(trackIds(mixProjectReducer(project, { type: 'reorderMusicTracks', ids: ['c', 'x', 'c'] }))).toEqual(['c', 'a', 'b']);
+      expect(mixProjectReducer(project, { type: 'reorderMusicTracks', ids: ['a', 'b'] })).toBe(project);
+    });
+
+    test('updateMusicPlaylist', () => {
+      const project = withTracks();
+      const next = mixProjectReducer(project, { type: 'updateMusicPlaylist', patch: { crossfade: 4, loop: false, ducking: { enabled: true, amountDb: -6 } } });
+      expect(next.settings.musicPlaylist).toEqual({ tracks: project.settings.musicPlaylist.tracks, crossfade: 4, loop: false, ducking: { enabled: true, amountDb: -6 } });
+      expect(mixProjectReducer(project, { type: 'updateMusicPlaylist', patch: { ducking: { enabled: false, amountDb: -10 } } })).toBe(project);
+    });
+  });
+
+  test('text overlays (v3): update removes cleared optional keys', () => {
+    const project = mixProjectReducer(makeProject(), { type: 'addOverlay', overlay: { ...createTextOverlay({ id: 't', name: 'Text', text: 'a' }), shadow: { x: 1, y: 1, color: '#000000' } } });
+    const next = mixProjectReducer(project, { type: 'updateOverlay', overlayId: 't', patch: { text: 'a\nb', shadow: undefined, entry: { kind: 'slide', from: 'left', duration: 1 } } });
+    expect(next.overlays[0]).toMatchObject({ text: 'a\nb', entry: { kind: 'slide', from: 'left', duration: 1 } });
+    expect('shadow' in next.overlays[0]!).toBe(false);
   });
 
   test('setLoudnessCache', () => {

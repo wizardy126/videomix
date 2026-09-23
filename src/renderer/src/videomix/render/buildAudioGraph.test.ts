@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
-import { MUSIC_LOUDNESS_KEY, buildAudioGraph, getCompensationExpr, getNormalizationGain, getPlacementFades } from './buildAudioGraph';
-import { createEmptyMixProject } from '../types';
+import { buildAudioGraph, getCompensationExpr, getNormalizationGain, getPlacementFades } from './buildAudioGraph';
+import { createEmptyMixProject, defaultMusicPlaylist } from '../types';
 import type { LoudnessMeasurement, MixClip, MixSettings, SoundOverlay } from '../types';
 import type { LayoutKeyframe, MixPlan } from '../planner/types';
 import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
@@ -15,6 +15,11 @@ const clip = (id: string, sourceId: string, start: number, end: number, extra: P
 const sourcePaths = { s1: '/media/h.mp4', s2: '/media/v.mp4', s3: '/media/sq.mp4' };
 
 const makeSettings = (settings: Partial<MixSettings> = {}): MixSettings => ({ ...createEmptyMixProject().settings, ...settings });
+
+// A single music track (the only music before T24's playlist)
+const withMusic = ({ volumeDb, loop }: { volumeDb: number, loop: boolean }): Pick<MixSettings, 'musicPlaylist'> => ({
+  musicPlaylist: { ...defaultMusicPlaylist, tracks: [{ id: 'music', path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb }], loop },
+});
 
 const measured = (inputI: number, inputTp: number, extra: Partial<Extract<LoudnessMeasurement, { hasAudio: true }>> = {}): LoudnessMeasurement => ({
   hasAudio: true, inputI, inputTp, inputLra: 3, inputThresh: inputI - 10, ...extra,
@@ -127,7 +132,7 @@ describe('buildAudioGraph', () => {
   });
 
   test('with looped music, global fades and the exact video duration', () => {
-    const settings = makeSettings({ music: { path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb: -12, loop: true } });
+    const settings = makeSettings(withMusic({ volumeDb: -12, loop: true }));
     expect(buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, duration: 11.5 + 1 / 60, loudness: twoColumnLoudness })).toMatchSnapshot();
   });
 
@@ -141,22 +146,22 @@ describe('buildAudioGraph', () => {
 
   test('no audible clip: silence of the video duration, with music', () => {
     const clips = [clip('a', 's3', 1, 7), clip('b', 's2', 0, 6, { muted: true }), clip('c', 's3', 0, 8)];
-    const settings = makeSettings({ music: { path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb: 0, loop: false } });
+    const settings = makeSettings(withMusic({ volumeDb: 0, loop: false }));
     const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips, sourcePaths, settings, loudness: { a: { hasAudio: false }, c: { hasAudio: false } } });
     expect(audioPass.inputs).toEqual([['-vn', '-i', '/media/m.mp3']]);
     expect(audioPass).toMatchSnapshot();
   });
 
   test('music is normalized like a clip, plus volumeDb (T12b)', () => {
-    const settings = makeSettings({ music: { path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb: -12, loop: true } });
-    const loudness = { ...twoColumnLoudness, [MUSIC_LOUDNESS_KEY]: measured(-9, -1) };
+    const settings = makeSettings(withMusic({ volumeDb: -12, loop: true }));
+    const loudness = { ...twoColumnLoudness, music: measured(-9, -1) };
     const { filterComplex } = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness });
     // getNormalizationGain(-9, -1) = min(-16 - -9, 24, 5 - -1) = -7, plus volumeDb -12 = -19
     expect(filterComplex).toContain('volume=-19dB');
   });
 
   test('music without a loudness measurement only applies volumeDb (T12b)', () => {
-    const settings = makeSettings({ music: { path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb: -12, loop: true } });
+    const settings = makeSettings(withMusic({ volumeDb: -12, loop: true }));
     const { filterComplex } = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness: twoColumnLoudness });
     expect(filterComplex).toContain('volume=-12dB');
   });
@@ -189,7 +194,7 @@ describe('buildAudioGraph: sound overlays (T21)', () => {
     const overlays = [sound('beep', '/media/beep.wav')];
     const overlayTimes = times([['beep', { start: 1, end: 2 }]]);
     const loudness = { ...twoColumnLoudness, beep: measured(-16, -3) };
-    const settings = makeSettings({ music: { path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb: -12, loop: true } });
+    const settings = makeSettings(withMusic({ volumeDb: -12, loop: true }));
     const { filterComplex } = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness, overlays, overlayTimes });
     expect(filterComplex).toMatch(/\[mix]\[s\d+]amix=inputs=2:normalize=0:duration=first\[withSounds]/);
   });

@@ -1,5 +1,13 @@
 import { z } from 'zod';
 
+import { mixEncoderSchema, defaultMixEncoder } from '../../../common/videomix/encoder';
+import { countdownOverlayStyleSchema, overlayFileSchema, progressBarOverlayStyleSchema, textOverlayStyleSchema } from '../../../common/videomix/overlayStyles';
+
+// Shared with main since T24 (style presets), re-exported for the existing imports
+export { OVERLAY_COLOR_REGEX, overlayFileSchema, progressBarDirections } from '../../../common/videomix/overlayStyles';
+export type { OverlayFile } from '../../../common/videomix/overlayStyles';
+export type { MixEncoderSettings } from '../../../common/videomix/encoder';
+
 /** Rectangle in oriented source pixels (after applying rotation metadata). Integer values. */
 export const rectSchema = z.object({
   x: z.number().int().nonnegative(),
@@ -46,6 +54,10 @@ export const mixClipSchema = z.object({
   muted: z.boolean(),
   /** Extra manual gain on top of loudness normalization. */
   gainDb: z.number(),
+  /** A4 (v3): the clip starts at this time of the final video (s); the planner arranges the rest around it (T30). */
+  pinTime: z.number().optional(),
+  /** A4 (v3): the clips sharing a group id start together (T30). A group needs at least 2 clips. */
+  groupId: z.string().min(1).optional(),
 });
 
 export type MixClip = z.infer<typeof mixClipSchema>;
@@ -63,28 +75,63 @@ export const transitionTypeSchema = z.enum(transitionTypes);
 
 export type TransitionType = z.infer<typeof transitionTypeSchema>;
 
-export const mixResolutions = {
-  '720p': { width: 1280, height: 720 },
-  '1080p': { width: 1920, height: 1080 },
-  '2160p': { width: 3840, height: 2160 },
-} as const;
+export const mixOutputAspects = ['16:9', '9:16', '1:1'] as const;
 
-export const mixResolutionSchema = z.enum(['720p', '1080p', '2160p']);
+/** Short side of the output (px). */
+export const mixOutputResolutions = ['720', '1080', '2160'] as const;
 
-export type MixResolution = z.infer<typeof mixResolutionSchema>;
+/** Output frame (B5): `resolution` is the short side, see `getOutputSize`. */
+export const mixOutputSchema = z.object({
+  aspect: z.enum(mixOutputAspects),
+  resolution: z.enum(mixOutputResolutions),
+});
+
+export type MixOutput = z.infer<typeof mixOutputSchema>;
+export type MixOutputAspect = MixOutput['aspect'];
+export type MixOutputResolution = MixOutput['resolution'];
+
+/** Exact output sizes (01-requisitos §10 B5). */
+export const mixOutputSizes: Record<MixOutputAspect, Record<MixOutputResolution, { width: number, height: number }>> = {
+  '16:9': { 720: { width: 1280, height: 720 }, 1080: { width: 1920, height: 1080 }, 2160: { width: 3840, height: 2160 } },
+  '9:16': { 720: { width: 720, height: 1280 }, 1080: { width: 1080, height: 1920 }, 2160: { width: 2160, height: 3840 } },
+  '1:1': { 720: { width: 720, height: 720 }, 1080: { width: 1080, height: 1080 }, 2160: { width: 2160, height: 2160 } },
+};
+
+export const getOutputSize = ({ aspect, resolution }: MixOutput) => mixOutputSizes[aspect][resolution];
 
 export const mixFpsValues = [24, 25, 30, 50, 60] as const;
 
 export const mixPresets = ['ultrafast', 'veryfast', 'fast', 'medium', 'slow'] as const;
 
-export const mixMusicSchema = z.object({
+/** A track of the music playlist (C2). `path`/`absolutePath` like the sources. Normalized to −16 LUFS, plus `volumeDb`. */
+export const mixMusicTrackSchema = z.object({
+  id: z.string().min(1),
   path: z.string(),
   absolutePath: z.string(),
   volumeDb: z.number(),
-  loop: z.boolean(),
 });
 
-export type MixMusic = z.infer<typeof mixMusicSchema>;
+export type MixMusicTrack = z.infer<typeof mixMusicTrackSchema>;
+
+/** Music (C1, C2): the tracks play in order with a crossfade; the whole list repeats if `loop`. */
+export const mixMusicPlaylistSchema = z.object({
+  /** Play order. Empty = no music. */
+  tracks: mixMusicTrackSchema.array(),
+  /** Seconds. */
+  crossfade: z.number().nonnegative(),
+  loop: z.boolean(),
+  /** The music goes down by `amountDb` (≤ 0) while the clips are heard (T27). */
+  ducking: z.object({ enabled: z.boolean(), amountDb: z.number() }),
+});
+
+export type MixMusicPlaylist = z.infer<typeof mixMusicPlaylistSchema>;
+
+export const defaultMusicPlaylist: MixMusicPlaylist = {
+  tracks: [],
+  crossfade: 2,
+  loop: true,
+  ducking: { enabled: false, amountDb: -10 },
+};
 
 /**
  * Initial `volumeDb` when a music file is picked (T12b): the music is normalized like the clips (buildAudioGraph), so
@@ -93,7 +140,8 @@ export type MixMusic = z.infer<typeof mixMusicSchema>;
 export const DEFAULT_MUSIC_VOLUME_DB = -12;
 
 export const mixSettingsSchema = z.object({
-  resolution: mixResolutionSchema,
+  output: mixOutputSchema,
+  encoder: mixEncoderSchema,
   fps: z.literal(mixFpsValues),
   crf: z.number().int().min(0).max(51),
   preset: z.enum(mixPresets),
@@ -109,7 +157,7 @@ export const mixSettingsSchema = z.object({
   fadeInOut: z.boolean(),
   /** How to fill space that no clip can cover. */
   fill: z.object({ mode: z.enum(['blur', 'color']), color: hexColorSchema }),
-  music: mixMusicSchema.optional(),
+  musicPlaylist: mixMusicPlaylistSchema,
 });
 
 export type MixSettings = z.infer<typeof mixSettingsSchema>;
@@ -153,15 +201,8 @@ export const loudnessMeasurementSchema = z.discriminatedUnion('hasAudio', [
 
 export type LoudnessMeasurement = z.infer<typeof loudnessMeasurementSchema>;
 
-export const mixProjectV1Schema = z.object({
-  version: z.literal(1),
-  sources: mixSourceSchema.array(),
-  /** Array order is the list order. */
-  clips: mixClipSchema.array(),
-  settings: mixSettingsSchema,
-  /** Keyed by the cache key described in 04-diseno §5.1. */
-  loudnessCache: z.record(z.string(), loudnessMeasurementSchema).optional(),
-});
+// Versions 1 and 2 are only read through the migrations of project.ts (they upgrade the raw JSON), so there's no
+// schema for them: `mixProjectSchema` is the current version.
 
 /** Where an overlay starts (01-requisitos §9.2). `edge` + `offset` (s, may be negative) relative to a clip or another overlay. */
 export const overlayAnchorSchema = z.discriminatedUnion('kind', [
@@ -193,16 +234,6 @@ export type OverlayBox = z.infer<typeof overlayBoxSchema>;
  */
 export const OVERLAY_REFERENCE_HEIGHT = 1080;
 
-/** `#rrggbb` or `#rrggbbaa` (alpha, e.g. `#00000000` = transparent). */
-export const OVERLAY_COLOR_REGEX = /^#[\da-f]{6}([\da-f]{2})?$/i;
-
-const overlayColorSchema = z.string().regex(OVERLAY_COLOR_REGEX);
-
-/** A user file stored like the sources: `path` relative to the .vmx when saved (absolute in memory), `absolutePath` as fallback. */
-export const overlayFileSchema = z.object({ path: z.string(), absolutePath: z.string() });
-
-export type OverlayFile = z.infer<typeof overlayFileSchema>;
-
 const overlayBaseSchema = z.object({
   id: z.string().min(1),
   name: z.string(),
@@ -232,24 +263,11 @@ export const countdownOverlaySchema = overlayBaseSchema.extend({
   duration: z.number(),
   /** `box.height` is the font size; the text is vertically centered in the box and aligned horizontally with `align`. */
   box: overlayBoxSchema,
-  align: z.enum(['left', 'center', 'right']),
-  decimals: z.literal([0, 1, 2, 3]),
-  /** `05` instead of `5` (and `01:05` instead of `1:05`). */
-  leadingZeros: z.boolean(),
-  color: overlayColorSchema,
-  /** TTF/OTF file; if missing, the bundled font. */
-  font: overlayFileSchema.optional(),
-  /** Reference px (see OVERLAY_REFERENCE_HEIGHT), 0 = none. */
-  border: z.object({ width: z.number().nonnegative(), color: overlayColorSchema }),
-  /** Offset in reference px. Missing = no shadow. */
-  shadow: z.object({ x: z.number(), y: z.number(), color: overlayColorSchema }).optional(),
-  /** Seconds before reaching 0, 0 = none. */
-  fadeOut: z.number().nonnegative(),
+  // align, decimals, leadingZeros, color, font?, border, shadow?, fadeOut (shared with the style presets)
+  ...countdownOverlayStyleSchema.shape,
 });
 
 export type CountdownOverlay = z.infer<typeof countdownOverlaySchema>;
-
-export const progressBarDirections = ['ltr', 'rtl', 'btt', 'ttb'] as const;
 
 export const progressBarOverlaySchema = overlayBaseSchema.extend({
   type: z.literal('progressBar'),
@@ -258,15 +276,8 @@ export const progressBarOverlaySchema = overlayBaseSchema.extend({
   /** Takes the start and duration of this countdown. */
   linkedCountdownId: z.string().min(1).optional(),
   box: overlayBoxSchema,
-  fillColor: overlayColorSchema,
-  /** `#00000000` = no background. */
-  backgroundColor: overlayColorSchema,
-  /** Reference px, drawn inside the box. 0 = none. */
-  border: z.object({ width: z.number().nonnegative(), color: overlayColorSchema }),
-  /** Direction in which the fill grows. */
-  direction: z.enum(progressBarDirections),
-  /** `fill`: 0 → 100 % during its duration; `empty`: 100 → 0 %. */
-  mode: z.enum(['fill', 'empty']),
+  // fillColor, backgroundColor, border, direction, mode (shared with the style presets)
+  ...progressBarOverlayStyleSchema.shape,
 });
 
 export type ProgressBarOverlay = z.infer<typeof progressBarOverlaySchema>;
@@ -280,26 +291,47 @@ export const soundOverlaySchema = overlayBaseSchema.extend({
 
 export type SoundOverlay = z.infer<typeof soundOverlaySchema>;
 
-export const mixOverlaySchema = z.discriminatedUnion('type', [imageOverlaySchema, countdownOverlaySchema, progressBarOverlaySchema, soundOverlaySchema]);
+/**
+ * Free text (B1, v3): several lines (`\n`) aligned with `align` in the box, which sets the font size (see
+ * textOverlayStyleSchema), with border, shadow, fades and an entry animation. Rendered by T26.
+ */
+export const textOverlaySchema = overlayBaseSchema.extend({
+  type: z.literal('text'),
+  text: z.string(),
+  duration: z.number(),
+  box: overlayBoxSchema,
+  // align, color, font?, border, shadow?, lineSpacing, fadeIn, fadeOut, entry (shared with the style presets)
+  ...textOverlayStyleSchema.shape,
+});
+
+export type TextOverlay = z.infer<typeof textOverlaySchema>;
+
+export const mixOverlaySchema = z.discriminatedUnion('type', [imageOverlaySchema, countdownOverlaySchema, progressBarOverlaySchema, soundOverlaySchema, textOverlaySchema]);
 
 export type MixOverlay = z.infer<typeof mixOverlaySchema>;
 
 export type MixOverlayType = MixOverlay['type'];
 
-export const mixProjectV2Schema = mixProjectV1Schema.extend({
-  version: z.literal(2),
+/** v3 (T24). v1 → v2 (T19): overlays; v2 → v3: output, encoder, music playlist, text overlays, pinned and grouped clips. */
+export const mixProjectSchema = z.object({
+  version: z.literal(3),
+  sources: mixSourceSchema.array(),
+  /** Array order is the list order. */
+  clips: mixClipSchema.array(),
+  settings: mixSettingsSchema,
+  /** Keyed by the cache key described in 04-diseno §5.1. */
+  loudnessCache: z.record(z.string(), loudnessMeasurementSchema).optional(),
   /** Array order is the layer order: the last one is drawn on top. */
   overlays: mixOverlaySchema.array(),
 });
 
-export const mixProjectSchema = mixProjectV2Schema;
-
 export type MixProject = z.infer<typeof mixProjectSchema>;
 
-export const MIX_PROJECT_VERSION = 2;
+export const MIX_PROJECT_VERSION = 3;
 
 export const defaultMixSettings: MixSettings = {
-  resolution: '1080p',
+  output: { aspect: '16:9', resolution: '1080' },
+  encoder: defaultMixEncoder,
   fps: 30,
   crf: 20,
   preset: 'medium',
@@ -310,6 +342,7 @@ export const defaultMixSettings: MixSettings = {
   transition: { type: 'fade', duration: 0.5 },
   fadeInOut: true,
   fill: { mode: 'blur', color: '#000000' },
+  musicPlaylist: defaultMusicPlaylist,
 };
 
 export function createEmptyMixProject(): MixProject {

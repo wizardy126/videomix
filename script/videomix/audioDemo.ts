@@ -34,14 +34,13 @@ const { getPlannerInput } = await import(`${rendererDir}/planner/plannerInput.ts
 const { ensureLoudness } = await import(`${rendererDir}/loudness.ts`) as {
   ensureLoudness: (params: {
     project: unknown,
-    music?: { absolutePath: string } | undefined,
+    musicTracks?: { id: string, absolutePath: string }[] | undefined,
     deps: { stat: (path: string) => Promise<{ mtimeMs: number, size: number }>, measureLoudness: (range: { filePath: string, start?: number | undefined, end?: number | undefined }) => Promise<LoudnessAnalysis> },
     onCacheEntries: (entries: Record<string, LoudnessAnalysis>) => void,
   }) => Promise<Record<string, LoudnessAnalysis>>,
 };
 const audioGraph = await import(`${rendererDir}/render/buildAudioGraph.ts`) as {
   LOUDNESS_TARGET: number,
-  MUSIC_LOUDNESS_KEY: string,
   buildAudioGraph: (params: { plan: Plan, clips: Clip[], sourcePaths: Record<string, string>, settings: unknown, loudness: Record<string, LoudnessAnalysis> }) => AudioPass,
   getPlacementFades: (plan: Plan, placement: Placement) => { fadeIn: number, fadeOut: number },
   getNormalizationGain: (measurement: LoudnessAnalysis) => number,
@@ -111,6 +110,7 @@ async function main() {
     ['vPink', 1, 7],
     ['h1080', 2, 9],
   ];
+  const musicTrack = { id: 'music', path: media('music-20s.m4a'), absolutePath: media('music-20s.m4a'), volumeDb: -12 };
   const project = {
     ...empty,
     sources: Object.entries(sourceFiles).map(([id, name]) => ({ id, path: media(name), absolutePath: media(name), name })),
@@ -121,7 +121,7 @@ async function main() {
     settings: {
       ...empty.settings,
       maxColumns,
-      ...(withMusic && { music: { path: media('music-20s.m4a'), absolutePath: media('music-20s.m4a'), volumeDb: -12, loop: true } }),
+      ...(withMusic && { musicPlaylist: { tracks: [musicTrack], crossfade: 2, loop: true, ducking: { enabled: false, amountDb: -10 } } }),
     },
   };
 
@@ -131,13 +131,13 @@ async function main() {
   let cache: Record<string, LoudnessAnalysis> = {};
   const loudness = await ensureLoudness({
     project,
-    music: withMusic ? { absolutePath: media('music-20s.m4a') } : undefined,
+    musicTracks: withMusic ? [musicTrack] : undefined,
     deps: { stat: async (path) => stat(path), measureLoudness },
     onCacheEntries: (entries) => { cache = { ...cache, ...entries }; },
   });
   console.log(`Measured ${Object.keys(cache).length} clip/music ranges (cache keys: ${Object.keys(cache).map((key) => key.slice(0, 8)).join(', ')})`);
   if (withMusic) {
-    const m = loudness[audioGraph.MUSIC_LOUDNESS_KEY]!;
+    const m = loudness[musicTrack.id]!;
     console.log(`Music (whole file): ${m.hasAudio ? `${m.inputI.toFixed(1)} LUFS, gain ${audioGraph.getNormalizationGain(m).toFixed(1)} dB` : '(no audio)'}`);
   }
 
@@ -226,7 +226,7 @@ async function main() {
     const start = 1;
     const end = plan.duration - 3;
     const m = await measureLoudness({ filePath: musicAlonePath, start, end });
-    const volumeDb = project.settings.music?.volumeDb ?? 0;
+    const { volumeDb } = musicTrack;
     if (m.hasAudio) {
       console.log(`\nMusic alone (isolated render, ${start.toFixed(1)}–${end.toFixed(1)} s, volumeDb ${volumeDb} dB): ${m.inputI.toFixed(1)} LUFS (target ${(audioGraph.LOUDNESS_TARGET + volumeDb).toFixed(1)} LUFS)`);
     }

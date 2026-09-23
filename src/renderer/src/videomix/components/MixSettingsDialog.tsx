@@ -2,6 +2,7 @@ import type { ChangeEventHandler, FormEventHandler, ReactNode } from 'react';
 import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FaFolderOpen, FaMusic, FaRandom, FaTimes } from 'react-icons/fa';
+import { nanoid } from 'nanoid';
 
 import * as Dialog from '../../components/Dialog';
 import Button from '../../components/Button';
@@ -10,19 +11,20 @@ import Switch from '../../components/Switch';
 import Truncated from '../../components/Truncated';
 import { showOpenDialog } from '../../dialogs';
 import type { EditOptions } from '../hooks/useMixProject';
-import { DEFAULT_MUSIC_VOLUME_DB, mixFpsValues, mixPresets, mixResolutions, transitionTypes } from '../types';
-import type { MixResolution, MixSettings, TransitionType } from '../types';
+import { getOutputSize, mixFpsValues, mixOutputResolutions, mixPresets, transitionTypes } from '../types';
+import type { MixOutput, MixOutputResolution, MixSettings, TransitionType } from '../types';
+import { replaceMusic } from '../workspace';
 
 const { basename } = window.require('node:path');
 
 /** Audio containers accepted for the music track (01-requisitos §5). */
 const MUSIC_EXTENSIONS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'opus'];
 
-const resolutionLabels: Record<MixResolution, string> = {
-  '720p': '720p (1280×720)',
-  '1080p': '1080p (1920×1080)',
-  '2160p': '4K (3840×2160)',
-};
+// e.g. "1080p (1920×1080)", "4K (3840×2160)"
+function getResolutionLabel(output: MixOutput) {
+  const { width, height } = getOutputSize(output);
+  return `${output.resolution === '2160' ? '4K' : `${output.resolution}p`} (${width}×${height})`;
+}
 
 const transitionLabels: Record<TransitionType, string> = {
   fade: 'Fade',
@@ -84,8 +86,8 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
   const { t } = useTranslation();
 
   const handleResolutionChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
-    onChange({ resolution: e.target.value as MixResolution });
-  }, [onChange]);
+    onChange({ output: { ...settings.output, resolution: e.target.value as MixOutputResolution } });
+  }, [onChange, settings.output]);
 
   const handleFpsChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
     onChange({ fps: Number(e.target.value) as MixSettings['fps'] });
@@ -163,33 +165,39 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
     return filePath;
   }, [onPickMusicFile, t]);
 
+  // Until the playlist UI (T27), this section edits a single track: the first one
+  const { musicPlaylist } = settings;
+  const [music] = musicPlaylist.tracks;
+
   const handleChooseMusicClick = useCallback(async () => {
     const filePath = await pickMusicFile();
     if (filePath == null) return;
     // Same absolute path for both fields at pick time; saving the project relativizes `path` (projectFile.ts)
-    onChange({ music: { path: filePath, absolutePath: filePath, volumeDb: DEFAULT_MUSIC_VOLUME_DB, loop: true } });
-  }, [onChange, pickMusicFile]);
+    onChange({ musicPlaylist: replaceMusic(musicPlaylist, { id: nanoid(), filePath, loopIfNew: true }) });
+  }, [musicPlaylist, onChange, pickMusicFile]);
 
   const handleRemoveMusicClick = useCallback(() => {
-    onChange({ music: undefined });
-  }, [onChange]);
+    onChange({ musicPlaylist: { ...musicPlaylist, tracks: [] } });
+  }, [musicPlaylist, onChange]);
+
+  const setMusicVolume = useCallback((volumeDb: number, options?: EditOptions) => {
+    if (music == null) return;
+    onChange({ musicPlaylist: { ...musicPlaylist, tracks: musicPlaylist.tracks.map((track) => (track === music ? { ...track, volumeDb } : track)) } }, options);
+  }, [music, musicPlaylist, onChange]);
 
   const handleMusicVolumeInput = useCallback<FormEventHandler<HTMLInputElement>>((e) => {
-    if (settings.music == null) return;
-    onChange({ music: { ...settings.music, volumeDb: Number(e.currentTarget.value) } }, { transient: true });
-  }, [onChange, settings.music]);
+    setMusicVolume(Number(e.currentTarget.value), { transient: true });
+  }, [setMusicVolume]);
 
   const handleMusicVolumeCommit = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    if (settings.music == null) return;
-    onChange({ music: { ...settings.music, volumeDb: Number(e.target.value) } });
-  }, [onChange, settings.music]);
+    setMusicVolume(Number(e.target.value));
+  }, [setMusicVolume]);
 
   const handleMusicLoopChange = useCallback((checked: boolean) => {
-    if (settings.music == null) return;
-    onChange({ music: { ...settings.music, loop: checked } });
-  }, [onChange, settings.music]);
+    onChange({ musicPlaylist: { ...musicPlaylist, loop: checked } });
+  }, [musicPlaylist, onChange]);
 
-  const musicFileName = useMemo(() => (settings.music != null ? basename(settings.music.absolutePath) as string : undefined), [settings.music]);
+  const musicFileName = useMemo(() => (music != null ? basename(music.absolutePath) as string : undefined), [music]);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -202,9 +210,9 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
             {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
             <label style={rowStyle}>
               {t('Resolution')}<br />
-              <Select value={settings.resolution} onChange={handleResolutionChange}>
-                {(Object.keys(mixResolutions) as MixResolution[]).map((res) => (
-                  <option key={res} value={res}>{resolutionLabels[res]}</option>
+              <Select value={settings.output.resolution} onChange={handleResolutionChange}>
+                {mixOutputResolutions.map((resolution) => (
+                  <option key={resolution} value={resolution}>{getResolutionLabel({ ...settings.output, resolution })}</option>
                 ))}
               </Select>
             </label>
@@ -320,7 +328,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
           </Section>
 
           <Section title={t('Music')}>
-            {settings.music == null ? (
+            {music == null ? (
               <Button onClick={handleChooseMusicClick}>
                 <FaFolderOpen style={{ verticalAlign: 'middle', marginRight: '.3em' }} />{t('Choose music file…')}
               </Button>
@@ -328,20 +336,20 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange, onPickMusic
               <>
                 <div style={inlineRowStyle}>
                   <FaMusic style={{ verticalAlign: 'middle' }} />
-                  <Truncated maxWidth="16em" title={settings.music.absolutePath}>{musicFileName}</Truncated>
+                  <Truncated maxWidth="16em" title={music.absolutePath}>{musicFileName}</Truncated>
                   <Button onClick={handleRemoveMusicClick} title={t('Remove music')}><FaTimes /></Button>
                 </div>
 
                 {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
                 <label style={rowStyle}>
-                  {t('Music volume')}: {t('{{db}} dB', { db: settings.music.volumeDb.toFixed(1) })}<br />
-                  <input type="range" min={-30} max={6} step={0.5} style={{ width: '100%' }} value={settings.music.volumeDb} onInput={handleMusicVolumeInput} onChange={handleMusicVolumeCommit} />
+                  {t('Music volume')}: {t('{{db}} dB', { db: music.volumeDb.toFixed(1) })}<br />
+                  <input type="range" min={-30} max={6} step={0.5} style={{ width: '100%' }} value={music.volumeDb} onInput={handleMusicVolumeInput} onChange={handleMusicVolumeCommit} />
                   <div style={detailsStyle}>{t('0 dB = as loud as the clips')}</div>
                 </label>
 
                 <div style={inlineRowStyle}>
                   <span>{t('Loop if shorter than the video')}</span>
-                  <Switch checked={settings.music.loop} onCheckedChange={handleMusicLoopChange} />
+                  <Switch checked={musicPlaylist.loop} onCheckedChange={handleMusicLoopChange} />
                 </div>
               </>
             )}
