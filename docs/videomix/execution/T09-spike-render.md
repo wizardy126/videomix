@@ -1,6 +1,6 @@
 # T09 · Spike: estrategia de render ffmpeg (ADR-001)
 
-- **Hito**: M3 · **Modelo**: Opus · **Depende de**: T02 · **Estado**: pendiente
+- **Hito**: M3 · **Modelo**: Opus · **Depende de**: T02 · **Estado**: hecha
 
 ## Objetivo
 
@@ -55,4 +55,65 @@ Prototipos **fuera del código de la app**, en `script/videomix/spike/`: pueden 
 
 ## Notas de ejecución
 
+### Resultado
+
+**El re-layout animado es viable**. No hace falta el fallback de transición de fotograma completo. La decisión está en [ADR-001](../decisiones/ADR-001-render.md) y el resumen, en [04-diseno §4](../04-diseno.md) (sin "provisional").
+
+- **Técnica "capa de columna"**:
+  - `crop` fijo de la unión de recortes;
+  - `scale … eval=frame`, con tamaño variable, que `overlay` acepta;
+  - `overlay` con `x`/`y` por fotograma sobre una base fija;
+  - composición de izquierda a derecha, con barras de separación redibujadas.
+
+  Aguanta zoom, `xfade` simultáneo y columnas que aparecen o desaparecen.
+- **Render por bloques** + concat `-c copy` + audio en pasada aparte, con **2 bloques en paralelo**.
+- **Máquina**: 4 vCPU Xeon 2,1 GHz, 15 GB, ffmpeg 8.0.
+- **Medidas con 2 min, 15 clips, 1080p, x264 medium** y fuentes con ruido (pesimista):
+
+  | Modo | Tiempo real | Pico de memoria |
+  |---|---|---|
+  | Bloques, secuencial | 550 s | 1,1 GB |
+  | Bloques, 2 en paralelo | 427 s | ~1,06 GB por proceso |
+  | Grafo único | 400 s | 2,7 GB |
+
+  En todos los casos, 3540 fotogramas exactos.
+
+### Hallazgos que T11 debe respetar
+
+Todos están en el ADR.
+
+- **Ni `crop` ni `xfade` admiten tamaño variable**: `crop` con `w(t)` no cambia de tamaño y con `sendcmd` produce una imagen corrupta; `xfade` con entradas variables también. Probado.
+- **`if()` anidado** falla a partir de ~98 niveles. Se usa una suma plana de escalones, probada con 2000 términos.
+- **`setpts=PTS-STARTPTS` antes de `fps`** tras `-ss` desplaza el clip hasta un fotograma. Hace falta `fps=F:start_time=0`.
+- **El *accurate seek*** descarta el fotograma en pantalla en el punto de corte: se abre la entrada 0,1 s antes y se compensa con `setpts=PTS-0.1/TB`.
+- **Longitud del comando**: el grafo único de 2 min ocupa ~23k caracteres, frente al límite de 32 767 en Windows. Siempre `-/filter_complex <fichero>`.
+
+### Ficheros
+
+Se conservan como referencia para T11–T13.
+
+- `script/videomix/spike/renderSpike.ts`:
+  - prototipo del generador (plan → bloques → grafos → render → concat, y el grafo único para comparar) y escenarios de medida;
+  - lleva `eslint-disable` de reglas de estilo concretas, porque es un prototipo; pasa `tsc`.
+- `script/videomix/spike/example-anim-chunk.sh`: ejemplo real comentado (estable + animación con `xfade` + estable + audio + concat). Reproduce bit a bit la salida del generador.
+- `script/videomix/spike/measure.py`: mide el tiempo, la CPU y el pico de RSS, porque no hay `/usr/bin/time`.
+- `docs/videomix/decisiones/ADR-001-render.md`, enlazado desde `decisiones/README.md` y desde 04-diseno §4.
+
+Las salidas (vídeos, PNG, grafos) quedan en `test-media/spike-out/`, ignorado por git. Las fuentes largas del spike se generan con `renderSpike.ts sources` (≈3 min).
+
+### Desviaciones y dudas
+
+- El spike usa una copia mínima de `getCropForAspect`, porque Node no resuelve los imports sin extensión de `geometry.ts`. T11 debe usar el real.
+- La previsualización a 640×360 no se ha medido.
+- Las medidas de rendimiento se tomaron antes de añadir el margen previo de 0,1 s en `-ss` (impacto despreciable).
+- **Para el orquestador**:
+  - Durante un re-layout, los tipos de `xfade` con geometría (`wipe*`, `slide*`…) se calculan sobre el ancho máximo de la columna y no sobre el ancho animado (pequeña desviación). `fade`, `dissolve` y `fadeblack` son exactos. Si el usuario lo considera inaceptable, se puede forzar `fade` en las sustituciones que coinciden con un re-layout.
+  - Invariantes nuevas para T10 (ver ADR, "Consecuencias"):
+    - orden de columnas estable durante una animación;
+    - columnas que aparecen o desaparecen con ancho 0 junto a su vecina derecha.
+
 ## Revisión
+
+- **Resultado**: aceptada. El re-layout animado es viable, así que no hace falta fallback. `tsc` y `lint` en verde con el spike incluido.
+- **Decisión del orquestador**: se acepta la pequeña desviación de las transiciones geométricas (`wipe*`, `slide*`…) cuando coinciden con un re-layout. No se fuerza `fade`.
+- **Seguimiento**: las invariantes nuevas para el planificador (orden estable y columnas que aparecen o desaparecen con ancho 0) se verifican en T10b.
