@@ -5,13 +5,13 @@ import i18n from 'i18next';
 
 import { showOpenDialog } from '../../dialogs';
 import { createEmptyMixProject } from '../types';
-import type { LoudnessMeasurement, MixClip, MixProject, MixSettings } from '../types';
+import type { LoudnessMeasurement, MixClip, MixOverlay, MixProject, MixSettings } from '../types';
 import { createMixSource, mixProjectReducer } from '../projectReducer';
-import type { MixClipPatch, MixProjectAction, MixSourceRelink } from '../projectReducer';
+import type { MixClipPatch, MixOverlayPatch, MixProjectAction, MixSourceRelink, OverlayLayerMove, ResolvedOverlayTimesForRemoval } from '../projectReducer';
 import * as history from '../projectHistory';
 import type { History } from '../projectHistory';
 import { loadMixProject, mixProjectExtension, saveMixProject } from '../projectFile';
-import type { LoadedMixProject, NodeDeps } from '../projectFile';
+import type { LoadedMixProject, NodeDeps, OverlayFileKind } from '../projectFile';
 import { deleteRecoveryFile, deleteRecoveryFilePath, findRecoverableProjects, getRecoveryDir, resolveRecoveredProject, writeRecoveryFile } from '../projectRecovery';
 import type { RecoverableProject } from '../projectRecovery';
 import { askForUnsavedChanges } from '../dialogs';
@@ -89,11 +89,12 @@ export default function useMixProject() {
     return sources.map((s) => s.id);
   }, [dispatch]);
 
-  const removeSource = useCallback((sourceId: string) => dispatch({ type: 'removeSource', sourceId }), [dispatch]);
+  // `resolved`: the current resolveOverlayTimes result, so overlays anchored to what is removed become absolute at their current time
+  const removeSource = useCallback((sourceId: string, resolved?: ResolvedOverlayTimesForRemoval) => dispatch({ type: 'removeSource', sourceId, resolved }), [dispatch]);
   const relinkSource = useCallback((sourceId: string, source: MixSourceRelink) => dispatch({ type: 'relinkSource', sourceId, source }), [dispatch]);
   const addClip = useCallback((clip: MixClip, index?: number) => dispatch({ type: 'addClip', clip, index }), [dispatch]);
   const updateClip = useCallback((clipId: string, patch: MixClipPatch, options?: EditOptions) => dispatch({ type: 'updateClip', clipId, patch }, options), [dispatch]);
-  const removeClip = useCallback((clipId: string) => dispatch({ type: 'removeClip', clipId }), [dispatch]);
+  const removeClip = useCallback((clipId: string, resolved?: ResolvedOverlayTimesForRemoval) => dispatch({ type: 'removeClip', clipId, resolved }), [dispatch]);
   const duplicateClip = useCallback((clipId: string, name?: string) => {
     const newId = nanoid();
     dispatch({ type: 'duplicateClip', clipId, newId, name });
@@ -101,6 +102,22 @@ export default function useMixProject() {
   }, [dispatch]);
   const reorderClips = useCallback((ids: string[]) => dispatch({ type: 'reorderClips', ids }), [dispatch]);
   const updateSettings = useCallback((patch: Partial<MixSettings>, options?: EditOptions) => dispatch({ type: 'updateSettings', patch }, options), [dispatch]);
+
+  /** `overlay` comes from a `create*Overlay` factory (overlays/factories.ts), with e.g. `nanoid()` as id. */
+  const addOverlay = useCallback((overlay: MixOverlay, index?: number) => dispatch({ type: 'addOverlay', overlay, index }), [dispatch]);
+  const updateOverlay = useCallback((overlayId: string, patch: MixOverlayPatch, options?: EditOptions) => dispatch({ type: 'updateOverlay', overlayId, patch }, options), [dispatch]);
+  const removeOverlay = useCallback((overlayId: string, resolved?: ResolvedOverlayTimesForRemoval) => dispatch({ type: 'removeOverlay', overlayId, resolved }), [dispatch]);
+  const duplicateOverlay = useCallback((overlayId: string, name?: string) => {
+    const newId = nanoid();
+    dispatch({ type: 'duplicateOverlay', overlayId, newId, name });
+    return newId;
+  }, [dispatch]);
+  const moveOverlayLayer = useCallback((overlayId: string, to: OverlayLayerMove) => dispatch({ type: 'moveOverlayLayer', overlayId, to }), [dispatch]);
+  /** Points an overlay's image/sound (`media`) or countdown font to a new file (e.g. a missing file located again). */
+  const relinkOverlayFile = useCallback((overlayId: string, kind: OverlayFileKind, filePath: string) => {
+    const file = { path: filePath, absolutePath: filePath };
+    dispatch({ type: 'updateOverlay', overlayId, patch: kind === 'font' ? { font: file } : file });
+  }, [dispatch]);
 
   /** Merge measurements into the cache. Not an undo step and doesn't make the project dirty (it's recomputable). */
   const setLoudnessCache = useCallback((entries: Record<string, LoudnessMeasurement>) => {
@@ -264,6 +281,12 @@ export default function useMixProject() {
     duplicateClip,
     reorderClips,
     updateSettings,
+    addOverlay,
+    updateOverlay,
+    removeOverlay,
+    duplicateOverlay,
+    moveOverlayLayer,
+    relinkOverlayFile,
     setLoudnessCache,
     setSourceMeta,
     userNewProject,

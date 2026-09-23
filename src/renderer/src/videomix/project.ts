@@ -1,9 +1,13 @@
-import { MIN_RECT_SIZE, MIX_PROJECT_VERSION, defaultMixSettings, mixProjectV1Schema } from './types';
-import type { MixClip, MixProject, Rect } from './types';
+import { MIN_RECT_SIZE, MIX_PROJECT_VERSION, OVERLAY_COLOR_REGEX, defaultMixSettings, mixProjectSchema } from './types';
+import type { MixClip, MixOverlay, MixProject, Rect } from './types';
 import { rectContains } from './geometry';
+import { findOverlayCycleIds, getOverlaysById } from './overlays/anchors';
 
-// Each entry upgrades a raw project from version `n` to `n + 1`. Empty while only v1 exists.
-const migrations: Record<number, (json: Record<string, unknown>) => Record<string, unknown>> = {};
+// Each entry upgrades a raw project from version `n` to `n + 1`.
+const migrations: Record<number, (json: Record<string, unknown>) => Record<string, unknown>> = {
+  // v2 (T19): overlays
+  1: (json) => ({ ...json, version: 2, overlays: [] }),
+};
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v != null && !Array.isArray(v);
 
@@ -26,7 +30,7 @@ export function parseMixProject(json: unknown): MixProject {
   }
 
   const { settings } = project;
-  return mixProjectV1Schema.parse({
+  return mixProjectSchema.parse({
     ...project,
     settings: isObject(settings) ? { ...structuredClone(defaultMixSettings), ...settings } : settings,
   });
@@ -42,7 +46,14 @@ export type MixProjectIssueCode =
   | 'max-rect-outside-frame'
   | 'min-rect-outside-max'
   | 'clip-shorter-than-transitions'
-  | 'odd-gap';
+  | 'odd-gap'
+  | 'duplicate-overlay-id'
+  | 'overlay-broken-reference'
+  | 'overlay-cycle'
+  | 'overlay-box-out-of-range'
+  | 'overlay-invalid-duration'
+  | 'overlay-invalid-color'
+  | 'overlay-fades-too-long';
 
 /** A problem found by {@link validateMixProject}. `message` is English for logs; the UI should map `code` to a translated text. */
 export interface MixProjectIssue {
@@ -51,6 +62,7 @@ export interface MixProjectIssue {
   message: string,
   clipId?: string | undefined,
   sourceId?: string | undefined,
+  overlayId?: string | undefined,
 }
 
 export const getClipDuration = (clip: Pick<MixClip, 'start' | 'end'>) => clip.end - clip.start;
@@ -66,8 +78,73 @@ export function clipsBySource(clips: MixClip[]) {
   return map;
 }
 
+// Tolerance for boxes computed with floats (e.g. 1 - margin - height)
+const BOX_EPSILON = 1e-9;
+
+const overlayColors = (overlay: MixOverlay): string[] => {
+  switch (overlay.type) {
+    case 'countdown': { return [overlay.color, overlay.border.color, ...(overlay.shadow ? [overlay.shadow.color] : [])]; }
+    case 'progressBar': { return [overlay.fillColor, overlay.backgroundColor, overlay.border.color]; }
+    default: { return []; }
+  }
+};
+
 /**
- * Semantic checks of 04-diseno §1.2 that the schema can't express.
+ * Broken references and cycles are warnings: resolveOverlayTimes falls back to an absolute time, so the project still renders.
+ * Boxes, durations and colors are errors, as the render relies on them.
+ */
+function validateOverlays({ overlays }: MixProject, clipIds: ReadonlySet<string>): MixProjectIssue[] {
+  const issues: MixProjectIssue[] = [];
+  const byId = getOverlaysById(overlays);
+  const cycleIds = findOverlayCycleIds(overlays, byId);
+
+  const seen = new Set<string>();
+  overlays.forEach((overlay) => {
+    const overlayId = overlay.id;
+    const add = (level: MixProjectIssue['level'], code: MixProjectIssueCode, message: string) => issues.push({ level, code, message, overlayId });
+
+    if (seen.has(overlayId)) add('error', 'duplicate-overlay-id', `Duplicate overlay id ${overlayId}`);
+    seen.add(overlayId);
+
+    const { anchor } = overlay;
+    if (anchor.kind === 'clip' && !clipIds.has(anchor.clipId)) {
+      add('warning', 'overlay-broken-reference', `Overlay ${overlayId} is anchored to unknown clip ${anchor.clipId}`);
+    }
+    if (anchor.kind === 'element' && !byId.has(anchor.elementId)) {
+      add('warning', 'overlay-broken-reference', `Overlay ${overlayId} is anchored to unknown overlay ${anchor.elementId}`);
+    }
+    if (overlay.type === 'progressBar' && overlay.linkedCountdownId != null && byId.get(overlay.linkedCountdownId)?.type !== 'countdown') {
+      add('warning', 'overlay-broken-reference', `Progress bar ${overlayId} is linked to unknown countdown ${overlay.linkedCountdownId}`);
+    }
+    if (cycleIds.has(overlayId)) add('warning', 'overlay-cycle', `Overlay ${overlayId} is part of an anchor cycle`);
+
+    if (overlay.type === 'sound') return;
+
+    const { box } = overlay;
+    const inRange = (v: number) => Number.isFinite(v) && v >= -BOX_EPSILON && v <= 1 + BOX_EPSILON;
+    if (![box.x, box.y, box.width, box.height, box.x + box.width, box.y + box.height].every((v) => inRange(v)) || box.width <= 0 || box.height <= 0) {
+      add('error', 'overlay-box-out-of-range', `Overlay ${overlayId} box is outside the frame or empty`);
+    }
+
+    // A linked bar's own duration is not used
+    const linked = overlay.type === 'progressBar' && overlay.linkedCountdownId != null;
+    if (!linked && !(Number.isFinite(overlay.duration) && overlay.duration > 0)) {
+      add('error', 'overlay-invalid-duration', `Overlay ${overlayId} has invalid duration ${overlay.duration}`);
+    } else {
+      const fades = overlay.type === 'image' ? overlay.fadeIn + overlay.fadeOut : (overlay.type === 'countdown' ? overlay.fadeOut : 0);
+      if (fades > overlay.duration) add('warning', 'overlay-fades-too-long', `Overlay ${overlayId} fades are longer than its duration`);
+    }
+
+    if (overlayColors(overlay).some((color) => !OVERLAY_COLOR_REGEX.test(color))) {
+      add('error', 'overlay-invalid-color', `Overlay ${overlayId} has an invalid color`);
+    }
+  });
+
+  return issues;
+}
+
+/**
+ * Semantic checks of 04-diseno §1.2 and §8.1 that the schema can't express.
  * Source size/duration come from the source cache, overridable with fresher values (e.g. from ffprobe).
  * Checks that need an unknown size/duration are skipped.
  * Errors make the project unrenderable; warnings are handled downstream (e.g. the planner shortens the transition).
@@ -125,6 +202,8 @@ export function validateMixProject(project: MixProject, { sourceDurations = {}, 
   if (settings.gap.width % 2 !== 0) {
     issues.push({ level: 'warning', code: 'odd-gap', message: 'Odd gap width can leave a 1px fill column (yuv420p needs even widths)' });
   }
+
+  issues.push(...validateOverlays(project, clipIds));
 
   return issues;
 }

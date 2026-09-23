@@ -45,7 +45,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T16 | Limpieza de la UI heredada de LosslessCut | M5 | Sonnet | T13 | hecha |
 | T17 | i18n (es), atajos y manual de usuario | M5 | Sonnet | T16 | hecha |
 | T18 | Empaquetado de VideoMix | M6 | Sonnet | T17 | hecha |
-| T19 | Overlays: modelo, migración v2 y anclajes | M7 | Opus | — | pendiente |
+| T19 | Overlays: modelo, migración v2 y anclajes | M7 | Opus | — | hecha |
 | T20 | Overlays: render de vídeo (PNG, contador, barra) | M7 | Opus | T19 | pendiente |
 | T21 | Overlays: efectos de sonido en la mezcla | M7 | Sonnet | T19 | pendiente |
 | T22 | Overlays: pistas en la vista Mix y panel de propiedades | M7 | Opus | T19 | pendiente |

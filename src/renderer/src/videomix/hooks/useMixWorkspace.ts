@@ -10,7 +10,8 @@ import type { SetWorking } from '../../hooks/useLoading';
 import type { WithErrorHandling } from '../../hooks/useErrorHandling';
 import type { FileFfprobeMeta } from '../../ffmpeg';
 import type { UseMixProject } from './useMixProject';
-import type { LoadedMixProject } from '../projectFile';
+import type { LoadedMixProject, MissingOverlayFile, OverlayFileKind } from '../projectFile';
+import { getOverlayFiles } from '../projectFile';
 import { askForRecoverProject } from '../dialogs';
 import { classifyOpenedPaths, countClipsBySource, createMusic, getMixProjectTitle, getSourceMeta, isSourceMetaChanged } from '../workspace';
 
@@ -35,10 +36,12 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   withErrorHandling: WithErrorHandling,
   confirmDialog: ConfirmDialog,
 }) {
-  const { project, addSources, removeSource, relinkSource, updateSettings, setSourceMeta } = mixProject;
+  const { project, addSources, removeSource, relinkSource, updateSettings, setSourceMeta, relinkOverlayFile } = mixProject;
 
   // Sources whose file wasn't found (when opening/recovering the project or activating the source)
   const [missingSourceIds, setMissingSourceIds] = useState<ReadonlySet<string>>(new Set());
+  // Overlay files (image/sound/font) not found when opening/recovering the project, for T22 to offer "Locate..."
+  const [missingOverlayFiles, setMissingOverlayFiles] = useState<readonly MissingOverlayFile[]>([]);
   // Settles when the recovery offer at startup is over (see the effect at the end)
   const recoveryDoneRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -114,6 +117,19 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     }, i18n.t('Failed to open file'));
   }, [activateSourceFile, project.sources, relinkSource, withErrorHandling]);
 
+  const userLocateOverlayFile = useCallback(async (overlayId: string, kind: OverlayFileKind) => {
+    const overlay = project.overlays.find((o) => o.id === overlayId);
+    const file = overlay != null ? getOverlayFiles(overlay).find((f) => f.kind === kind)?.file : undefined;
+    if (file == null) return;
+    await withErrorHandling(async () => {
+      const { canceled, filePaths } = await showOpenDialog({ properties: ['openFile'], defaultPath: dirname(file.absolutePath), title: i18n.t('Locate {{name}}', { name: basename(file.absolutePath) }) });
+      const [newPath] = filePaths;
+      if (canceled || newPath == null) return;
+      relinkOverlayFile(overlayId, kind, newPath);
+      setMissingOverlayFiles((existing) => existing.filter((m) => m.overlayId !== overlayId || m.kind !== kind));
+    }, i18n.t('Failed to open file'));
+  }, [project.overlays, relinkOverlayFile, withErrorHandling]);
+
   const userRemoveSource = useCallback(async (sourceId: string) => {
     const source = project.sources.find((s) => s.id === sourceId);
     if (source == null || workingRef.current) return;
@@ -160,6 +176,7 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     closeMedia();
     const missing = new Set(loaded?.missingSourceIds);
     setMissingSourceIds(missing);
+    setMissingOverlayFiles(loaded?.missingOverlayFiles ?? []);
     if (loaded == null) return;
     if (missing.size > 0) {
       getSwal().toast.fire({ icon: 'warning', timer: 10000, title: i18n.t('{{numMissing}} source file(s) not found. Use "Locate..." in the sources list.', { numMissing: missing.size }) });
@@ -280,10 +297,12 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   return {
     currentSourceId,
     missingSourceIds,
+    missingOverlayFiles,
     clipCountBySource,
     openFiles,
     userActivateSource,
     userLocateSource,
+    userLocateOverlayFile,
     userRemoveSource,
     userAddSourcesDialog,
     userNewProject,

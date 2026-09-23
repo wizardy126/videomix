@@ -10,6 +10,7 @@ import { deleteRecoveryFile, findRecoverableProjects, getRecoveryDir, resolveRec
 import { createMixSource } from './projectReducer';
 import { createEmptyMixProject } from './types';
 import type { MixProject } from './types';
+import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay } from './overlays/factories';
 
 const deps: NodeDeps = { path, fs };
 
@@ -24,8 +25,21 @@ function makeProject(dir: string): MixProject {
     clips: [{ id: 'c1', sourceId: 's1', name: 'a #1', color: 2, start: 1, end: 3.5, maxRect: { x: 0, y: 0, width: 640, height: 480 }, minRect: { x: 10, y: 10, width: 100, height: 100 }, muted: false, gainDb: -2 }],
     settings: { ...project.settings, music: { path: path.join(dir, 'music.mp3'), absolutePath: path.join(dir, 'music.mp3'), volumeDb: -6, loop: true } },
     loudnessCache: { abc: { hasAudio: true, inputI: -20, inputTp: -1, inputLra: 5, inputThresh: -30 } },
+    overlays: [
+      createImageOverlay({ id: 'o1', name: 'Logo', filePath: path.join(dir, 'img', 'logo.png') }),
+      { ...createCountdownOverlay({ id: 'o2', name: 'Countdown' }), font: { path: path.join(dir, 'font.ttf'), absolutePath: path.join(dir, 'font.ttf') } },
+      createCountdownOverlay({ id: 'o3', name: 'Countdown (bundled font)' }),
+      createProgressBarOverlay({ id: 'o4', name: 'Bar', linkedCountdownId: 'o2' }),
+      createSoundOverlay({ id: 'o5', name: 'Beep', filePath: path.join(dir, 'beep.wav') }),
+    ],
   };
 }
+
+const overlayPaths = (project: MixProject) => project.overlays.flatMap((o) => {
+  if (o.type === 'image' || o.type === 'sound') return [[o.id, o.path, o.absolutePath]];
+  if (o.type === 'countdown' && o.font != null) return [[o.id, o.font.path, o.font.absolutePath]];
+  return [];
+});
 
 describe('project paths', () => {
   test('toProjectRelativePath posix', () => {
@@ -57,6 +71,12 @@ describe('project paths', () => {
       ['b.mp4', '/home/u/proj/b.mp4'],
     ]);
     expect(saved.settings.music).toMatchObject({ path: 'music.mp3', absolutePath: '/home/u/proj/music.mp3' });
+    expect(overlayPaths(saved)).toEqual([
+      ['o1', 'img/logo.png', '/home/u/proj/img/logo.png'],
+      ['o2', 'font.ttf', '/home/u/proj/font.ttf'],
+      ['o5', 'beep.wav', '/home/u/proj/beep.wav'],
+    ]);
+    expect(saved.overlays[2]).toBe(project.overlays[2]);
     expect(project.sources[0]!.path).toBe('/home/u/proj/media/a.mp4');
   });
 
@@ -84,7 +104,7 @@ describe('save / load', () => {
 
   test('round trip', async () => {
     const project = makeProject(tmpDir);
-    await Promise.all([path.join(tmpDir, 'media', 'a.mp4'), path.join(tmpDir, 'b.mp4'), path.join(tmpDir, 'music.mp3')].map((p) => touch(p)));
+    await Promise.all(['media/a.mp4', 'b.mp4', 'music.mp3', 'img/logo.png', 'font.ttf', 'beep.wav'].map((p) => touch(path.join(tmpDir, p))));
     const vmxPath = path.join(tmpDir, 'p.vmx');
 
     await saveMixProject(deps, vmxPath, project);
@@ -92,7 +112,10 @@ describe('save / load', () => {
     expect(json.sources[0].path).toBe('media/a.mp4');
     expect(json.sources[0].absolutePath).toBe(path.join(tmpDir, 'media', 'a.mp4'));
 
-    expect(await loadMixProject(deps, vmxPath)).toEqual({ project, missingSourceIds: [], missingMusic: false });
+    expect(json.version).toBe(2);
+    expect(json.overlays[0].path).toBe('img/logo.png');
+
+    expect(await loadMixProject(deps, vmxPath)).toEqual({ project, missingSourceIds: [], missingMusic: false, missingOverlayFiles: [] });
   });
 
   test('project moved together with its media: relative path wins', async () => {
@@ -106,6 +129,34 @@ describe('save / load', () => {
     expect(loaded.project.sources[0]).toMatchObject({ path: path.join(movedDir, 'media', 'a.mp4'), absolutePath: path.join(movedDir, 'media', 'a.mp4') });
     expect(loaded.missingSourceIds).toEqual(['s2']);
     expect(loaded.missingMusic).toBe(true);
+    expect(loaded.missingOverlayFiles).toEqual([{ overlayId: 'o1', kind: 'media' }, { overlayId: 'o2', kind: 'font' }, { overlayId: 'o5', kind: 'media' }]);
+  });
+
+  test('overlay files: relative path wins, then the absolute fallback, else reported', async () => {
+    const project = makeProject(tmpDir);
+    await touch(path.join(tmpDir, 'font.ttf'));
+    await saveMixProject(deps, path.join(tmpDir, 'p.vmx'), project);
+
+    const movedDir = path.join(tmpDir, 'moved');
+    await touch(path.join(movedDir, 'img', 'logo.png'));
+    await fs.copyFile(path.join(tmpDir, 'p.vmx'), path.join(movedDir, 'p.vmx'));
+    const loaded = await loadMixProject(deps, path.join(movedDir, 'p.vmx'));
+    expect(overlayPaths(loaded.project)).toEqual([
+      ['o1', path.join(movedDir, 'img', 'logo.png'), path.join(movedDir, 'img', 'logo.png')],
+      ['o2', path.join(tmpDir, 'font.ttf'), path.join(tmpDir, 'font.ttf')],
+      ['o5', path.join(movedDir, 'beep.wav'), path.join(tmpDir, 'beep.wav')],
+    ]);
+    expect(loaded.missingOverlayFiles).toEqual([{ overlayId: 'o5', kind: 'media' }]);
+  });
+
+  test('opens a v1 project', async () => {
+    const vmxPath = path.join(tmpDir, 'old.vmx');
+    const { overlays, ...v1 } = makeProject(tmpDir);
+    await fs.writeFile(vmxPath, JSON5.stringify({ ...toSavedMixProject(path, vmxPath, { ...v1, overlays: [] }), version: 1, overlays: undefined }));
+    const loaded = await loadMixProject(deps, vmxPath);
+    expect(loaded.project).toMatchObject({ version: 2, overlays: [], clips: v1.clips });
+    expect(loaded.missingOverlayFiles).toEqual([]);
+    expect(overlays).toHaveLength(5);
   });
 
   test('project moved without its media: absolute fallback', async () => {

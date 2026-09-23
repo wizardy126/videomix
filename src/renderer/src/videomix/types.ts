@@ -146,9 +146,140 @@ export const mixProjectV1Schema = z.object({
   loudnessCache: z.record(z.string(), loudnessMeasurementSchema).optional(),
 });
 
-export type MixProject = z.infer<typeof mixProjectV1Schema>;
+/** Where an overlay starts (01-requisitos §9.2). `edge` + `offset` (s, may be negative) relative to a clip or another overlay. */
+export const overlayAnchorSchema = z.discriminatedUnion('kind', [
+  /** Time in the final video (s). */
+  z.object({ kind: z.literal('absolute'), time: z.number().nonnegative() }),
+  /** Uses the clip's `ColumnPlacement.startTime` / `endTime`, so it follows the clip when the planner moves it. */
+  z.object({ kind: z.literal('clip'), clipId: z.string().min(1), edge: z.enum(['start', 'end']), offset: z.number() }),
+  z.object({ kind: z.literal('element'), elementId: z.string().min(1), edge: z.enum(['start', 'end']), offset: z.number() }),
+]);
 
-export const MIX_PROJECT_VERSION = 1;
+export type OverlayAnchor = z.infer<typeof overlayAnchorSchema>;
+
+/**
+ * Box in fractions (0..1) of the output frame (x/width of its width, y/height of its height), so it works at any resolution.
+ * The range is checked by validateMixProject (not the schema), so a project with a bad box still opens and can be fixed.
+ */
+export const overlayBoxSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+
+export type OverlayBox = z.infer<typeof overlayBoxSchema>;
+
+/**
+ * Lengths that aren't part of a box (text border/shadow, bar border) are in "reference px": px of a 1080 px high output,
+ * scaled by `outputHeight / OVERLAY_REFERENCE_HEIGHT` when rendering (see `overlayPxToOutput`).
+ */
+export const OVERLAY_REFERENCE_HEIGHT = 1080;
+
+/** `#rrggbb` or `#rrggbbaa` (alpha, e.g. `#00000000` = transparent). */
+export const OVERLAY_COLOR_REGEX = /^#[\da-f]{6}([\da-f]{2})?$/i;
+
+const overlayColorSchema = z.string().regex(OVERLAY_COLOR_REGEX);
+
+/** A user file stored like the sources: `path` relative to the .vmx when saved (absolute in memory), `absolutePath` as fallback. */
+export const overlayFileSchema = z.object({ path: z.string(), absolutePath: z.string() });
+
+export type OverlayFile = z.infer<typeof overlayFileSchema>;
+
+const overlayBaseSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  anchor: overlayAnchorSchema,
+});
+
+/** PNG (with alpha) scaled to `box`. */
+export const imageOverlaySchema = overlayBaseSchema.extend({
+  type: z.literal('image'),
+  ...overlayFileSchema.shape,
+  /** Seconds. */
+  duration: z.number(),
+  box: overlayBoxSchema,
+  /** Seconds, 0 = none. */
+  fadeIn: z.number().nonnegative(),
+  fadeOut: z.number().nonnegative(),
+});
+
+export type ImageOverlay = z.infer<typeof imageOverlaySchema>;
+
+/**
+ * Counts down from `duration` to 0 while visible, then disappears. Text format: `SS` below 60 s, `MM:SS` from 60 s on,
+ * with `decimals`, rounded up to that precision (T20).
+ */
+export const countdownOverlaySchema = overlayBaseSchema.extend({
+  type: z.literal('countdown'),
+  duration: z.number(),
+  /** `box.height` is the font size; the text is vertically centered in the box and aligned horizontally with `align`. */
+  box: overlayBoxSchema,
+  align: z.enum(['left', 'center', 'right']),
+  decimals: z.literal([0, 1, 2, 3]),
+  /** `05` instead of `5` (and `01:05` instead of `1:05`). */
+  leadingZeros: z.boolean(),
+  color: overlayColorSchema,
+  /** TTF/OTF file; if missing, the bundled font. */
+  font: overlayFileSchema.optional(),
+  /** Reference px (see OVERLAY_REFERENCE_HEIGHT), 0 = none. */
+  border: z.object({ width: z.number().nonnegative(), color: overlayColorSchema }),
+  /** Offset in reference px. Missing = no shadow. */
+  shadow: z.object({ x: z.number(), y: z.number(), color: overlayColorSchema }).optional(),
+  /** Seconds before reaching 0, 0 = none. */
+  fadeOut: z.number().nonnegative(),
+});
+
+export type CountdownOverlay = z.infer<typeof countdownOverlaySchema>;
+
+export const progressBarDirections = ['ltr', 'rtl', 'btt', 'ttb'] as const;
+
+export const progressBarOverlaySchema = overlayBaseSchema.extend({
+  type: z.literal('progressBar'),
+  /** Ignored (like `anchor`) while linked to a countdown. */
+  duration: z.number(),
+  /** Takes the start and duration of this countdown. */
+  linkedCountdownId: z.string().min(1).optional(),
+  box: overlayBoxSchema,
+  fillColor: overlayColorSchema,
+  /** `#00000000` = no background. */
+  backgroundColor: overlayColorSchema,
+  /** Reference px, drawn inside the box. 0 = none. */
+  border: z.object({ width: z.number().nonnegative(), color: overlayColorSchema }),
+  /** Direction in which the fill grows. */
+  direction: z.enum(progressBarDirections),
+  /** `fill`: 0 → 100 % during its duration; `empty`: 100 → 0 %. */
+  mode: z.enum(['fill', 'empty']),
+});
+
+export type ProgressBarOverlay = z.infer<typeof progressBarOverlaySchema>;
+
+/** Plays the whole file (its duration comes from outside, see resolveOverlayTimes). Normalized to −16 LUFS + `gainDb` (T21). */
+export const soundOverlaySchema = overlayBaseSchema.extend({
+  type: z.literal('sound'),
+  ...overlayFileSchema.shape,
+  gainDb: z.number(),
+});
+
+export type SoundOverlay = z.infer<typeof soundOverlaySchema>;
+
+export const mixOverlaySchema = z.discriminatedUnion('type', [imageOverlaySchema, countdownOverlaySchema, progressBarOverlaySchema, soundOverlaySchema]);
+
+export type MixOverlay = z.infer<typeof mixOverlaySchema>;
+
+export type MixOverlayType = MixOverlay['type'];
+
+export const mixProjectV2Schema = mixProjectV1Schema.extend({
+  version: z.literal(2),
+  /** Array order is the layer order: the last one is drawn on top. */
+  overlays: mixOverlaySchema.array(),
+});
+
+export const mixProjectSchema = mixProjectV2Schema;
+
+export type MixProject = z.infer<typeof mixProjectSchema>;
+
+export const MIX_PROJECT_VERSION = 2;
 
 export const defaultMixSettings: MixSettings = {
   resolution: '1080p',
@@ -166,9 +297,10 @@ export const defaultMixSettings: MixSettings = {
 
 export function createEmptyMixProject(): MixProject {
   return {
-    version: 1,
+    version: MIX_PROJECT_VERSION,
     sources: [],
     clips: [],
     settings: structuredClone(defaultMixSettings),
+    overlays: [],
   };
 }

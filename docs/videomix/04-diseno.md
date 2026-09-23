@@ -62,12 +62,13 @@ interface MixSettings {
 }
 
 interface MixProject {
-  version: 1,
+  version: 2,              // v1 (sin overlays) se migra al abrir, ver §8.1
   sources: MixSource[],
   clips: MixClip[],        // el orden del array es el orden de la lista
   settings: MixSettings,
   // cache de análisis de sonoridad, por clave (ver §5.1)
   loudnessCache?: Record<string, LoudnessMeasurement> | undefined,
+  overlays: MixOverlay[],  // desde v2 (§8.1); el orden es el orden de capas
 }
 ```
 
@@ -468,24 +469,28 @@ Requisitos: [01-requisitos §9](01-requisitos.md). Tareas: T19–T23.
 
 ### 8.1 Modelo (T19)
 
-`MixProject` pasa a **`version: 2`**, con migración automática desde v1 (`overlays: []`).
+`MixProject` pasa a **`version: 2`**, con migración automática desde v1 (`overlays: []`). Se guarda siempre en v2. Esquemas zod en `videomix/types.ts`; la lógica, en `videomix/overlays/`. Detalle completo y API en las notas de [T19](execution/T19-overlays-modelo.md).
 
 ```ts
 type OverlayAnchor =
-  | { kind: 'absolute', time: number }
+  | { kind: 'absolute', time: number }                                        // time ≥ 0
   | { kind: 'clip', clipId: string, edge: 'start' | 'end', offset: number }
   | { kind: 'element', elementId: string, edge: 'start' | 'end', offset: number };
 
 interface OverlayBase { id: string, name: string, anchor: OverlayAnchor }
-// Caja en fracciones del fotograma de salida (0..1) para que valga en cualquier resolución
+// Caja en fracciones del fotograma de salida (0..1). El rango lo comprueba validateMixProject, no el esquema.
 interface OverlayBox { x: number, y: number, width: number, height: number }
+// Colores: '#rrggbb' o '#rrggbbaa'. Grosores de borde y desplazamientos de sombra: "px de referencia" de una salida de
+// 1080 px de alto (OVERLAY_REFERENCE_HEIGHT), escalados con overlayPxToOutput(valor, altoSalida).
 
 interface ImageOverlay extends OverlayBase { type: 'image', path: string, absolutePath: string, duration: number, box: OverlayBox, fadeIn: number, fadeOut: number }
 interface CountdownOverlay extends OverlayBase {
-  type: 'countdown', duration: number, box: OverlayBox /* x,y = posición; height = tamaño de letra */,
+  type: 'countdown', duration: number,
+  box: OverlayBox,                    // box.height = tamaño de letra; texto centrado en vertical
+  align: 'left' | 'center' | 'right', // alineación horizontal dentro de la caja (refinamiento de T19)
   decimals: 0 | 1 | 2 | 3, leadingZeros: boolean, color: string,
   font?: { path: string, absolutePath: string } | undefined,   // por defecto, la fuente incluida
-  border: { width: number, color: string }, shadow: { x: number, y: number, color: string } | undefined, fadeOut: number,
+  border: { width: number, color: string }, shadow?: { x: number, y: number, color: string } | undefined, fadeOut: number,
 }
 interface ProgressBarOverlay extends OverlayBase {
   type: 'progressBar', duration: number, linkedCountdownId?: string | undefined, box: OverlayBox,
@@ -498,11 +503,14 @@ type MixOverlay = ImageOverlay | CountdownOverlay | ProgressBarOverlay | SoundOv
 // MixProject.overlays: MixOverlay[]  (el orden es el orden de capas: el último va encima)
 ```
 
-- **Resolución de tiempos** (`resolveOverlayTimes(project, plan) → Map<id, { start, end, warnings }>`, pura):
-  - orden topológico de los anclajes y detección de ciclos;
-  - los anclajes a clips usan `ColumnPlacement.startTime` / `endTime`;
-  - la duración de los sonidos sale de su medida (T21) o de ffprobe;
-  - la barra con `linkedCountdownId` toma el inicio y la duración del contador.
+- **Resolución de tiempos** (`overlays/resolveOverlayTimes.ts`: `resolveOverlayTimes(project, plan, { soundDurations }) → Map<id, { start, end, rawStart, rawEnd, warnings }>`, pura y O(n)):
+  - orden topológico de los anclajes y detección de ciclos (cada elemento depende como mucho de otro: grafo funcional);
+  - los anclajes a clips usan `ColumnPlacement.startTime` / `endTime`; los anclajes a elementos usan los tiempos sin recortar (`rawStart`/`rawEnd`);
+  - la duración de los sonidos llega en `soundDurations` (T21); si falta, dura 0 con aviso;
+  - la barra con `linkedCountdownId` toma el inicio y el fin del contador;
+  - ciclos y referencias rotas no lanzan: el elemento se trata como absoluto en `max(0, offset)`, con aviso;
+  - `start`/`end` se recortan a `[0, plan.duration]`, con aviso (`clipped` u `outside-video`).
+- **Borrado**: `removeClip`, `removeSource` y `removeOverlay` reciben los tiempos resueltos antes del borrado; los elementos anclados a lo borrado pasan a absolutos en su inicio actual y las barras vinculadas a un contador borrado se desvinculan conservando su inicio y duración.
 
 ### 8.2 Render de vídeo (T20)
 

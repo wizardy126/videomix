@@ -3,7 +3,7 @@ import type { PlatformPath } from 'node:path';
 import type fsPromises from 'node:fs/promises';
 
 import { parseMixProject } from './project';
-import type { MixProject } from './types';
+import type { MixOverlay, MixProject, OverlayFile } from './types';
 
 // Node modules are passed in (instead of `window.require` here) so this file can be tested with vitest in Node.
 export type PathApi = Pick<PlatformPath, 'dirname' | 'resolve' | 'relative' | 'isAbsolute' | 'sep' | 'join' | 'basename'>;
@@ -41,8 +41,35 @@ export function resolveProjectPath(path: PathApi, baseDir: string | undefined, s
   return path.resolve(baseDir, storedPath);
 }
 
+/** Which file of an overlay: its media (image/sound) or the countdown font. */
+export type OverlayFileKind = 'media' | 'font';
+
+/** The user files of an overlay (the bundled font isn't one). */
+export function getOverlayFiles(overlay: MixOverlay): { kind: OverlayFileKind, file: OverlayFile }[] {
+  if (overlay.type === 'image' || overlay.type === 'sound') return [{ kind: 'media', file: overlay }];
+  if (overlay.type === 'countdown' && overlay.font != null) return [{ kind: 'font', file: overlay.font }];
+  return [];
+}
+
+/** Applies `fn` to each user file of an overlay (keeping the rest of it). */
+export async function mapOverlayFiles(overlay: MixOverlay, fn: (file: OverlayFile, kind: OverlayFileKind) => OverlayFile | Promise<OverlayFile>): Promise<MixOverlay> {
+  if (overlay.type === 'image' || overlay.type === 'sound') {
+    const { path, absolutePath } = await fn({ path: overlay.path, absolutePath: overlay.absolutePath }, 'media');
+    return { ...overlay, path, absolutePath };
+  }
+  if (overlay.type === 'countdown' && overlay.font != null) return { ...overlay, font: await fn(overlay.font, 'font') };
+  return overlay;
+}
+
+// Sync variant for saving (the relativization is sync)
+function mapOverlayFilesSync(overlay: MixOverlay, fn: (file: OverlayFile) => OverlayFile): MixOverlay {
+  if (overlay.type === 'image' || overlay.type === 'sound') return { ...overlay, ...fn({ path: overlay.path, absolutePath: overlay.absolutePath }) };
+  if (overlay.type === 'countdown' && overlay.font != null) return { ...overlay, font: fn(overlay.font) };
+  return overlay;
+}
+
 /**
- * In memory, `path` of sources/music is the absolute path in use and `absolutePath` the fallback
+ * In memory, `path` of sources/music/overlay files is the absolute path in use and `absolutePath` the fallback
  * (the same, unless the file is missing). This converts `path` to relative for writing to `projectFilePath`.
  */
 export function toSavedMixProject(path: PathApi, projectFilePath: string, project: MixProject): MixProject {
@@ -51,12 +78,15 @@ export function toSavedMixProject(path: PathApi, projectFilePath: string, projec
   return {
     ...project,
     sources: project.sources.map((source) => ({ ...source, path: toProjectRelativePath(path, baseDir, source.path) })),
+    overlays: project.overlays.map((overlay) => mapOverlayFilesSync(overlay, (file) => ({ ...file, path: toProjectRelativePath(path, baseDir, file.path) }))),
     settings: {
       ...project.settings,
       ...(music != null && { music: { ...music, path: toProjectRelativePath(path, baseDir, music.path) } }),
     },
   };
 }
+
+export interface MissingOverlayFile { overlayId: string, kind: OverlayFileKind }
 
 /**
  * Resolve the stored paths of a loaded project: the relative path first, then the absolute fallback.
@@ -78,9 +108,20 @@ export async function resolveMixProjectPaths({ path, fs }: NodeDeps, baseDir: st
   const { music } = project.settings;
   const resolvedMusic = music != null ? await resolveFile(music) : undefined;
 
+  const resolvedOverlays = await Promise.all(project.overlays.map(async (overlay) => {
+    const missing: MissingOverlayFile[] = [];
+    const resolved = await mapOverlayFiles(overlay, async (file, kind) => {
+      const ret = await resolveFile(file);
+      if (!ret.found) missing.push({ overlayId: overlay.id, kind });
+      return ret.file;
+    });
+    return { overlay: resolved, missing };
+  }));
+
   const resolvedProject: MixProject = {
     ...project,
     sources: resolvedSources.map(({ file }) => file),
+    overlays: resolvedOverlays.map(({ overlay }) => overlay),
     settings: {
       ...project.settings,
       ...(resolvedMusic != null && { music: resolvedMusic.file }),
@@ -91,6 +132,8 @@ export async function resolveMixProjectPaths({ path, fs }: NodeDeps, baseDir: st
     project: resolvedProject,
     missingSourceIds: resolvedSources.filter(({ found }) => !found).map(({ file }) => file.id),
     missingMusic: resolvedMusic != null && !resolvedMusic.found,
+    /** In layer order. Relink with `relinkOverlayFile` (useMixProject). */
+    missingOverlayFiles: resolvedOverlays.flatMap(({ missing }) => missing),
   };
 }
 
