@@ -2,7 +2,7 @@
  * Result of the first `loudnorm` pass over a clip (EBU R128). Mirrors `LoudnessMeasurement` in
  * src/renderer/src/videomix/types.ts (main can't import the renderer types).
  */
-export type LoudnessAnalysis = {
+export type LoudnessAnalysis = ({
   hasAudio: true,
   /** Integrated loudness (LUFS). */
   inputI: number,
@@ -14,7 +14,14 @@ export type LoudnessAnalysis = {
   /** Of the analyzed audio stream, for getFixChannelLayoutFilter when mixing. */
   channels?: number | undefined,
   channelLayout?: string | undefined,
-} | { hasAudio: false };
+} | { hasAudio: false }) & {
+  /**
+   * File duration (s), only set for a whole-file measurement (T12b music, T21 sound overlays: `start`/`end` omitted):
+   * `resolveOverlayTimes` needs a sound overlay's duration. Absent on a clip's (ranged) measurement, and on cached
+   * entries measured before T21.
+   */
+  duration?: number | undefined,
+};
 
 /**
  * Integrated loudness at or below this is treated as silence. -70 LUFS is the EBU R128 absolute gate: loudnorm reports
@@ -90,4 +97,17 @@ export function parseFfprobeAudioStream(stdout: string) {
     channels: typeof stream.channels === 'number' ? stream.channels : undefined,
     channelLayout: typeof stream.channel_layout === 'string' ? stream.channel_layout : undefined,
   };
+}
+
+/**
+ * Duration (s) from `ffprobe -show_entries format=duration -of json`, run alongside {@link parseFfprobeAudioStream}
+ * (same JSON, `format` doesn't depend on `-select_streams`): T21, so sound overlays know their length even without
+ * measuring their loudness again.
+ */
+export function parseFfprobeDuration(stdout: string) {
+  const json: unknown = JSON.parse(stdout);
+  const format = json != null && typeof json === 'object' ? (json as { format?: unknown }).format : undefined;
+  const duration = format != null && typeof format === 'object' ? (format as { duration?: unknown }).duration : undefined;
+  const num = typeof duration === 'string' || typeof duration === 'number' ? Number(duration) : NaN;
+  return Number.isFinite(num) && num >= 0 ? num : undefined;
 }

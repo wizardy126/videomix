@@ -3,7 +3,7 @@ import invariant from 'tiny-invariant';
 
 import { getClipDuration } from './project';
 import { MUSIC_LOUDNESS_KEY } from './render/buildAudioGraph';
-import type { LoudnessMeasurement, MixClip, MixMusic, MixProject } from './types';
+import type { LoudnessMeasurement, MixClip, MixMusic, MixProject, SoundOverlay } from './types';
 
 export interface LoudnessDeps {
   stat: (path: string) => Promise<{ mtimeMs: number, size: number }>,
@@ -34,8 +34,9 @@ export async function getLoudnessCacheKey({ absolutePath, mtimeMs, size, start, 
 }
 
 /**
- * Cache key of the music track's loudness (T12b): the whole file, so it reuses `getLoudnessCacheKey` with the
- * sentinel range `[0, Infinity)`, which no clip (a finite range) can ever produce.
+ * Cache key of a whole file's loudness (music, T12b; sound overlays, T21): reuses `getLoudnessCacheKey` with the
+ * sentinel range `[0, Infinity)`, which no clip (a finite range) can ever produce. Two sound overlays (or an
+ * overlay and the music) sharing a file share the measurement.
  */
 export const getMusicLoudnessCacheKey = ({ absolutePath, mtimeMs, size }: { absolutePath: string, mtimeMs: number, size: number }) => getLoudnessCacheKey({ absolutePath, mtimeMs, size, start: 0, end: Infinity });
 
@@ -49,14 +50,20 @@ export const getClipsNeedingLoudness = (clips: MixClip[]) => clips.filter((clip)
  * - `music` (T12b): when given, also measures the whole music file (its own cache key, `getMusicLoudnessCacheKey`) and
  *   returns it under `MUSIC_LOUDNESS_KEY` (a key no clip id can be), the input `buildAudioGraph` expects for the music
  *   normalization gain.
+ * - `sounds` (T21): when given, also measures the whole file of every sound overlay (same per-file cache key as the
+ *   music) and returns each one under its overlay id. Its measurement carries `duration` (the file's length), which
+ *   `getSoundDurations` turns into the `soundDurations` `resolveOverlayTimes` needs; a cache entry from before T21
+ *   (no `duration`) is re-measured.
  * - `onCacheEntries` gets the new cache entries (pass `setLoudnessCache` of useMixProject). It's also called with the
  *   ones measured so far when aborted or failing, so the work isn't lost.
  * - `onProgress` goes from 0 to 1 over the measurements that are needed.
- * - Returns the measurements by clip id (plus the music's, if requested), the input of `buildAudioGraph`.
+ * - Returns the measurements by clip id (plus the music's and the sounds', if requested), the input of
+ *   `buildAudioGraph`.
  */
-export async function ensureLoudness({ project, music, onProgress, abortSignal, onCacheEntries, deps = getElectronDeps(), concurrency = 2 }: {
+export async function ensureLoudness({ project, music, sounds, onProgress, abortSignal, onCacheEntries, deps = getElectronDeps(), concurrency = 2 }: {
   project: Pick<MixProject, 'clips' | 'sources' | 'loudnessCache'>,
   music?: Pick<MixMusic, 'absolutePath'> | undefined,
+  sounds?: Pick<SoundOverlay, 'id' | 'absolutePath'>[] | undefined,
   onProgress?: ((progress: number) => void) | undefined,
   abortSignal?: AbortSignal | undefined,
   onCacheEntries?: ((entries: Record<string, LoudnessMeasurement>) => void) | undefined,
@@ -87,12 +94,21 @@ export async function ensureLoudness({ project, music, onProgress, abortSignal, 
   }));
 
   const musicKey = music != null ? await getMusicLoudnessCacheKey({ absolutePath: music.absolutePath, ...await statOf(music.absolutePath) }) : undefined;
+  const keyedSounds = await Promise.all((sounds ?? []).map(async (sound) => {
+    const key = await getMusicLoudnessCacheKey({ absolutePath: sound.absolutePath, ...await statOf(sound.absolutePath) });
+    return { sound, key };
+  }));
 
   const toMeasure = new Map<string, { filePath: string, start?: number, end?: number }>();
   keyedClips.forEach(({ clip, filePath, key }) => {
     if (project.loudnessCache?.[key] == null && !toMeasure.has(key)) toMeasure.set(key, { filePath, start: clip.start, end: clip.end });
   });
   if (musicKey != null && music != null && project.loudnessCache?.[musicKey] == null) toMeasure.set(musicKey, { filePath: music.absolutePath });
+  // Whole-file, so also re-measures a cache entry from before T21 (no `duration`)
+  keyedSounds.forEach(({ sound, key }) => {
+    const cached = project.loudnessCache?.[key];
+    if ((cached == null || cached.duration == null) && !toMeasure.has(key)) toMeasure.set(key, { filePath: sound.absolutePath });
+  });
 
   const newEntries: Record<string, LoudnessMeasurement> = {};
   let done = 0;
@@ -118,5 +134,24 @@ export async function ensureLoudness({ project, music, onProgress, abortSignal, 
     invariant(measurement != null);
     result[MUSIC_LOUDNESS_KEY] = measurement;
   }
+  keyedSounds.forEach(({ sound, key }) => {
+    const measurement = newEntries[key] ?? project.loudnessCache?.[key];
+    invariant(measurement != null);
+    result[sound.id] = measurement;
+  });
+  return result;
+}
+
+/**
+ * `soundDurations` (id → s) that `resolveOverlayTimes` needs, from an `ensureLoudness` result and the sound overlays
+ * it was called with. A sound whose measurement has no `duration` (not measured, or silent with the file unreadable
+ * by ffprobe) is left out; `resolveOverlayTimes` then warns (`unknown-duration`) and treats it as 0 s.
+ */
+export function getSoundDurations(loudness: Record<string, LoudnessMeasurement>, sounds: Pick<SoundOverlay, 'id'>[]): Record<string, number> {
+  const result: Record<string, number> = {};
+  sounds.forEach(({ id }) => {
+    const duration = loudness[id]?.duration;
+    if (duration != null) result[id] = duration;
+  });
   return result;
 }

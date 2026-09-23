@@ -1,6 +1,6 @@
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { describe, expect, test } from 'vitest';
-import { parseFfprobeAudioStream, parseLoudnormOutput, toLoudnessAnalysis } from './loudnessParse';
+import { parseFfprobeAudioStream, parseFfprobeDuration, parseLoudnormOutput, toLoudnessAnalysis } from './loudnessParse';
 
 // Real ffmpeg 8 output (`-nostats`, stderr tail)
 const stderr = `  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono, fltp, 69 kb/s (default)
@@ -83,5 +83,22 @@ describe('parseFfprobeAudioStream', () => {
   test('no audio stream', () => {
     expect(parseFfprobeAudioStream('{"programs":[],"stream_groups":[],"streams":[]}')).toBeUndefined();
     expect(parseFfprobeAudioStream('{}')).toBeUndefined();
+  });
+});
+
+describe('parseFfprobeDuration', () => {
+  test('reads format.duration (T21)', () => {
+    expect(parseFfprobeDuration('{"streams":[{"index":1}],"format":{"duration":"12.345000"}}')).toBe(12.345);
+  });
+
+  test('present even without an audio stream, since format is independent of -select_streams', () => {
+    expect(parseFfprobeDuration('{"streams":[],"format":{"duration":"3.500000"}}')).toBe(3.5);
+  });
+
+  test('missing or invalid', () => {
+    expect(parseFfprobeDuration('{}')).toBeUndefined();
+    expect(parseFfprobeDuration('{"format":{}}')).toBeUndefined();
+    expect(parseFfprobeDuration('{"format":{"duration":"N/A"}}')).toBeUndefined();
+    expect(parseFfprobeDuration('{"format":{"duration":"-1"}}')).toBeUndefined();
   });
 });

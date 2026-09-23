@@ -2,8 +2,9 @@ import { describe, expect, test } from 'vitest';
 
 import { MUSIC_LOUDNESS_KEY, buildAudioGraph, getCompensationExpr, getNormalizationGain, getPlacementFades } from './buildAudioGraph';
 import { createEmptyMixProject } from '../types';
-import type { LoudnessMeasurement, MixClip, MixSettings } from '../types';
+import type { LoudnessMeasurement, MixClip, MixSettings, SoundOverlay } from '../types';
 import type { LayoutKeyframe, MixPlan } from '../planner/types';
+import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
 
 const rect = { x: 0, y: 0, width: 1920, height: 1080 };
 
@@ -162,5 +163,70 @@ describe('buildAudioGraph', () => {
 
   test('missing loudness of an audible clip throws', () => {
     expect(() => buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings(), loudness: { a: measured(-20, -6) } })).toThrow('Missing loudness');
+  });
+});
+
+describe('buildAudioGraph: sound overlays (T21)', () => {
+  const sound = (id: string, absolutePath: string, gainDb = 0): Pick<SoundOverlay, 'id' | 'absolutePath' | 'gainDb'> => ({ id, absolutePath, gainDb });
+  const times = (entries: [string, Pick<ResolvedOverlayTimes extends Map<string, infer V> ? V : never, 'start' | 'end'>][]): ResolvedOverlayTimes => new Map(entries.map(([id, { start, end }]) => [id, { start, end, rawStart: start, rawEnd: end, warnings: [] }]));
+
+  test('mixed in after the compensation, before the limiter', () => {
+    const overlays = [sound('beep', '/media/beep.wav', -3)];
+    const overlayTimes = times([['beep', { start: 2, end: 3.5 }]]);
+    const loudness = { ...twoColumnLoudness, beep: measured(-20, -6) };
+    const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings({ fadeInOut: false }), loudness, overlays, overlayTimes });
+    expect(audioPass.inputs).toContainEqual(['-vn', '-i', '/media/beep.wav']);
+    // getNormalizationGain(-20, -6) = min(4, 24, 11) = 4, plus gainDb -3 = 1
+    expect(audioPass.filterComplex).toContain('volume=1dB');
+    expect(audioPass.filterComplex).toContain('adelay=96000S:all=1'); // 2s * 48000
+    expect(audioPass.filterComplex).toContain('atrim=duration=1.5'); // 3.5 - 2
+    // after the clips' compensation and (no music here) right before the limiter
+    expect(audioPass.filterComplex).toMatch(/\[clips]\[s\d+]amix=inputs=2:normalize=0:duration=first\[withSounds];\n\[withSounds]atrim.*alimiter/s);
+    expect(audioPass).toMatchSnapshot();
+  });
+
+  test('with music too: sounds are summed in after the music mix', () => {
+    const overlays = [sound('beep', '/media/beep.wav')];
+    const overlayTimes = times([['beep', { start: 1, end: 2 }]]);
+    const loudness = { ...twoColumnLoudness, beep: measured(-16, -3) };
+    const settings = makeSettings({ music: { path: 'm.mp3', absolutePath: '/media/m.mp3', volumeDb: -12, loop: true } });
+    const { filterComplex } = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings, loudness, overlays, overlayTimes });
+    expect(filterComplex).toMatch(/\[mix]\[s\d+]amix=inputs=2:normalize=0:duration=first\[withSounds]/);
+  });
+
+  test('a resolved zero-duration overlay (outside the video) is left out', () => {
+    const overlays = [sound('beep', '/media/beep.wav')];
+    const overlayTimes = times([['beep', { start: 11.5, end: 11.5 }]]);
+    const loudness = { ...twoColumnLoudness, beep: measured(-16, -3) };
+    const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings(), loudness, overlays, overlayTimes });
+    expect(audioPass.inputs).not.toContainEqual(['-vn', '-i', '/media/beep.wav']);
+    expect(audioPass.filterComplex).not.toContain('withSounds');
+  });
+
+  test('an overlay missing from overlayTimes is left out', () => {
+    const overlays = [sound('beep', '/media/beep.wav')];
+    const loudness = { ...twoColumnLoudness, beep: measured(-16, -3) };
+    const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings(), loudness, overlays, overlayTimes: new Map() });
+    expect(audioPass.inputs).not.toContainEqual(['-vn', '-i', '/media/beep.wav']);
+  });
+
+  test('a silent overlay (no audio) is left out', () => {
+    const overlays = [sound('beep', '/media/beep.wav')];
+    const overlayTimes = times([['beep', { start: 1, end: 2 }]]);
+    const loudness = { ...twoColumnLoudness, beep: { hasAudio: false as const } };
+    const audioPass = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings(), loudness, overlays, overlayTimes });
+    expect(audioPass.inputs).not.toContainEqual(['-vn', '-i', '/media/beep.wav']);
+  });
+
+  test('missing loudness of a sounding overlay throws', () => {
+    const overlays = [sound('beep', '/media/beep.wav')];
+    const overlayTimes = times([['beep', { start: 1, end: 2 }]]);
+    expect(() => buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings(), loudness: twoColumnLoudness, overlays, overlayTimes })).toThrow('Missing loudness of sound overlay beep');
+  });
+
+  test('no overlays (or overlayTimes): unchanged from callers that don\'t pass them', () => {
+    const withoutOverlays = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings({ fadeInOut: false }), loudness: twoColumnLoudness });
+    const withEmptyOverlays = buildAudioGraph({ plan: twoColumnPlan, clips: twoColumnClips, sourcePaths, settings: makeSettings({ fadeInOut: false }), loudness: twoColumnLoudness, overlays: [], overlayTimes: new Map() });
+    expect(withEmptyOverlays).toEqual(withoutOverlays);
   });
 });

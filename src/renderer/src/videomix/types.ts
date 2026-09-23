@@ -118,6 +118,13 @@ export type MixSettings = z.infer<typeof mixSettingsSchema>;
  * Cached loudnorm analysis (first pass, EBU R128) of a clip's first audio stream, see src/main/videomix/loudness.ts.
  * Clips without audio (or pure silence) are cached as `{ hasAudio: false }`.
  */
+/**
+ * File duration (s), only present for a whole-file measurement (T12b music, T21 sound overlays: `start`/`end`
+ * omitted): `resolveOverlayTimes` needs a sound overlay's duration. Additive, so cached entries measured before T21
+ * (or a clip's ranged measurement) simply lack it.
+ */
+const loudnessDurationSchema = { duration: z.number().nonnegative().optional() };
+
 export const loudnessMeasurementSchema = z.discriminatedUnion('hasAudio', [
   z.object({
     hasAudio: z.literal(true),
@@ -130,8 +137,9 @@ export const loudnessMeasurementSchema = z.discriminatedUnion('hasAudio', [
     /** Of the audio stream, to fix unusual channel layouts when mixing (getFixChannelLayoutFilter). */
     channels: z.number().int().positive().optional(),
     channelLayout: z.string().optional(),
+    ...loudnessDurationSchema,
   }),
-  z.object({ hasAudio: z.literal(false) }),
+  z.object({ hasAudio: z.literal(false), ...loudnessDurationSchema }),
 ]);
 
 export type LoudnessMeasurement = z.infer<typeof loudnessMeasurementSchema>;

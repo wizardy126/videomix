@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { ensureLoudness, getLoudnessCacheKey } from './loudness';
+import { ensureLoudness, getLoudnessCacheKey, getSoundDurations } from './loudness';
 import type { LoudnessDeps } from './loudness';
 import { MUSIC_LOUDNESS_KEY } from './render/buildAudioGraph';
 import { createEmptyMixProject } from './types';
@@ -106,6 +106,58 @@ describe('ensureLoudness', () => {
     const result2 = await ensureLoudness({ project: { ...project, loudnessCache: entries }, music, deps: deps2 });
     expect(result2).toEqual(result);
     expect(deps2.measureLoudness).not.toHaveBeenCalled();
+  });
+
+  test('measures sound overlays too, whole file, under their overlay id (T21)', async () => {
+    const deps = makeDeps();
+    deps.measureLoudness.mockImplementation(async ({ filePath }) => ({ ...measurement(-14), duration: filePath.length }));
+    const onCacheEntries = vi.fn();
+    const project = makeProject([clip('c1', 's1', 0, 5)]);
+    const sounds = [{ id: 'beep', absolutePath: '/media/beep.wav' }, { id: 'boop', absolutePath: '/media/boop.wav' }];
+    const result = await ensureLoudness({ project, sounds, deps, onCacheEntries });
+
+    expect(result['beep']).toEqual({ ...measurement(-14), duration: '/media/beep.wav'.length });
+    expect(result['boop']).toEqual({ ...measurement(-14), duration: '/media/boop.wav'.length });
+    expect(deps.measureLoudness).toHaveBeenCalledTimes(3); // clip + 2 sounds
+
+    // cached the second time, and getSoundDurations reads the durations back out
+    const entries = onCacheEntries.mock.calls[0]![0] as Record<string, LoudnessMeasurement>;
+    const deps2 = makeDeps();
+    const result2 = await ensureLoudness({ project: { ...project, loudnessCache: entries }, sounds, deps: deps2 });
+    expect(result2).toEqual(result);
+    expect(deps2.measureLoudness).not.toHaveBeenCalled();
+    expect(getSoundDurations(result2, sounds)).toEqual({ beep: '/media/beep.wav'.length, boop: '/media/boop.wav'.length });
+  });
+
+  test('two sound overlays sharing a file share the measurement (one measureLoudness call)', async () => {
+    const deps = makeDeps();
+    deps.measureLoudness.mockResolvedValue({ ...measurement(-14), duration: 3 });
+    const project = makeProject([]);
+    const sounds = [{ id: 'beep1', absolutePath: '/media/beep.wav' }, { id: 'beep2', absolutePath: '/media/beep.wav' }];
+    const result = await ensureLoudness({ project, sounds, deps });
+    expect(result['beep1']).toEqual(result['beep2']);
+    expect(deps.measureLoudness).toHaveBeenCalledTimes(1);
+  });
+
+  test('a sound cached without a duration (before T21) is re-measured', async () => {
+    const project = makeProject([]);
+    const sounds = [{ id: 'beep', absolutePath: '/media/beep.wav' }];
+
+    // A cache entry that looks like it came from before T21 (no `duration`), under the real key
+    const onCacheEntries = vi.fn();
+    await ensureLoudness({ project, sounds, deps: makeDeps(), onCacheEntries }); // deps' default mock has no duration
+    const staleEntries = onCacheEntries.mock.calls[0]![0] as Record<string, LoudnessMeasurement>;
+    expect(Object.values(staleEntries)[0]!.duration).toBeUndefined();
+
+    const deps = makeDeps();
+    deps.measureLoudness.mockResolvedValue({ ...measurement(-14), duration: 5 });
+    const result = await ensureLoudness({ project: { ...project, loudnessCache: staleEntries }, sounds, deps });
+    expect(deps.measureLoudness).toHaveBeenCalledTimes(1); // re-measured, not reused from the stale cache
+    expect(result['beep']!.duration).toBe(5);
+  });
+
+  test('getSoundDurations leaves out sounds without a duration', () => {
+    expect(getSoundDurations({ beep: measurement(-14), boop: { ...measurement(-14), duration: 2 } }, [{ id: 'beep' }, { id: 'boop' }, { id: 'missing' }])).toEqual({ boop: 2 });
   });
 
   test('keeps what was measured when aborted', async () => {

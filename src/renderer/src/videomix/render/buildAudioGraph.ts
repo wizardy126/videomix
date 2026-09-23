@@ -1,8 +1,9 @@
 import invariant from 'tiny-invariant';
 
 import { formatFfmpegNumber, getFixChannelLayoutFilter } from '../../../../common/util';
-import type { LoudnessMeasurement, MixClip, MixSettings } from '../types';
+import type { LoudnessMeasurement, MixClip, MixSettings, SoundOverlay } from '../types';
 import type { ColumnPlacement, MixPlan } from '../planner/types';
+import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
 
 /** Integrated loudness every clip is normalized to (LUFS). Decided by the user (01-requisitos §5). */
 export const LOUDNESS_TARGET = -16;
@@ -174,15 +175,24 @@ export interface AudioPass {
  * @param sourcePaths `sourceId` → media path (the same paths the loudness was measured on, `MixSource.absolutePath`).
  * @param duration exact output duration (frames / fps); defaults to `plan.duration`.
  * @param loudness measurements by clip id, from `ensureLoudness`. Every audible clip of the plan must have one. The
- *   music's measurement (T12b), if any, is under `MUSIC_LOUDNESS_KEY`; without one, only `volumeDb` applies.
+ *   music's measurement (T12b), if any, is under `MUSIC_LOUDNESS_KEY`; without one, only `volumeDb` applies. A sound
+ *   overlay's (T21) is under its own overlay id, like a clip's.
+ * @param overlays sound overlays to mix in (T21), with `overlayTimes` (`resolveOverlayTimes`'s result): each one is
+ *   normalized to `LOUDNESS_TARGET` plus its `gainDb`, delayed to its resolved start and trimmed to its resolved end
+ *   (already cut to the video's duration), then summed in **after** the simultaneity compensation and **before** the
+ *   `alimiter` — the global fade doesn't reach them. An overlay missing from `overlayTimes`, resolved to zero
+ *   duration (`start === end`), or without a loudness measurement with audio, is left out. Both optional and left
+ *   out together: existing callers (without overlays) are unaffected.
  */
-export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, loudness }: {
+export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, loudness, overlays, overlayTimes }: {
   plan: Pick<MixPlan, 'duration' | 'placements' | 'layouts'>,
   clips: AudioClip[],
   sourcePaths: Record<string, string>,
   settings: Pick<MixSettings, 'transition' | 'fadeInOut' | 'music'>,
   duration?: number | undefined,
   loudness: Record<string, LoudnessMeasurement>,
+  overlays?: Pick<SoundOverlay, 'id' | 'absolutePath' | 'gainDb'>[] | undefined,
+  overlayTimes?: ResolvedOverlayTimes | undefined,
 }): AudioPass {
   const clipsById = new Map(clips.map((clip) => [clip.id, clip]));
   const totalDuration = duration ?? plan.duration;
@@ -258,6 +268,38 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
       '[clips][music]amix=inputs=2:normalize=0:duration=first[mix]',
     );
     mix = 'mix';
+  }
+
+  // Sound overlays (T21): after the simultaneity compensation (and the music), before the limiter and the global fade
+  const soundLabels: string[] = [];
+  (overlays ?? []).forEach((overlay) => {
+    const times = overlayTimes?.get(overlay.id);
+    if (times == null || times.end <= times.start) return;
+    const measurement = loudness[overlay.id];
+    invariant(measurement != null, `Missing loudness of sound overlay ${overlay.id}`);
+    if (!measurement.hasAudio) return;
+
+    const soundDuration = times.end - times.start;
+    const inputIndex = inputs.length;
+    inputs.push(['-vn', '-i', overlay.absolutePath]);
+
+    const label = `s${inputIndex}`;
+    const chain = [
+      'asetpts=PTS-STARTPTS',
+      getFixChannelLayoutFilter(measurement),
+      `aresample=${AUDIO_SAMPLE_RATE}`,
+      'aformat=sample_fmts=fltp:channel_layouts=stereo',
+      `atrim=duration=${fmt(soundDuration)}`,
+      `volume=${fmt(getNormalizationGain(measurement) + overlay.gainDb)}dB`,
+      `adelay=${Math.round(times.start * AUDIO_SAMPLE_RATE)}S:all=1`,
+    ].filter((filter) => filter != null);
+    filters.push(`[${inputIndex}:a:0]${chain.join(',')}[${label}]`);
+    soundLabels.push(`[${label}]`);
+  });
+  if (soundLabels.length > 0) {
+    // duration=first: the mix so far is already padded/trimmed to the video's duration
+    filters.push(`[${mix}]${soundLabels.join('')}amix=inputs=${soundLabels.length + 1}:normalize=0:duration=first[withSounds]`);
+    mix = 'withSounds';
   }
 
   const globalFade = Math.min(getGlobalFadeDuration(settings), totalDuration / 2);

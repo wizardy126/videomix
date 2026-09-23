@@ -11,7 +11,8 @@ import type { WithErrorHandling } from '../../hooks/useErrorHandling';
 import type { ShowGenericDialog } from '../../components/GenericDialog';
 import type { UseMixProject } from './useMixProject';
 import { validateMixProject } from '../project';
-import { ensureLoudness } from '../loudness';
+import { ensureLoudness, getSoundDurations } from '../loudness';
+import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
 import { buildRenderJob, getChunkConcurrency } from '../render/buildRenderJob';
 import { buildAudioGraph } from '../render/buildAudioGraph';
 import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
@@ -144,15 +145,18 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     preview: boolean,
   }) => {
     const abortController = new AbortController();
+    // Sound overlays (T21): measured and mixed in alongside the clips
+    const soundOverlays = project.overlays.filter((overlay) => overlay.type === 'sound');
     try {
       setWorking({ text: i18n.t('Analyzing audio loudness'), abortController });
       setProgress(0);
       // Measures only what isn't cached yet; the new measurements are stored in the project (also when cancelled)
-      const loudness = await ensureLoudness({ project, music: project.settings.music, onProgress: setProgress, abortSignal: abortController.signal, onCacheEntries: setLoudnessCache });
+      const loudness = await ensureLoudness({ project, music: project.settings.music, sounds: soundOverlays, onProgress: setProgress, abortSignal: abortController.signal, onCacheEntries: setLoudnessCache });
 
       setWorking({ text: preview ? i18n.t('Rendering preview') : i18n.t('Rendering mix'), abortController });
       setProgress(0);
       const { plan, settings, encoding } = renderPlan;
+      const overlayTimes = resolveOverlayTimes(project, plan, { soundDurations: getSoundDurations(loudness, soundOverlays) });
       const job = buildRenderJob({
         plan,
         clips: project.clips,
@@ -162,7 +166,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
         workDir,
         outPath: partialPath,
         // RenderClip has no muted/gainDb: close over the full clips (T12)
-        buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness }),
+        buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness, overlays: soundOverlays, overlayTimes }),
         join: path.join,
       });
       await runRenderJob({
