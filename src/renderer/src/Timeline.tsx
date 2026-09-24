@@ -117,6 +117,7 @@ function Timeline({
   darkMode,
   setCutTime,
   setHoveringTime,
+  cursorDurationLabel,
 } : {
   fileDurationNonZero: number,
   startTimeOffset: number,
@@ -152,6 +153,8 @@ function Timeline({
   darkMode: boolean,
   setCutTime: UseSegments['setCutTime'],
   setHoveringTime: (time: number | undefined) => void,
+  /** E1: duration counter next to the playhead ("mm:ss" or "mm:ss → mm:ss"), or `undefined` to show nothing. */
+  cursorDurationLabel?: string | undefined,
 }) {
   const { t } = useTranslation();
 
@@ -455,6 +458,13 @@ function Timeline({
           )}
           {commandedTimePercent !== undefined && (
             <CommandedTime commandedTimePercent={commandedTimePercent} />
+          )}
+
+          {/* E1: duration counter next to the playhead, e.g. a marker's elapsed time or a clip's duration */}
+          {commandedTimePercent !== undefined && cursorDurationLabel != null && (
+            <div style={{ position: 'absolute', left: commandedTimePercent, top: 1, transform: 'translateX(4px)', fontSize: 10, lineHeight: '14px', fontFamily: 'monospace', color: 'var(--gray-12)', background: 'var(--gray-3)', padding: '0 3px', borderRadius: 3, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+              {cursorDurationLabel}
+            </div>
           )}
         </div>
       </div>

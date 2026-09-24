@@ -66,7 +66,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T34 | v2: i18n, manual y cierre | M8 | Sonnet | T24–T33 | hecha |
 | T35 | v3: bug SAR y re-vincular con otra resolución (B1, B2) | M9 | Opus | — | hecha |
 | T36 | v3: modelo v4 (enlaces, secuencia, duración máxima) | M9 | Sonnet | — | hecha |
-| T37 | v3: contador, "Nuevo clip desde aquí", duración estimada y máxima en UI (E1, E3, E4, E6) | M9 | Sonnet | T36 | pendiente |
+| T37 | v3: contador, "Nuevo clip desde aquí", duración estimada y máxima en UI (E1, E3, E4, E6) | M9 | Sonnet | T36 | hecha |
 | T38 | v3: planificador — cadenas, secuencia y duración máxima (E2, E4, E5) | M9 | Opus | T36 | pendiente |
 | T38b | v3: ampliar más allá del máx. (E7) | M9 | Opus | T37, T38 | pendiente |
 | T38c | v3: ventana de reorden ilimitada y ampliable (E8) | M9 | Opus | T38b | pendiente |

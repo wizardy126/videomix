@@ -1306,5 +1306,10 @@
   "Unpin": "Quitar fijación",
   "Approximate live preview: the render is the reference": "Previsualización en vivo aproximada: el render es la referencia",
   "Audio levels are not normalized until the clips have been analysed (preview or render the mix once)": "Los volúmenes no están normalizados hasta que se analicen los clips (previsualiza o monta una vez)",
-  "Frames drawn per second": "Fotogramas dibujados por segundo"
+  "Frames drawn per second": "Fotogramas dibujados por segundo",
+  "New clip from here": "Nuevo clip desde aquí",
+  "Limit the length of the mix": "Limitar la duración del montaje",
+  "Maximum duration (m:ss)": "Duración máxima (m:ss)",
+  "If the mix would be longer, it is cut at the limit with the global fade-out. The estimate next to Settings/Preview/Render is highlighted when this happens.": "Si el montaje duraría más, se corta en el límite con el fundido de salida global. El indicador junto a Ajustes/Vista previa/Renderizar se resalta cuando esto pasa.",
+  "cut at {{time}}": "se corta en {{time}}"
 }

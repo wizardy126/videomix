@@ -1,5 +1,5 @@
-import type { ChangeEventHandler, FormEventHandler, ReactNode } from 'react';
-import { memo, useCallback } from 'react';
+import type { ChangeEventHandler, FocusEventHandler, FormEventHandler, KeyboardEventHandler, ReactNode } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FaRandom } from 'react-icons/fa';
 
@@ -7,11 +7,15 @@ import * as Dialog from '../../components/Dialog';
 import Button from '../../components/Button';
 import Select from '../../components/Select';
 import Switch from '../../components/Switch';
+import { formatDuration, parseDuration } from '../../util/duration';
 import type { EditOptions } from '../hooks/useMixProject';
 import useEncoderAvailability from '../hooks/useEncoderAvailability';
 import { getOutputSize, mixEncoderCodecs, mixEncoderHardware, mixFpsValues, mixOutputAspects, mixOutputResolutions, mixPresets, transitionTypes } from '../types';
 import type { MixEncoderCodec, MixEncoderHardware, MixMusicPlaylist, MixOutput, MixOutputAspect, MixOutputResolution, MixSettings, TransitionType } from '../types';
 import MixMusicSection from './MixMusicSection';
+
+// E4: sensible starting point when the switch is turned on with no previous value.
+const DEFAULT_MAX_DURATION = 60;
 
 // e.g. "1080p (1920×1080)", "4K (3840×2160)"
 function getResolutionLabel(output: MixOutput) {
@@ -96,6 +100,30 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
   onChange: (patch: Partial<MixSettings>, options?: EditOptions) => void,
 }) {
   const { t } = useTranslation();
+
+  // E4: local draft of the "m:ss" field, so an in-progress edit (e.g. "1:3") isn't clobbered by re-formatting on
+  // every keystroke; committed (parsed) on blur or Enter, discarded on Escape.
+  const [maxDurationText, setMaxDurationText] = useState<string>();
+  const maxDurationEnabled = settings.maxDuration != null;
+
+  const handleMaxDurationToggle = useCallback((checked: boolean) => {
+    onChange({ maxDuration: checked ? (settings.maxDuration ?? DEFAULT_MAX_DURATION) : undefined });
+  }, [onChange, settings.maxDuration]);
+
+  const commitMaxDurationText = useCallback((text: string) => {
+    const seconds = parseDuration(text);
+    if (seconds != null && seconds > 0) onChange({ maxDuration: seconds });
+    setMaxDurationText(undefined);
+  }, [onChange]);
+
+  const handleMaxDurationBlur = useCallback<FocusEventHandler<HTMLInputElement>>((e) => {
+    if (maxDurationText != null) commitMaxDurationText(e.target.value);
+  }, [commitMaxDurationText, maxDurationText]);
+
+  const handleMaxDurationKeyDown = useCallback<KeyboardEventHandler<HTMLInputElement>>((e) => {
+    if (e.key === 'Enter') e.currentTarget.blur();
+    else if (e.key === 'Escape') { setMaxDurationText(undefined); e.currentTarget.blur(); }
+  }, []);
 
   // Hardware encoders actually detected on this machine (T25); undefined while still detecting.
   const availableEncoders = useEncoderAvailability();
@@ -263,6 +291,29 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
               </Select>
               <div style={detailsStyle}>{t('"Auto" uses the first available hardware encoder and falls back to software if none work or if it fails while rendering.')}</div>
             </label>
+
+            {/* E4: off by default (01-requisitos §11); the cut itself and the pre-render warning are T39, this only edits the setting */}
+            <div style={inlineRowStyle}>
+              <span>{t('Limit the length of the mix')}</span>
+              <Switch checked={maxDurationEnabled} onCheckedChange={handleMaxDurationToggle} />
+              {maxDurationEnabled && (
+                // eslint-disable-next-line jsx-a11y/label-has-associated-control
+                <label>
+                  {t('Maximum duration (m:ss)')}<br />
+                  <input
+                    type="text"
+                    style={{ width: '6em', fontFamily: 'monospace' }}
+                    value={maxDurationText ?? formatDuration({ seconds: settings.maxDuration ?? 0, shorten: true, showFraction: false })}
+                    onChange={(e) => setMaxDurationText(e.target.value)}
+                    onBlur={handleMaxDurationBlur}
+                    onKeyDown={handleMaxDurationKeyDown}
+                  />
+                </label>
+              )}
+            </div>
+            {maxDurationEnabled && (
+              <div style={detailsStyle}>{t('If the mix would be longer, it is cut at the limit with the global fade-out. The estimate next to Settings/Preview/Render is highlighted when this happens.')}</div>
+            )}
           </Section>
 
           <Section title={t('Composition')}>

@@ -494,6 +494,40 @@ test.describe.serial('VideoMix (English UI)', () => {
 
     await screenshot(page, '09-undo');
   });
+
+  test('9b. "New clip from here" starts a new clip inside another one, without changing it (E6)', async () => {
+    await page.getByRole('button', { name: 'Source', exact: true }).click();
+    // clip "h-1080p-10s #1" (0:00 – 0:02, at index 1 after the reorder of scenario 3): select it (activates its
+    // source and seeks to its start) so the cursor lands inside its range
+    await clipRows(page).nth(1).getByText('0:00 – 0:02').click();
+    await waitIdle(page);
+    await pressShortcut(page, 'Control+Home');
+    await seekBy(page, 1); // now at 1 s, inside the clip's 0–2 s range
+
+    // BottomBar button: unlike plain "Mark start" (which would move clip #1's own start), it always starts a new
+    // marker, even with the cursor inside another clip's range, and never touches that clip
+    await page.getByTestId('new-clip-from-cursor-button').click();
+    await expect(clipRows(page)).toHaveCount(3); // a marker isn't a clip yet
+    await expect(clipRows(page).nth(1)).toContainText('0:00 – 0:02'); // clip #1 untouched
+
+    await seekBy(page, 1); // now at 2 s
+    await pressShortcut(page, 'o'); // "Mark end" closes the NEW marker as a new clip, not clip #1
+    await expect(clipRows(page)).toHaveCount(4);
+    expect(await clipNames(page)).toEqual(['v-1080x1920-12s #1', 'h-1080p-10s #1', 'h-720p-25fps-8s #1', 'h-1080p-10s #2']);
+    await expect(clipRows(page).nth(1)).toContainText('0:00 – 0:02'); // clip #1 still untouched
+    await expect(clipRows(page).nth(3)).toContainText('0:01 – 0:02'); // the new clip, overlapping clip #1
+    await screenshot(page, '09b-new-clip-from-here');
+
+    // undo it so the remaining scenarios (an app closed and relaunched) don't depend on it
+    await pressShortcut(page, 'Control+z');
+    await expect(clipRows(page)).toHaveCount(3);
+    expect(await clipNames(page)).toEqual(['v-1080x1920-12s #1', 'h-1080p-10s #1', 'h-720p-25fps-8s #1']);
+
+    // the Shift+I shortcut path does the same thing (still with the cursor inside clip #1)
+    await pressShortcut(page, 'Shift+i');
+    await expect(clipRows(page)).toHaveCount(3); // still just a marker
+    await expect(clipRows(page).nth(1)).toContainText('0:00 – 0:02'); // clip #1 untouched
+  });
 });
 
 test.describe('VideoMix (anamorphic source)', () => {

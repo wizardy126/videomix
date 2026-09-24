@@ -109,6 +109,9 @@ const allDefaultKeyBindings: KeyBinding[] = [
   { keys: 'MetaLeft+KeyD', action: 'duplicateCurrentClip' },
   { keys: 'Delete', action: 'removeCurrentClip' },
   { keys: 'MetaLeft+Backspace', action: 'removeCurrentClip' },
+  // E6 "New clip from here": unlike KeyI (setCutStart), always starts a new marker, even inside another clip.
+  // ShiftLeft+KeyI is not used by any other binding or menu accelerator.
+  { keys: 'ShiftLeft+KeyI', action: 'newClipFromCursor' },
 
   // VideoMix mix. Plain E ('export') also renders in VideoMix mode. Ctrl/Cmd+E, Ctrl/Cmd+P and Ctrl/Cmd+Shift+M are not
   // used by any other binding or menu accelerator (Cmd+M alone is the macOS minimize shortcut, so Shift is added).

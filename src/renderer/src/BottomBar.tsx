@@ -12,6 +12,7 @@ import invariant from 'tiny-invariant';
 import { primaryTextColor, primaryColor, darkModeTransition, dangerColor } from './colors';
 import SegmentCutpointButton from './components/SegmentCutpointButton';
 import SetCutpointButton from './components/SetCutpointButton';
+import NewClipFromCursorButton from './videomix/components/NewClipFromCursorButton';
 import ExportButton from './components/ExportButton';
 import ToggleExportConfirm from './components/ToggleExportConfirm';
 import CaptureFormatButton from './components/CaptureFormatButton';
@@ -273,6 +274,7 @@ function BottomBar({
   outputPlaybackRate, setOutputPlaybackRate,
   formatTimecode, parseTimecode, playbackRate,
   currentFrame, playbackMode, displayTime, fileDurationNonZero, getFrameCount, exportButtons,
+  cursorDurationLabel, newClipFromCursor,
 }: {
   zoom: number,
   setZoom: (fn: (z: number) => number) => void,
@@ -327,6 +329,10 @@ function BottomBar({
   displayTime: number,
   fileDurationNonZero: number,
   getFrameCount: GetFrameCount,
+  /** E1: duration counter (see Timeline's prop of the same name), shown as text next to the time display. */
+  cursorDurationLabel?: string | undefined,
+  /** VideoMix (E6): "New clip from here", next to the mark-start/mark-end buttons. `undefined` outside VideoMix. */
+  newClipFromCursor?: (() => void) | undefined,
 }) {
   const { t } = useTranslation();
   const { getSegColor } = useSegColors();
@@ -530,6 +536,11 @@ function BottomBar({
 
         <SetCutpointButton currentCutSeg={currentCutSeg} side="end" onClick={setCutEnd} title={actionTitle(t('End current segment at current time'), 'setCutEnd')} style={{ marginLeft: 5 }} />
 
+        {/* VideoMix (E6): starts a new marker even with the cursor inside another clip; "Mark end" then closes it as a new clip */}
+        {videoMixMode && newClipFromCursor != null && (
+          <NewClipFromCursorButton onClick={newClipFromCursor} title={actionTitle(t('New clip from here'), 'newClipFromCursor')} style={{ marginLeft: 5 }} />
+        )}
+
         {!simpleMode && (
           <>
             <SegmentCutpointButton currentCutSeg={currentCutSeg} side="end" Icon={FaStepForward} onClick={jumpCutEnd} title={actionTitle(t('Jump to current segment\'s end time'), 'jumpCutEnd')} style={{ marginLeft: 5 }} />
@@ -613,6 +624,8 @@ function BottomBar({
               {displayTimeFrameCount ?? 0}<span style={{ opacity: 0.5, userSelect: 'none' }}>f</span>
               {isZoomed && <span style={{ marginLeft: '.5em' }}>{Math.round((displayTime / fileDurationNonZero) * 100)}<span style={{ opacity: 0.5, userSelect: 'none' }}>%</span></span>}
             </span>
+            {/* E1: duration counter (marker's elapsed time, or a clip's duration and what it'd be if its end moved here) */}
+            {cursorDurationLabel != null && <span style={{ marginLeft: '.6em', opacity: 0.7 }}>{cursorDurationLabel}</span>}
           </div>
         </div>
 

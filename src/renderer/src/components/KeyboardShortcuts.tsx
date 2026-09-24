@@ -791,6 +791,11 @@ const KeyboardShortcuts = memo(({
         name: t('Remove clip'),
         category: mixProjectCategory,
       },
+      newClipFromCursor: {
+        // E6: starts a new marker at the cursor even inside another clip, without changing it; "Mark end" closes it as a new clip
+        name: t('New clip from here'),
+        category: mixProjectCategory,
+      },
       showMixSettings: {
         name: t('Mix settings'),
         category: mixProjectCategory,

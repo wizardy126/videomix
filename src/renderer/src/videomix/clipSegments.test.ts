@@ -135,6 +135,20 @@ describe('timeline → project', () => {
     expect(actions.flatMap((a) => (a.type === 'addClip' ? [a.clip.name] : []))).toEqual(['beach #3', 'beach #4']);
   });
 
+  // E6 "New clip from here": the new action always appends a marker (like `addSegment`), even with the cursor inside
+  // an existing clip's range; "Mark end" then gives it an end that may overlap that clip. The sync must create a new
+  // clip for it without touching the clip it overlaps (01-requisitos §11 E6, ADR-002).
+  test('a new segment that overlaps an existing clip becomes its own clip; the overlapped clip is untouched', () => {
+    // clip '1' is start:1, end:5; this marker was added at 2 (inside it) and closed at 4 (still inside it)
+    const actions = getClipActionsFromSegments({ segments: [...inSync(), newSegment('n', 2, 4)], source, clips, frameSize, paletteSize });
+    expect(actions).toEqual([{
+      type: 'addClip',
+      clip: { id: 'n', sourceId: 's1', name: 'beach #3', color: 3, start: 2, end: 4, maxRect: { x: 0, y: 0, width: 1920, height: 1080 }, muted: false, gainDb: 0 },
+    }]);
+    // no action at all for clip '1', which fully contains the overlap
+    expect(actions.some((a) => (a.type === 'updateClip' || a.type === 'removeClip') && a.clipId === '1')).toBe(false);
+  });
+
   test('without the frame size (no video) new segments are not added', () => {
     expect(getClipActionsFromSegments({ segments: [newSegment('n', 1, 2)], source, clips: [], frameSize: undefined, paletteSize })).toEqual([]);
   });

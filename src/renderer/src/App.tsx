@@ -44,6 +44,7 @@ import MixRenderButtons from './videomix/components/MixRenderButtons';
 import MixPlanView from './videomix/components/MixPlanView';
 import OverlayPanel from './videomix/components/OverlayPanel';
 import useMixOverlays from './videomix/hooks/useMixOverlays';
+import useMixDuration from './videomix/hooks/useMixDuration';
 import useMixLivePreview from './videomix/hooks/useMixLivePreview';
 import MixLivePreview from './videomix/components/MixLivePreview';
 import useClipThumbnails from './videomix/hooks/useClipThumbnails';
@@ -68,6 +69,7 @@ import OutputFormatSelect from './components/OutputFormatSelect';
 import * as Dialog from './components/Dialog';
 
 import { loadMifiLink, runStartupCheck } from './mifi';
+import { getCursorDurationInfo, formatCursorDurationLabel } from './videomix/cursorDuration';
 import { darkModeTransition } from './colors';
 import { getSegColor } from './util/colors';
 import type {
@@ -1604,6 +1606,11 @@ function App() {
   // VideoMix: clips of the project <-> segments of the active source's timeline, selected clip and clip actions (ADR-002)
   const mixClips = useMixClips({ mixProject, currentSourceId: mixWorkspace.currentSourceId, activateSource: mixWorkspace.userActivateSource, cutSegments, setCutSegments, currentCutSeg, setCurrentSegIndex, fileDuration, getRelevantTime, seekAbs });
 
+  // VideoMix: duration counter next to the playhead and in the bottom bar (E1): the marked start's elapsed time, or the
+  // selected clip's duration and what it would become if its end moved to the cursor. Tracks the playhead (not the
+  // mouse hover), so it also updates while playing.
+  const cursorDurationLabel = useMemo(() => formatCursorDurationLabel(getCursorDurationInfo(currentCutSeg, relevantTime)), [currentCutSeg, relevantTime]);
+
   // VideoMix: preview and render of the mix (T13), and the mix settings dialog (T14). They replace LosslessCut's export
   const mixRender = useMixRender({ mixProject, workingRef, setWorking, setProgress, withErrorHandling, showGenericDialog, openExportFinishedDialog, appendFfmpegCommandLog });
   const [mixSettingsOpen, setMixSettingsOpen] = useState(false);
@@ -1612,6 +1619,9 @@ function App() {
 
   // VideoMix: overlays edited in the Mix view (T22): plan + resolved overlay times, selection, cursor and overlay actions
   const mixOverlays = useMixOverlays({ mixProject, enabled: videoMixMode && showMixPlan, withErrorHandling, onFileReplaced: mixWorkspace.clearMissingOverlayFile });
+
+  // VideoMix: "≈ m:ss" estimated duration (E3), visible in both tabs; reuses mixOverlays.plan when the Mix tab has one
+  const mixDuration = useMixDuration({ clips: mixProject.project.clips, settings: mixProject.project.settings, mixPlan: mixOverlays.plan });
 
   // VideoMix: approximate live preview of the mix in the player area while the Mix tab is shown (A1, T32). Its time
   // follows the Mix view cursor, and the play/pause keys drive it instead of the source player (see mainActions)
@@ -2281,6 +2291,9 @@ function App() {
       addClip: mixClips.userAddClip,
       duplicateCurrentClip: () => mixClips.userDuplicateClip(mixClips.selectedClipId),
       removeCurrentClip: () => mixClips.userRemoveClip(mixClips.selectedClipId),
+      // E6 "New clip from here": unlike setCutStart (I), always starts a new marker, even inside another clip
+      // (addSegment always appends one, ignoring the current segment; setCutStart only falls back to it past the end)
+      newClipFromCursor: () => { if (checkFileOpened()) addSegment(); },
       showMixSettings: () => setMixSettingsOpen(true),
       previewMix: () => { mixRender.userPreviewMix(); },
       renderMix: () => { mixRender.userRenderMix(); },
@@ -2934,6 +2947,7 @@ function App() {
                       darkMode={darkMode}
                       setCutTime={setCutTime}
                       setHoveringTime={setHoveringTime}
+                      cursorDurationLabel={cursorDurationLabel}
                     />
                   )}
 
@@ -2950,8 +2964,10 @@ function App() {
                     captureSnapshot={captureSnapshot}
                     onExportPress={onExportPress}
                     exportButtons={videoMixMode ? (
-                      <MixRenderButtons onSettings={() => setMixSettingsOpen(true)} onPreview={mixRender.userPreviewMix} onRender={mixRender.userRenderMix} disabled={mixProject.project.clips.length === 0} />
+                      <MixRenderButtons onSettings={() => setMixSettingsOpen(true)} onPreview={mixRender.userPreviewMix} onRender={mixRender.userRenderMix} disabled={mixProject.project.clips.length === 0} estimate={mixDuration} maxDuration={mixProject.project.settings.maxDuration} />
                     ) : undefined}
+                    cursorDurationLabel={cursorDurationLabel}
+                    newClipFromCursor={videoMixMode ? mainActions.newClipFromCursor : undefined}
                     segmentsToExport={segmentsToExport}
                     seekAbs={seekAbs}
                     currentSegIndexSafe={currentSegIndexSafe}
