@@ -29,8 +29,16 @@ export function getStableLayouts(plan: Pick<MixPlan, 'layouts'>) {
   }));
 }
 
-/** Warnings of a finished plan (see {@link PlanWarning}). */
-export function getPlanWarnings(plan: Omit<MixPlan, 'warnings'>, clips: PlannerClip[], transitionDuration: number): PlanWarning[] {
+/**
+ * Warnings of a finished plan (see {@link PlanWarning}). `cutClipIds`: clips that follow the previous one of their
+ * chain or sequence with a direct cut on purpose (E2/E5, T38), not a shortened transition.
+ */
+export function getPlanWarnings(
+  plan: Omit<MixPlan, 'warnings'>,
+  clips: readonly PlannerClip[],
+  transitionDuration: number,
+  cutClipIds: ReadonlySet<string> = new Set(),
+): PlanWarning[] {
   const clipById = new Map(clips.map((clip) => [clip.id, clip]));
   const stable = getStableLayouts(plan);
   const axis = getPlanAxis(plan);
@@ -51,7 +59,7 @@ export function getPlanWarnings(plan: Omit<MixPlan, 'warnings'>, clips: PlannerC
 
     const isFirst = !firstInColumn.has(placement.column);
     firstInColumn.add(placement.column);
-    if (!isFirst && placement.transitionIn < transitionDuration - EPS) {
+    if (!isFirst && placement.transitionIn < transitionDuration - EPS && !cutClipIds.has(clip.id)) {
       warnings.push({ type: 'transition-shortened', clipId: clip.id, duration: placement.transitionIn });
     }
 

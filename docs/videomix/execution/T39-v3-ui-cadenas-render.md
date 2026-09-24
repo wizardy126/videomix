@@ -23,7 +23,11 @@
    - Test con ffmpeg real: la duración es exactamente el límite y hay *fade* al final.
 4. **Previsualización en vivo**: respeta cadenas (corte directo), secuencia y límite.
 5. **Pendiente de T35**: refrescar con ffprobe los metadatos (tamaño de visualización y SAR) de todas las fuentes al abrir un proyecto (en segundo plano) y antes de renderizar. Así, un proyecto antiguo con una fuente anamórfica que no se ha activado en la sesión no falla con `max-rect-outside-frame`. Hay que respetar la regla de no reescalar de T35 (`sourceResize.ts`).
-6. **i18n**: español.
+6. **Pendientes de T38**:
+   - `truncatePlan` en el render y la previsualización;
+   - overlays y sonidos resueltos con los *placements* del plan completo y la duración truncada;
+   - audio sin bajada de volumen en las uniones de cadena con corte directo (crossfade mínimo de pocos ms en lugar del antichasquido por separado).
+7. **i18n**: español.
 
 ## Criterios de aceptación
 

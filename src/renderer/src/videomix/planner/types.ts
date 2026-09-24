@@ -39,12 +39,35 @@ export interface PlannerSettings {
    * columns for landscape, rows for portrait, and for a square output the better of both plans.
    */
   axis?: LayoutAxis | undefined,
+  /**
+   * E2/E5 (T38): transition between consecutive clips of a chain or of the always-visible sequence: `cut` (default) =
+   * direct cut (`transitionIn = 0`, a concat in the render), `global` = the global transition (shortened for short
+   * clips like any crossfade).
+   */
+  linkTransition?: 'cut' | 'global' | undefined,
+  /**
+   * E4 (T38): maximum video duration (s). The planner doesn't cut (see `truncatePlan`): while the projected content
+   * goes past it, the scoring favours more columns so that more fits before the cut.
+   */
+  maxDuration?: number | undefined,
 }
 
 export interface PlanMixInput {
   /** In list order. */
   clips: PlannerClip[],
   settings: PlannerSettings,
+  /**
+   * E2 (T38): chains of linked clips (ids in playing order, e.g. from `getClipChains`). A chain plays in one slot, its
+   * clips one after the other, and takes the list position of its earliest clip. Chains of less than 2 known clips,
+   * pinned, grouped or sequence clips and clips already in an earlier chain are ignored (see `getPlanLinks`).
+   */
+  chains?: string[][] | undefined,
+  /**
+   * E5 (T38): the always-visible sequence (ids in order). Its clips leave the normal distribution and play one after the
+   * other in a slot of their own from t = 0 until they run out. It wins over pins and groups (they are ignored for its
+   * clips).
+   */
+  sequence?: string[] | undefined,
 }
 
 /** A clip playing in a column. */
@@ -116,7 +139,12 @@ export type PlanWarning =
    */
   | { type: 'pin-shifted', clipId: string, pinTime: number, time: number }
   /** A4 (T30): the clips of a group don't all start together (more clips than columns, or no room for all of them). */
-  | { type: 'group-split', groupId: string, clipIds: string[] };
+  | { type: 'group-split', groupId: string, clipIds: string[] }
+  /**
+   * E4 (T38, `truncatePlan`): the video is cut at `time` (the maximum duration). `seconds` of the planned video are
+   * lost: the clips of `clipIds` entirely (they would start at or after the cut) and the end of those of `cutClipIds`.
+   */
+  | { type: 'truncated', time: number, seconds: number, clipIds: string[], cutClipIds: string[] };
 
 export interface MixPlan {
   /** Output size (px), whatever the axis. */

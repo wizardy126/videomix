@@ -3,7 +3,7 @@ import invariant from 'tiny-invariant';
 import { distributeWidths, getAxisLengths, getMainAspectRange, getWidthRange, normalizeClipRects, transposeRect } from '../geometry';
 import type { AspectRange, LayoutAxis } from '../geometry';
 import { getColumnFit, getPlanWarnings } from './planWarnings';
-import { getPlanUnits } from './units';
+import { getPlanLinks, getPlanUnits } from './units';
 import { validatePlan } from './validatePlan';
 import { getDefaultAxis } from './types';
 import type { ColumnPlacement, LayoutKeyframe, MixPlan, PlanMixInput, PlannerClip } from './types';
@@ -20,6 +20,13 @@ import type { ColumnPlacement, LayoutKeyframe, MixPlan, PlanMixInput, PlannerCli
 // pins (the reserve: `Option.violation`), so a column is freed (removed, or given a clip that ends in time) when the
 // row would otherwise be full. A unit that can't wait (an overdue pin, a group at the end of its window) goes in at the
 // next event, or that event's column is removed to make room; clips are never cut, so a pin may start late (warned).
+
+// Chains and the always-visible sequence (E2/E5, T38; 04-diseno §3.7). A chain is a single unit (one position in the
+// order, where its earliest clip is) whose first clip carries the rest (`Clip.next`): when a clip with `next` ends,
+// the event is a chain event (`resolveChainEvent`) and the next clip follows in the same column, with a cut or the
+// global transition. A column with pending chain clips is busy until the chain ends (`Clip.tail`): it is never
+// removed, merged into another event or freed for a pin. The sequence is a chain pinned at 0 that always goes in the
+// initial row.
 
 // Score weights: an option's cost is the sum of these terms, lower is better. Rough scale: 1 point ≈ moving a clip
 // one position away from its list index.
@@ -58,6 +65,20 @@ const UPSCALE_WEIGHT = 5;
  * {@link PREF_WEIGHT} = 3.2), so a lone clip only wins when more columns would crop beyond it.
  */
 const COLUMN_COUNT_WEIGHT = 4;
+/**
+ * E4 (T38), maximum duration. While the projected end of the video (event time + content left / columns of the row)
+ * is past the limit ("pressure"): each column below `maxColumns` costs this much, more than 3 columns is no longer
+ * penalized, the cheap crop goes up to {@link LIMIT_MAX_CROP_LOSS}, and a direct substitution loses its priority while
+ * the row has less than `maxColumns` columns (re-layouts that add columns compete with it).
+ * E.g. at 16:9 with 3 columns max: two 16:9 clips side by side (50 % crop each: 2 × 4 × 0.5 = 4, + 4 for the missing
+ * column) cost 8 against 12 for one at full screen (4 for the lone column + 2 × 4), so they share the row even after
+ * paying a re-layout (3); three of them (67 % crop, ≈ 6.9 each) don't.
+ */
+const LIMIT_COLUMN_WEIGHT = 4;
+/** E4 (T38): columns the projection of the pressure assumes (the usual 2, see {@link COLUMN_COUNT_WEIGHT}). */
+const LIMIT_DENSITY = 2;
+/** E4 (T38): {@link MAX_CROP_LOSS} under pressure. */
+const LIMIT_MAX_CROP_LOSS = 0.55;
 
 /**
  * Fill before direct substitution (01-requisitos §4.3, decided after T10): when the row has structural fill, a
@@ -106,6 +127,10 @@ interface Clip {
   singleBase: number,
   /** Index of its unit among the ordered units; -1 for pinned clips. */
   unitBase: number,
+  /** E2/E5 (T38): next clip of its chain or sequence, which follows it in the same column. */
+  next?: Clip | undefined,
+  /** Seconds the rest of its chain plays after it ends (0 without `next`): the column is busy until `end + tail`. */
+  tail: number,
 }
 
 
@@ -135,6 +160,8 @@ interface Assignment {
   clip: Clip,
   start: number,
   transitionIn: number,
+  /** The next clip of a chain (not a pick: no order position, `lastStart` unchanged). */
+  continuation?: boolean | undefined,
 }
 
 interface Option {
@@ -196,7 +223,7 @@ function toClip(clip: PlannerClip, unit: Unit, height: number, axis: LayoutAxis)
     size = { maxWidth: tMax.width, maxHeight: tMax.height, minHeight: tMin.height };
   }
   const single = isSingle(unit) && unit.pinTime == null;
-  return { id: clip.id, duration: clip.duration, range, widths: getWidthRange(range, height), size, unit, singleBase: single ? unit.singleBase : -1, unitBase: unit.pinTime == null ? unit.unitBase : -1 };
+  return { id: clip.id, duration: clip.duration, range, widths: getWidthRange(range, height), size, unit, singleBase: single ? unit.singleBase : -1, unitBase: unit.pinTime == null ? unit.unitBase : -1, tail: 0 };
 }
 
 /**
@@ -218,7 +245,7 @@ export interface PlanScore {
 }
 
 /** {@link planMix} along a given main axis, with the plan's score. */
-export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis: LayoutAxis): { plan: MixPlan, score: PlanScore } {
+export function planMixAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput, axis: LayoutAxis): { plan: MixPlan, score: PlanScore } {
   const { maxColumns, gap, reorderWindow: N, transitionDuration: D } = settings;
   const { main: W, cross: H } = getAxisLengths(axis, settings);
   invariant(maxColumns >= 1 && Number.isInteger(maxColumns), 'maxColumns must be a positive integer');
@@ -228,16 +255,33 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
   const placements: ColumnPlacement[] = [];
   const layouts: LayoutKeyframe[] = [];
 
-  if (inputClips.length === 0) {
+  if (rawClips.length === 0) {
     layouts.push({ time: 0, transitionDuration: 0, columns: [], fills: [{ x: 0, width: W }] });
     return { plan: { ...output, duration: 0, placements, layouts, warnings: [] }, score: { total: 0, fill: 0, clips: 0, relayouts: 0, order: 0 } };
   }
 
-  // Units (A4): ordered ones (singles and groups, in base order) and pinned ones (by pin time).
-  const planUnits = getPlanUnits(inputClips, settings);
+  // E2/E5 (T38): chains and sequence, cleaned up (the sequence wins over pins and groups)
+  const links = getPlanLinks(rawClips, { chains, sequence });
+  const inputClips = links.clips;
+  const linkCut = (settings.linkTransition ?? 'cut') === 'cut';
+  /** Transition from a clip into the next one of its chain: fixed, it doesn't depend on the other columns. */
+  const chainTransition = (a: Clip, b: Clip) => (linkCut ? 0 : Math.min(D, a.duration / 2, b.duration / 2));
+  const linkChain = (chain: Clip[]) => {
+    for (let i = chain.length - 2; i >= 0; i -= 1) {
+      const [a, b] = [chain[i]!, chain[i + 1]!];
+      a.next = b;
+      a.tail = b.tail + b.duration - chainTransition(a, b);
+    }
+  };
+  const { maxDuration } = settings;
+  const hasLimit = maxDuration != null && Number.isFinite(maxDuration) && maxDuration > 0;
+
+  // Units (A4): ordered ones (singles, chains and groups, in base order) and pinned ones (by pin time).
+  const planUnits = getPlanUnits(inputClips, settings, links);
   const toUnit = (u: (typeof planUnits.ordered)[number]): Unit => {
     const unit: Unit = { clips: [], unitBase: u.unitBase, singleBase: u.singleBase, groupId: u.groupId, pinTime: u.pinTime, started: false };
     unit.clips = u.clips.map((clip) => toClip(clip, unit, H, axis));
+    if (u.continuation != null) linkChain([unit.clips[0]!, ...u.continuation.map((clip) => toClip(clip, unit, H, axis))]);
     return unit;
   };
   /** Ordered units not placed yet, in base order. */
@@ -246,7 +290,20 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
   const pins = planUnits.pinned.map((u) => toUnit(u));
   /** Pinned units whose time has come without room for them: they go in as soon as possible. */
   const overdue: Unit[] = [];
-  const allClips = new Map([...remaining, ...pins].flatMap((unit) => unit.clips.map((clip) => [clip.id, clip] as const)));
+  /** E5 (T38): the always-visible sequence, a chain that starts at 0 in the initial row (outside the order). */
+  let sequenceUnit: Unit | undefined;
+  if (links.sequence.length > 0) {
+    sequenceUnit = { clips: [], unitBase: -1, singleBase: -1, pinTime: 0, started: false };
+    const chain = links.sequence.map((clip) => toClip(clip, sequenceUnit!, H, axis));
+    linkChain(chain);
+    sequenceUnit.clips = [chain[0]!];
+  }
+  const allClips = new Map<string, Clip>();
+  [...remaining, ...pins, ...(sequenceUnit != null ? [sequenceUnit] : [])].forEach((unit) => unit.clips.forEach((head) => {
+    for (let clip: Clip | undefined = head; clip != null; clip = clip.next) allClips.set(clip.id, clip);
+  }));
+  /** Clips that follow the previous one of their chain with a cut on purpose (no `transition-shortened` warning). */
+  const cutClipIds = new Set(linkCut ? [...allClips.values()].flatMap((clip) => (clip.next != null ? [clip.next.id] : [])) : []);
 
   const columns = new Map<number, Column>();
   /** Visual order of the column ids, left to right. */
@@ -269,6 +326,29 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
 
   const remainingClipCount = () => remaining.reduce((acc, unit) => acc + unit.clips.length, 0);
   const hasPendingPins = () => pins.length > 0 || overdue.length > 0;
+  /** A column still has chain clips to play (E2/E5). */
+  const hasPendingChains = () => order.some((id) => {
+    const col = columns.get(id)!;
+    return col.active && col.clip.next != null;
+  });
+
+  /**
+   * E4 (T38): the projected end of the video is past the maximum duration, so more columns are favoured (see
+   * {@link LIMIT_COLUMN_WEIGHT}). Projection: `time` + content left (clips to start, chains and pins included, plus
+   * what the row still has to play) / {@link LIMIT_DENSITY} columns. A fixed density (not the row's) keeps the pressure
+   * from switching off as soon as the row has more columns, which would take them away again at the next event.
+   */
+  let limitPressure = false;
+  const updateLimitPressure = (time: number) => {
+    if (!hasLimit) return;
+    let content = 0;
+    [...remaining, ...pins, ...overdue].forEach((unit) => unit.clips.forEach((clip) => { content += clip.duration + clip.tail; }));
+    order.forEach((id) => {
+      const col = columns.get(id)!;
+      if (col.active) content += Math.max(0, col.end + col.clip.tail - time);
+    });
+    limitPressure = time < maxDuration! && time + content / Math.min(LIMIT_DENSITY, maxColumns) > maxDuration! + EPS;
+  };
 
   // --- helpers ---
 
@@ -293,7 +373,8 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
     const { range } = clip;
     const aspect = Math.min(range.max, Math.max(range.min, width / H));
     const loss = 1 - Math.min(aspect / range.preferred, range.preferred / aspect);
-    let cost = PREF_WEIGHT * Math.min(loss, MAX_CROP_LOSS) + EXCESS_CROP_WEIGHT * Math.max(0, loss - MAX_CROP_LOSS);
+    const maxLoss = limitPressure ? LIMIT_MAX_CROP_LOSS : MAX_CROP_LOSS;
+    let cost = PREF_WEIGHT * Math.min(loss, maxLoss) + EXCESS_CROP_WEIGHT * Math.max(0, loss - maxLoss);
     if (clip.size != null) {
       // crop height as in getCropForAspect (fill/pillarbox); overestimates letterbox, which is penalized anyway
       const { maxWidth, maxHeight, minHeight } = clip.size;
@@ -303,7 +384,9 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
     return cost;
   }
 
-  const columnCountCost = (n: number) => COLUMN_COUNT_WEIGHT * (n < 2 ? 2 - n : Math.max(0, n - 3));
+  const columnCountCost = (n: number) => (limitPressure
+    ? COLUMN_COUNT_WEIGHT * Math.max(0, 2 - n) + LIMIT_COLUMN_WEIGHT * Math.max(0, maxColumns - n)
+    : COLUMN_COUNT_WEIGHT * (n < 2 ? 2 - n : Math.max(0, n - 3)));
 
   /**
    * Cost of a row of clips at the given widths, each shown for about `seconds`: misfits, cropping, upscale and
@@ -383,12 +466,13 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
    */
   function getViolation(items: { clip: Clip, end: number }[]) {
     if (pins.length === 0) return 0;
-    const maxEnd = Math.max(...items.map((item) => item.end));
+    // a column is busy until its chain ends (E2/E5)
+    const maxEnd = Math.max(...items.map((item) => item.end + item.clip.tail));
     let violation = 0;
     for (let i = 0; i < pins.length && pins[i]!.pinTime! < maxEnd; i += 1) {
       const pin = pins[i]!;
       const time = pin.pinTime!;
-      const busy = items.filter((item) => item.end > time + EPS);
+      const busy = items.filter((item) => item.end + item.clip.tail > time + EPS);
       const over = busy.length + pinDemands[i]! - maxColumns;
       if (over > 0) {
         violation += over;
@@ -467,10 +551,11 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
     }
   }
 
-  function place(column: number, clip: Clip, start: number, transitionIn: number) {
+  function place(column: number, clip: Clip, start: number, transitionIn: number, continuation = false) {
     placements.push({ clipId: clip.id, column, startTime: start, endTime: start + clip.duration, transitionIn });
     columns.set(column, { id: column, clip, end: start + clip.duration, active: true });
-    lastStart = Math.max(lastStart, start);
+    // the next clip of a chain isn't a pick: it doesn't take part in the start order
+    if (!continuation) lastStart = Math.max(lastStart, start);
   }
 
   /** Crossfade length from `outgoing` (ending at `end`) into `incoming`, never starting before `notBefore`. */
@@ -485,8 +570,8 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
 
   {
     // pins at 0 go in first (as many as fit; the rest wait for room). With nothing else to start the video, the
-    // earliest pin moves to 0.
-    const atZero: Unit[] = [];
+    // earliest pin moves to 0. The always-visible sequence (E5) goes before them: it is always in the initial row.
+    const atZero: Unit[] = sequenceUnit != null ? [sequenceUnit] : [];
     while (pins.length > 0 && (pins[0]!.pinTime! <= EPS || (remaining.length === 0 && atZero.length === 0))) {
       const pin = pins.shift()!;
       if (clipCount(atZero) + pin.clips.length <= maxColumns) atZero.push(pin);
@@ -498,6 +583,7 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
     const due = remaining.find((unit) => !isSingle(unit) && unitPosition >= unit.unitBase + N);
 
     const window = getWindow(room);
+    updateLimitPressure(0);
     const sizes = [...(pinnedClips.length > 0 ? [0] : []), ...range1(room)];
     const candidates = pruneCandidates(window, sizes);
     let best: { option: Option, missing: number, clips: Clip[], widths: number[], fill: number } | undefined;
@@ -546,7 +632,7 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
    */
   function getDrainOption(trigger: Column): Option | undefined {
     const { end: e1 } = trigger;
-    const removed = [trigger, ...order.map((id) => columns.get(id)!).filter((col) => col !== trigger && col.active && Math.abs(col.end - e1) <= EPS)];
+    const removed = [trigger, ...order.map((id) => columns.get(id)!).filter((col) => col !== trigger && col.active && col.clip.next == null && Math.abs(col.end - e1) <= EPS)];
     const keptActive = () => order.filter((id) => columns.get(id)!.active && !removed.some((col) => col.id === id));
     while (removed.length > 1 && keptActive().length === 0) removed.pop();
     if (keptActive().length === 0) return undefined;
@@ -599,7 +685,7 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
 
     // Re-layout: the columns ending right now (this one first) take the clips with the same crossfade, the others go
     // away, and extra clips get new columns after this one. So they all start at `time`.
-    const ending = [trigger, ...order.map((id) => columns.get(id)!).filter((col) => col !== trigger && col.active && Math.abs(col.end - e1) <= EPS)];
+    const ending = [trigger, ...order.map((id) => columns.get(id)!).filter((col) => col !== trigger && col.active && col.clip.next == null && Math.abs(col.end - e1) <= EPS)];
     const staying = others.filter((id) => !ending.some((col) => col.id === id));
     if (staying.length + clips.length <= maxColumns && e1 >= animationEnd) {
       const used = ending.slice(0, clips.length);
@@ -661,9 +747,12 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
         break;
       }
     }
-    if (direct != null && direct.violation === 0 && rowFill <= 1) return direct;
+    // E4: under pressure a row with room for more columns weighs a direct substitution against the re-layouts (it is
+    // among the in-place options, with its real cost)
+    const moreColumns = limitPressure && order.length < maxColumns;
+    if (direct != null && direct.violation === 0 && rowFill <= 1 && !moreColumns) return direct;
     /** A direct substitution that respects the pins restricts the re-layouts (fill before direct substitution, T10b). */
-    const restricted = direct != null && direct.violation === 0;
+    const restricted = direct != null && direct.violation === 0 && !moreColumns;
     /** With a direct substitution at hand, only re-layouts that clearly reduce the fill are considered. */
     const maxRelayoutFill = restricted ? Math.max(1, rowFill * CLEAR_FILL_REDUCTION) : Infinity;
 
@@ -671,7 +760,7 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
     const consider = (option: Option) => {
       if (isBetter(option, best)) best = option;
     };
-    if (direct != null && !restricted) consider(direct);
+    if (direct != null && !restricted && !moreColumns) consider(direct);
 
     // 2a. In place with fill (pillarbox/letterbox), no layout change.
     if (!restricted) {
@@ -699,7 +788,8 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
     // too (merged event), so animations never overlap.
     const active = order.map((id) => columns.get(id)!).filter((col) => col.active);
     const group = active
-      .filter((col) => col === trigger || col.end <= e1 + EPS || col.end < e1 + D - EPS)
+      // a column in the middle of a chain isn't free: its next clip is its own event (E2/E5)
+      .filter((col) => col === trigger || (col.clip.next == null && (col.end <= e1 + EPS || col.end < e1 + D - EPS)))
       .sort((a, b) => (a === trigger || b === trigger ? Number(b === trigger) - Number(a === trigger) : a.end - b.end));
     const kept = order.filter((id) => !group.some((col) => col.id === id));
     const g = group.length;
@@ -784,8 +874,8 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
       // Nothing may end before the last start, so later picks keep starting in order.
       const maxStart = Math.max(...assignments.map((a) => a.start), lastStart);
       const ends = [
-        ...assignments.map((a) => a.start + a.clip.duration),
-        ...active.filter((col) => col !== trigger && !assignments.some((a) => a.column === col.id)).map((col) => col.end),
+        ...assignments.map((a) => a.start + a.clip.duration + a.clip.tail),
+        ...active.filter((col) => col !== trigger && !assignments.some((a) => a.column === col.id)).map((col) => col.end + col.clip.tail),
       ];
       if (ends.some((end) => end < maxStart - EPS)) return;
 
@@ -888,6 +978,99 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
   }
 
   /**
+   * E2/E5 (T38): `trigger`'s clip is followed by the next clip of its chain (or of the sequence) in the same column,
+   * starting `chainTransition` before it ends. Like a direct substitution, it keeps the layout when the clip fits the
+   * column and the row has no fill. Otherwise the best of: in place (pillarbox/letterbox), or an animated re-layout
+   * that starts at the change, with the same columns or new ones after this one for clips of the window. The animation
+   * ends before any clip of the row ends (and before the next pin), so it never meets another event's animation; when
+   * that leaves no room (or another animation is running, or a column is already empty at the end of the video), the
+   * clip stays in place.
+   */
+  function resolveChainEvent(trigger: Column): Option {
+    const { end: e1, clip: a1 } = trigger;
+    const { next } = a1;
+    invariant(next != null);
+    const w1 = widthOf.get(trigger.id)!;
+    const transitionIn = chainTransition(a1, next);
+    const time = e1 - transitionIn;
+    const continuation: Assignment = { column: trigger.id, clip: next, start: time, transitionIn, continuation: true };
+    const others = order.filter((id) => id !== trigger.id);
+    const fits = getColumnFit(next.range, w1, H) === 'fill';
+    // E4: under pressure, re-layouts that add columns compete with keeping the layout
+    const moreColumns = limitPressure && order.length < maxColumns;
+    const inPlace: Option = {
+      violation: getViolation(inPlaceItems(trigger, next, time + next.duration)),
+      cost: fits && !moreColumns ? 0 : fillCost(rowFill, rowFillSeconds(e1, others)) + rowCost(order.map((id) => {
+        const col = columns.get(id)!;
+        return id === trigger.id ? { clip: next, width: w1, seconds: next.duration } : { clip: col.clip, width: widthOf.get(id)!, seconds: col.end - e1 };
+      })),
+      assignments: [continuation],
+    };
+    if (fits && rowFill <= 1 && !moreColumns) return inPlace;
+    /** It fits but the row has fill: only re-layouts that clearly reduce it are considered (as in resolveNormalEvent). */
+    const restricted = fits && !moreColumns;
+    const maxRelayoutFill = restricted ? Math.max(1, rowFill * CLEAR_FILL_REDUCTION) : Infinity;
+    let best: Option | undefined = restricted ? undefined : inPlace;
+
+    const allPlaying = others.every((id) => {
+      const col = columns.get(id)!;
+      return col.active && col.end > time + EPS;
+    });
+    if (allPlaying && time >= animationEnd - EPS) {
+      const room = maxColumns - order.length;
+      // new columns take clips of the window (a unit that can't wait is left for the next normal event)
+      const canPick = room > 0 && time >= lastStart - EPS && getForcedUnit() == null;
+      const unitCounts = canPick ? range1(room) : [];
+      const candidates = canPick ? pruneCandidates(getWindow(room), unitCounts) : [];
+      const squeezed = isRowSqueezed();
+
+      const evaluate = (units: Unit[]) => {
+        const atOnce = [...units].sort((a, b) => a.unitBase - b.unitBase);
+        const orderCost = atOnce.length > 0 ? getOrderCost(atOnce) : 0;
+        if (orderCost == null) return;
+        const picks = atOnce.flatMap((unit) => unit.clips);
+        if (picks.length > room) return;
+        const row: RowItem[] = [];
+        order.forEach((id) => {
+          const col = columns.get(id)!;
+          if (id !== trigger.id) {
+            row.push({ column: id, clip: col.clip, end: col.end });
+            return;
+          }
+          row.push({ column: id, clip: next, end: time + next.duration });
+          picks.forEach((clip) => row.push({ column: undefined, clip, end: time + clip.duration }));
+        });
+        const dist = distribute(row.map((item) => item.clip), squeezed);
+        if (dist == null) return;
+        if (dist.fill > maxRelayoutFill || (restricted && row.some((item, i) => getColumnFit(item.clip.range, dist.widths[i]!, H) !== 'fill'))) return;
+        if (picks.length === 0 && dist.fill === rowFill && row.every((item, i) => widthOf.get(item.column!) === dist.widths[i])) return;
+        const duration = Math.max(0, Math.min(
+          transitionIn > 0 ? transitionIn : D,
+          ...row.map((item) => (item.end - time) / 2),
+          (pins[0]?.pinTime ?? Infinity) - time,
+        ));
+        if (D > 0 && duration <= EPS) return;
+        const cost = orderCost + fillCost(dist.fill, rowFillSeconds(e1, others)) + RELAYOUT_WEIGHT
+          + rowCost(row.map((item, i) => ({ clip: item.clip, width: dist.widths[i]!, seconds: Math.min(item.clip.duration, item.end - e1) })));
+        const option: Option = {
+          violation: getViolation(row),
+          cost,
+          assignments: [continuation, ...picks.map((clip): Assignment => ({ column: undefined, clip, start: time, transitionIn: 0 }))],
+          relayout: { time, duration, row, widths: dist.widths, fill: dist.fill, removed: [], closed: [] },
+        };
+        if (isBetter(option, best)) best = option;
+      };
+
+      evaluate([]);
+      for (const k of unitCounts) {
+        for (const idx of subsets(candidates.length, k)) evaluate(idx.map((i) => candidates[i]!));
+      }
+    }
+    if (best == null || (restricted && best.violation > 0)) return inPlace;
+    return best;
+  }
+
+  /**
    * A pin's time has come: its clips start now in new columns at the right end of the row if there are columns enough
    * (the reserve made it likely), squeezing the row if they don't fit at their min rects: an exact time wins over
    * letterboxing. The animation ends before any column ends or the next pin comes. Otherwise it waits (overdue).
@@ -935,15 +1118,15 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
 
   function applyOption(option: Option) {
     const newIds: number[] = [];
-    option.assignments.forEach(({ column, clip, start, transitionIn }) => {
+    option.assignments.forEach(({ column, clip, start, transitionIn, continuation }) => {
       let id = column;
       if (id == null) {
         id = newColumnId();
         newIds.push(id);
       }
-      place(id, clip, start, transitionIn);
+      place(id, clip, start, transitionIn, continuation);
     });
-    commit(option.assignments.map((a) => a.clip));
+    commit(option.assignments.filter((a) => a.continuation !== true).map((a) => a.clip));
 
     const { relayout } = option;
     if (relayout != null) {
@@ -967,18 +1150,23 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
     }
   }
 
-  while (remaining.length > 0 || hasPendingPins()) {
+  while (remaining.length > 0 || hasPendingPins() || hasPendingChains()) {
+    // with nothing else to start, only the chains go on (E2/E5): the other columns just run out
+    const onlyChains = remaining.length === 0 && !hasPendingPins();
     let trigger: Column | undefined;
     for (const id of order) {
       const col = columns.get(id)!;
-      if (col.active && (trigger == null || col.end < trigger.end - EPS)) trigger = col;
+      if (col.active && (!onlyChains || col.clip.next != null) && (trigger == null || col.end < trigger.end - EPS)) trigger = col;
     }
     invariant(trigger != null, 'No active column while clips remain');
 
     const pin = pins[0];
+    updateLimitPressure(trigger.end);
     if (pin != null && pin.pinTime! < trigger.end - EPS) startPin(pin);
-    else applyOption(resolveEvent(trigger));
+    else applyOption(trigger.clip.next != null ? resolveChainEvent(trigger) : resolveEvent(trigger));
   }
+  // the whole-plan score doesn't depend on the limit
+  limitPressure = false;
 
   // Remaining columns just run out: their areas become fill, no re-layout (01-requisitos §4.3).
 
@@ -998,7 +1186,7 @@ export function planMixAxis({ clips: inputClips, settings }: PlanMixInput, axis:
     if (transitionOut > 0) placements[i] = { ...placement, transitionOut };
   });
   const planWithoutWarnings: MixPlan = { ...output, duration, placements, layouts, warnings: [] };
-  const plan: MixPlan = { ...planWithoutWarnings, warnings: getPlanWarnings(planWithoutWarnings, inputClips, D) };
+  const plan: MixPlan = { ...planWithoutWarnings, warnings: getPlanWarnings(planWithoutWarnings, inputClips, D, cutClipIds) };
 
   // --- whole-plan score (see PlanScore) ---
 

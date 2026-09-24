@@ -74,6 +74,8 @@ export function getPlacementWarnings(plan: Pick<MixPlan, 'warnings'>, placement:
   return plan.warnings.filter((w) => {
     if (w.type === 'fill') return false;
     if (w.type === 'group-split') return w.clipIds.includes(placement.clipId);
+    // E4 (T38): a clip cut at the maximum duration
+    if (w.type === 'truncated') return w.cutClipIds.includes(placement.clipId);
     if (w.clipId !== placement.clipId) return false;
     if (w.type === 'pillarbox' || w.type === 'letterbox') return w.time >= placement.startTime - EPS && w.time < placement.endTime + EPS;
     return true;

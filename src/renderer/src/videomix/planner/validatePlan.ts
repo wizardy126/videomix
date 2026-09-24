@@ -1,6 +1,6 @@
 import { getDefaultAxis, getPlanAxis, getPlanAxisLengths } from './types';
 import type { ColumnPlacement, MixPlan, PlanMixInput } from './types';
-import { getEffectiveGroups, getEffectivePins, getPlanUnits } from './units';
+import { getEffectiveGroups, getEffectivePins, getPlanLinks, getPlanUnits } from './units';
 
 const TOL = 1e-6;
 
@@ -25,12 +25,20 @@ export function getAnimatedColumn(layout: Layout, other: Layout, column: number,
 }
 
 /**
- * Check every invariant of 04-diseno §3.2 (plus layout consistency, pins and groups). Returns the problems found, empty if the plan is
- * valid. Used by the tests and, in development, after each planMix.
+ * Check every invariant of 04-diseno §3.2 (plus layout consistency, pins and groups, chains, the sequence and a
+ * truncated plan). Returns the problems found, empty if the plan is valid. Used by the tests and, in development, after
+ * each planMix.
+ *
+ * A plan with a `truncated` warning (E4, `truncatePlan`) is checked as the cut of a valid plan: nothing goes past the
+ * cut, the clips that would start after it are the ones the warning lists, and the others are whole or end at the cut.
  */
-export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): string[] {
+export function validatePlan(plan: MixPlan, input: PlanMixInput): string[] {
   const issues: string[] = [];
   const fail = (message: string) => issues.push(message);
+  const { settings } = input;
+  // E2/E5 (T38): chains and sequence as the planner reads them (sequence clips lose their pins and groups)
+  const links = getPlanLinks(input.clips, input);
+  const { clips } = links;
   const { maxColumns, gap, reorderWindow: N, transitionDuration: D } = settings;
   const { placements, layouts } = plan;
   // layouts are along the main axis (T29): W is the frame's width for columns, its height for rows
@@ -41,21 +49,47 @@ export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): 
   const expectedAxis = settings.axis ?? getDefaultAxis(settings);
   if (expectedAxis != null && getPlanAxis(plan) !== expectedAxis) fail(`Plan axis ${getPlanAxis(plan)}, expected ${expectedAxis}`);
   const durations = new Map(clips.map((clip) => [clip.id, clip.duration]));
+  /** End of a placement if it isn't cut (E4): its start plus the clip's duration. */
+  const fullEnd = (p: ColumnPlacement) => p.startTime + (durations.get(p.clipId) ?? p.endTime - p.startTime);
 
-  // 1. every clip exactly once, whole
+  // E4 (T38): a truncated plan stops at the cut
+  const truncated = plan.warnings.find((w) => w.type === 'truncated');
+  const limit = truncated?.time ?? Infinity;
+  const lost = new Set(truncated?.clipIds ?? []);
+  if (truncated != null) {
+    if (!(truncated.seconds > 0)) fail(`Truncated plan loses ${truncated.seconds}s`);
+    if (Math.abs(plan.duration - limit) > TOL) fail(`Truncated plan lasts ${plan.duration}s, not its limit ${limit}s`);
+    if (settings.maxDuration != null && limit > settings.maxDuration + TOL) fail(`Truncated at ${limit}s, after the maximum duration ${settings.maxDuration}s`);
+    placements.forEach((p) => {
+      if (p.endTime > limit + TOL || p.startTime >= limit - TOL) fail(`Clip ${p.clipId} (${p.startTime}-${p.endTime}) goes past the limit ${limit}`);
+    });
+    layouts.forEach((layout, i) => { if (layout.time >= limit - TOL && i > 0) fail(`Layout ${i} (t=${layout.time}) after the limit ${limit}`); });
+    const cut = placements.filter((p) => fullEnd(p) > limit + TOL).map((p) => p.clipId);
+    if (cut.toSorted().join(',') !== truncated.cutClipIds.toSorted().join(',')) fail(`Truncated plan: cut clips ${truncated.cutClipIds.join(',')}, expected ${cut.join(',')}`);
+  }
+
+  // 1. every clip exactly once, whole (E4: or cut at the limit, or lost after it)
   const seen = new Set<string>();
   placements.forEach((p) => {
     const duration = durations.get(p.clipId);
     if (duration == null) fail(`Unknown clip ${p.clipId}`);
-    else if (Math.abs(p.endTime - p.startTime - duration) > TOL) fail(`Clip ${p.clipId} is not played whole`);
+    else if (Math.abs(p.endTime - Math.min(p.startTime + duration, limit)) > TOL) fail(`Clip ${p.clipId} is not played whole`);
     if (seen.has(p.clipId)) fail(`Clip ${p.clipId} placed twice`);
+    if (lost.has(p.clipId)) fail(`Clip ${p.clipId} is placed but warned as lost`);
     seen.add(p.clipId);
     if (p.startTime < -TOL) fail(`Clip ${p.clipId} starts before 0`);
   });
-  clips.forEach((clip) => { if (!seen.has(clip.id)) fail(`Clip ${clip.id} missing`); });
+  clips.forEach((clip) => { if (!seen.has(clip.id) && !lost.has(clip.id)) fail(`Clip ${clip.id} missing`); });
+  lost.forEach((id) => { if (!durations.has(id)) fail(`Unknown lost clip ${id}`); });
   const maxEnd = Math.max(0, ...placements.map((p) => p.endTime));
   const maxStart = Math.max(0, ...placements.map((p) => p.startTime));
   if (Math.abs(plan.duration - maxEnd) > TOL) fail(`Duration ${plan.duration} != last end ${maxEnd}`);
+
+  // E2/E5: the clips after the first of a chain or of the sequence aren't picks; clips are pending while one of the
+  // others (units) hasn't started
+  const chains = [...links.chains, ...(links.sequence.length > 0 ? [links.sequence] : [])];
+  const continuations = new Set(chains.flatMap((chain) => chain.slice(1).map((clip) => clip.id)));
+  const maxUnitStart = Math.max(0, ...placements.filter((p) => !continuations.has(p.clipId)).map((p) => p.startTime));
 
   // layouts: 2. max columns, 3. the row adds up to W
   const first = layouts[0];
@@ -88,8 +122,8 @@ export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): 
     });
     if (x !== W) fail(`${at} covers ${x} px instead of ${W}`);
 
-    // 7. no re-layout once all clips have started
-    if (layout.time > maxStart + TOL) fail(`${at} re-layout after the last clip started`);
+    // 7. no re-layout once all clips have started (E4: in a cut plan, the lost clips would start later)
+    if (layout.time > maxStart + TOL && truncated == null) fail(`${at} re-layout after the last clip started`);
 
     // ADR-001: during an animation the columns keep their left-to-right order, and a column that appears or
     // disappears does it at width 0 just left of its right neighbour (its x minus the gap; W + gap if it has none)
@@ -137,16 +171,16 @@ export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): 
       const prev = list[i - 1]!;
       const next = list[i]!;
       const tr = next.transitionIn;
-      const maxTr = Math.min(D, (prev.endTime - prev.startTime) / 2, (next.endTime - next.startTime) / 2);
+      const maxTr = Math.min(D, (fullEnd(prev) - prev.startTime) / 2, (fullEnd(next) - next.startTime) / 2);
       if (tr < 0 || tr > maxTr + TOL) fail(`${at} invalid transition ${tr} into ${next.clipId}`);
-      if (Math.abs(next.startTime - (prev.endTime - tr)) > TOL) fail(`${at} ${next.clipId} doesn't start ${tr}s before ${prev.clipId} ends`);
+      if (Math.abs(next.startTime - (fullEnd(prev) - tr)) > TOL) fail(`${at} ${next.clipId} doesn't start ${tr}s before ${prev.clipId} ends`);
     }
 
     const removal = layouts[lastIndex + 1];
     if (removal != null) {
-      const removedAt = removal.time + removal.transitionDuration;
+      const removedAt = Math.min(removal.time + removal.transitionDuration, limit);
       if (Math.abs(lastPlacement.endTime - removedAt) > TOL) fail(`${at} removed at ${removedAt} but its last clip ends at ${lastPlacement.endTime}`);
-    } else if (maxStart > lastPlacement.endTime + TOL) {
+    } else if (maxUnitStart > lastPlacement.endTime + TOL) {
       fail(`${at} left empty at ${lastPlacement.endTime} while clips are still pending`);
     }
 
@@ -159,10 +193,34 @@ export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): 
     });
   });
 
+  // E2/E5 (T38): a chain plays in one column, its clips one right after the other (nothing in between), with a cut
+  // or the global transition; the sequence also starts at 0, so it is on screen until it runs out. After a cut (E4) a
+  // chain may lose its last clips, never a clip in the middle.
+  const linkCut = (settings.linkTransition ?? 'cut') === 'cut';
+  const placementOf = new Map(placements.map((p) => [p.clipId, p]));
+  chains.forEach((chain) => {
+    const name = chain === links.sequence ? 'Sequence' : `Chain ${chain.map((clip) => clip.id).join('+')}`;
+    const placed = chain.flatMap((clip) => (placementOf.has(clip.id) ? [placementOf.get(clip.id)!] : []));
+    if (chain.slice(0, placed.length).some((clip, i) => clip.id !== placed[i]!.clipId)) fail(`${name} loses a clip before its end`);
+    const [head] = placed;
+    if (head == null) return;
+    if (chain === links.sequence && Math.abs(head.startTime) > TOL) fail(`${name} starts at ${head.startTime}, not at 0`);
+    const column = (byColumn.get(head.column) ?? []).toSorted((a, b) => a.startTime - b.startTime);
+    const index = column.indexOf(head);
+    placed.forEach((p, i) => {
+      if (i === 0) return;
+      const prev = placed[i - 1]!;
+      if (p.column !== head.column) fail(`${name}: ${p.clipId} is in column ${p.column}, not ${head.column}`);
+      else if (column[index + i] !== p) fail(`${name}: ${p.clipId} doesn't follow ${prev.clipId} in its column`);
+      const expected = linkCut ? 0 : Math.min(D, chain[i - 1]!.duration / 2, chain[i]!.duration / 2);
+      if (Math.abs(p.transitionIn - expected) > TOL) fail(`${name}: transition ${p.transitionIn} into ${p.clipId}, expected ${expected}`);
+    });
+  });
+
   // 5. order within the reorder window (ties in start time are sorted by base index, the most favourable). A4 (T30):
   // pinned clips are outside the order; the window applies to the single clips among themselves, and a group (one
   // position among the ordered units, where its first clip was) may wait for room but never starts more than N early.
-  const { ordered } = getPlanUnits(clips, settings);
+  const { ordered } = getPlanUnits(clips, settings, links);
   const startOf = new Map(placements.map((p) => [p.clipId, p.startTime]));
   const positions = <T, >(items: T[], start: (item: T) => number | undefined, base: (item: T) => number) => {
     const sorted = items.flatMap((item) => {
@@ -207,7 +265,9 @@ export function validatePlan(plan: MixPlan, { clips, settings }: PlanMixInput): 
     const together = starts.length === 0 || Math.max(...starts) - Math.min(...starts) <= TOL;
     const warning = split.get(groupId);
     if (!together && warning == null) fail(`Group ${groupId} doesn't start together without warning`);
-    if (warning != null && (together || warning.clipIds.join(',') !== members.map((clip) => clip.id).join(','))) fail(`Group ${groupId}: wrong group-split warning`);
+    // E4: a group cut by the limit may keep its warning (it was split in the whole plan)
+    const cut = members.some((clip) => lost.has(clip.id));
+    if (warning != null && ((together && !cut) || warning.clipIds.join(',') !== members.map((clip) => clip.id).join(','))) fail(`Group ${groupId}: wrong group-split warning`);
   });
   split.forEach((_w, groupId) => { if (!groups.has(groupId)) fail(`Group ${groupId} doesn't exist but has a group-split warning`); });
 

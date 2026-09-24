@@ -141,7 +141,7 @@ El planificador intenta evitar estos casos, pero el generador debe soportarlos.
 
 Carpeta: `src/renderer/src/videomix/planner/` (implementado en T10 y ajustado en T10b; detalles y justificación en [T10](execution/T10-planificador.md) y [T10b](execution/T10b-ajuste-planificador.md)).
 
-- **Entrada** (`PlanMixInput`): la lista ordenada de `PlannerClip = { id, duration, aspectRange, rects? }` y `PlannerSettings = { width, height, maxColumns, gap, reorderWindow, order, transitionDuration }`. `getPlannerInput(project)` (`plannerInput.ts`) la construye desde `MixClip`/`MixSettings`; `rects` (máx./mín.) solo sirve para el aviso y la puntuación de upscale.
+- **Entrada** (`PlanMixInput`): la lista ordenada de `PlannerClip = { id, duration, aspectRange, rects?, pinTime?, groupId? }`, `PlannerSettings = { width, height, maxColumns, gap, reorderWindow, order, transitionDuration, axis?, linkTransition?, maxDuration? }` y, desde T38, `chains?` (listas de ids) y `sequence?` (ids de la secuencia siempre visible). `getPlannerInput(project)` (`plannerInput.ts`) la construye desde `MixClip`/`MixSettings` (cadenas con `getClipChains` sobre los clips válidos); `rects` (máx./mín.) solo sirve para el aviso y la puntuación de upscale.
 - **Salida**: `MixPlan` (`planMix`). `validatePlan(plan, input)` comprueba las invariantes de §3.2 y devuelve la lista de problemas; `planMix` la ejecuta en desarrollo (`import.meta.env.DEV`). `formatPlan(plan)` da una vista textual compacta.
 
 ### 3.1 Salida: `MixPlan`
@@ -169,7 +169,8 @@ type PlanWarning =
   | { type: 'transition-shortened', clipId, duration }  // xfade de entrada < D
   | { type: 'fill', time, width }                       // keyframe con relleno estructural > 1 px
   | { type: 'pin-shifted', clipId, pinTime, time }      // (T30) un clip fijado no empieza en su momento sino en `time`
-  | { type: 'group-split', groupId, clipIds };          // (T30) los clips de un grupo no empiezan todos a la vez
+  | { type: 'group-split', groupId, clipIds }           // (T30) los clips de un grupo no empiezan todos a la vez
+  | { type: 'truncated', time, seconds, clipIds, cutClipIds }; // (T38, truncatePlan) corte en la duración máxima
 
 interface MixPlan {
   width: number, height: number, duration: number,
@@ -207,6 +208,9 @@ interface MixPlan {
 11. **Fundido de salida** (T10b): `transitionOut` vale `min(D, duración/2)` exactamente en los clips descritos en §3.1 y 0 (o falta) en los demás.
 12. **Clips fijados** (T30): un clip fijado empieza exactamente en su `pinTime` efectivo (§3.6) o hay un aviso `pin-shifted` con su inicio real; no hay avisos de clips no fijados ni avisos que no correspondan.
 13. **Grupos** (T30): los clips de un grupo empiezan a la vez o hay un aviso `group-split` del grupo (y solo entonces). En la ventana de orden (regla 5) los clips fijados no cuentan, los clips sueltos se comparan entre sí y un grupo, que ocupa una sola posición entre las unidades ordenadas (la de su primer clip), no puede empezar más de N posiciones antes; sí puede empezar después (espera a tener sitio).
+14. **Cadenas** (E2, T38): los clips de una cadena están en la misma columna, seguidos (nada entre medias) y en su orden, con `transitionIn` = 0 (`linkTransition: 'cut'`) o exactamente `min(D, a/2, b/2)` (`'global'`). En la ventana de orden una cadena es un clip suelto (el primero); los demás no cuentan. La regla 7 ("columna vacía con clips pendientes") solo mira los inicios de unidades: al final, una cadena o la secuencia puede seguir sola mientras otras columnas pasan a relleno.
+15. **Secuencia siempre visible** (E5, T38): es una cadena cuyo primer clip empieza en `t = 0`; con la regla 14 y las de columnas, está en pantalla (en una columna de ancho > 0) hasta que se acaba.
+16. **Plan truncado** (E4, T38): con aviso `truncated`, `duration` = `time` (≤ `maxDuration` de los ajustes), ningún clip empieza en el límite o después ni termina después, los clips que faltan son exactamente `clipIds` (y una cadena solo pierde su final), los cortados son `cutClipIds` y ningún keyframe empieza en el límite o después. El resto de reglas se comprueban sobre las duraciones sin cortar.
 
 Además: los keyframes no se solapan (`time ≥ anterior.time + anterior.transitionDuration`) y `transitionDuration ≤ D`.
 
@@ -246,6 +250,8 @@ Simulación por eventos "termina el clip de una columna". `D` = duración de la 
 
 Escala orientativa: 1 % de relleno durante 5 s ≈ un re-layout ≈ 3 posiciones de desorden.
 
+**Duración máxima** (E4, T38): hay *presión* mientras `t + contenido pendiente / LIMIT_DENSITY (2 columnas) > maxDuration` (contenido pendiente: clips por empezar con sus cadenas, fijados y lo que le queda a la fila). Con presión, cada columna por debajo de `maxColumns` cuesta `LIMIT_COLUMN_WEIGHT` = 4, no se penaliza pasar de 3 columnas, el recorte "barato" sube a `LIMIT_MAX_CROP_LOSS` = 0,55 y la sustitución directa pierde su prioridad absoluta mientras la fila tenga sitio para más columnas. Ejemplo a 16:9 con 3 columnas: dos 16:9 flexibles a 960 px (50 % de recorte) cuestan 2 × 4 × 0,5 + 4 = 8 frente a 4 + 2 × 4 = 12 de uno a pantalla completa. Sin límite, o si el contenido cabe, la puntuación no cambia. La puntuación global (`PlanScore`, 1:1) no depende del límite.
+
 **Criterio equilibrado de columnas** (T10b, requisitos §4.3): una fila de una sola columna cuesta 4, más que recortar dos clips hasta el umbral (2 × 0,4 × 4 = 3,2). Así se prefieren 2–3 columnas, estrechando los horizontales flexibles hacia su mín., salvo que haya que perder más de ~40 % del máx. de algún clip; entonces gana el clip a pantalla completa. Ejemplos a 1920×1080: un 16:9 flexible junto a un 9:16 se queda en 1312 px (pierde el 32 %) → 2 columnas; junto a un 1:1 rígido se quedaría en 840 px (pierde el 56 %) → pantalla completa; dos 16:9 a 960 px pierden el 50 % cada uno → pantalla completa.
 
 ### 3.5 Aleatoriedad
@@ -271,6 +277,30 @@ Detalle, ejemplos y justificación en las notas de [T30](execution/T30-v2-plan-m
 - **Grupos**: todos sus clips empiezan en el mismo `time`: en la columna que se libera y en columnas nuevas a su derecha (en un evento normal, en la familia "sustituir"; si es obligatorio, también en las columnas que terminan a la vez). Si no hay sitio, se quita la columna que termina hasta que lo haya. Un grupo cede el sitio a un clip fijado pendiente.
 - **Filas apretadas**: si los clips que deben empezar juntos no caben ni a su mín., todos los de la fila se estrechan en la misma proporción (letterbox, con su aviso) antes que retrasarlos.
 - Sin clips fijados ni grupos el algoritmo no cambia (mismos planes y snapshots). `placements` se ordena por inicio al final, porque un clip fijado puede empezar antes que otro elegido antes.
+
+### 3.7 Cadenas, secuencia siempre visible y duración máxima (E2, E4, E5, T38)
+
+Detalle, ejemplos antes/después y justificación en las notas de [T38](execution/T38-v3-planificador.md).
+
+- **Entrada**: `getPlanLinks` (`units.ts`, compartido con `validatePlan`) limpia `chains` y `sequence`:
+  - la secuencia se queda con sus clips conocidos, sin repetir, y **manda sobre fijaciones y grupos** (sus clips pierden `pinTime`/`groupId`);
+  - una cadena pierde los clips desconocidos, de la secuencia, fijados, agrupados (regla de T36) o ya usados en otra cadena; si le quedan menos de 2, se ignora.
+- **Cadenas** (E2):
+  - Una cadena es **una unidad suelta**: ocupa una posición en la ventana de orden, la de su clip más temprano en el orden base (lista o barajado); se representa por su primer clip, que lleva el resto enlazado (`Clip.next`, y `tail` = segundos que le quedan a la cadena tras ese clip).
+  - Cuando termina un clip con `next`, el evento es **de cadena** (`resolveChainEvent`): el siguiente clip entra en la misma columna, `chainTransition` antes (`linkTransition: 'cut'` → 0, concat en el render; `'global'` → `min(D, a/2, b/2)`, sin acortar por otras columnas).
+    - Si encaja en el ancho y la fila no tiene relleno, no cambia el layout (como una sustitución directa).
+    - Si no, se elige entre dejarlo en su sitio (pillarbox/letterbox) y un **re-layout animado que empieza en el cambio**: con las mismas columnas, o con columnas nuevas a su derecha para clips de la ventana. La animación dura la transición de la cadena (o `D` si es un corte), termina antes de que acabe cualquier clip de la fila y del siguiente fijado, y no puede empezar durante otra; si no hay margen, el clip queda en su sitio.
+    - Con relleno y un clip que encaja, se aplica la misma regla de "relleno antes que sustitución directa" (§3.3).
+  - Una columna a mitad de cadena **está ocupada hasta `end + tail`**: no entra en eventos fusionados, no se quita (re-layout "quitar", drenado, forzados) y cuenta como ocupada en la reserva de los fijados. Los siguientes clips de una cadena no cuentan en el orden de inicio (`lastStart`).
+- **Secuencia siempre visible** (E5): es una cadena fijada en 0 que va **siempre** en la fila inicial (antes que los fijados en 0), a la derecha de los clips elegidos. Cuenta para `maxColumns`. Su posición cambia con los re-layouts (las columnas nuevas entran junto a la que se libera). Sus clips van uno detrás de otro con la misma transición que las cadenas (`links.transition`). Cuando se acaba, su columna es una más: recibe clips o se quita.
+- **Final**: si no quedan clips por empezar ni fijados, la simulación sigue solo con las columnas que tienen cadena: las demás pasan a relleno al acabar (sin re-expansión), y un clip de cadena que no encaja se queda en su sitio si alguna columna ya ha terminado.
+- **Duración máxima** (E4): el planificador **no corta**; solo cambia la puntuación con presión (§3.4). El corte es `truncatePlan(plan, maxDuration)` (`truncatePlan.ts`, puro):
+  - quita los clips que empezarían en el límite o después y corta en el límite los que siguen (`endTime` = límite, sin `transitionOut`);
+  - quita los keyframes desde el límite (una animación en curso se queda: el vídeo acaba durante ella);
+  - `duration` = límite, así que el *fade* global de vídeo y audio queda en el corte;
+  - filtra los avisos de clips perdidos o posteriores al límite y añade `truncated` con los segundos perdidos, los clips perdidos y los cortados (cortar dos veces acumula).
+  - Overlays y sonidos: `resolveOverlayTimes` ya los recorta a `plan.duration`; hay que resolverlos con los *placements* del plan completo y la duración cortada, para que un overlay anclado a un clip perdido quede fuera del vídeo en vez de perder el ancla.
+- Sin cadenas, secuencia ni límite (o si el contenido cabe en el límite), los planes no cambian (mismos snapshots).
 
 ## 4. Render de vídeo con ffmpeg
 
