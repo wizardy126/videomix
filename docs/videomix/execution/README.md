@@ -80,3 +80,9 @@
 | T32 | [T32-v2-preview-vivo.md](T32-v2-preview-vivo.md) |
 | T33 | [T33-v2-tests-e2e.md](T33-v2-tests-e2e.md) |
 | T34 | [T34-v2-cierre.md](T34-v2-cierre.md) |
+| T35 | [T35-v3-bug-sar.md](T35-v3-bug-sar.md) |
+| T36 | [T36-v3-modelo.md](T36-v3-modelo.md) |
+| T37 | [T37-v3-ui-edicion.md](T37-v3-ui-edicion.md) |
+| T38 | [T38-v3-planificador.md](T38-v3-planificador.md) |
+| T39 | [T39-v3-ui-cadenas-render.md](T39-v3-ui-cadenas-render.md) |
+| T40 | [T40-v3-cierre.md](T40-v3-cierre.md) |

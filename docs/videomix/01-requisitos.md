@@ -190,7 +190,20 @@ Añadido tras la v1. Son capas que se dibujan o suenan **encima del vídeo final
 | D2 | **Codificación por hardware y H.265** | Detección automática de NVENC, QSV, VideoToolbox y VAAPI, con x264/x265 como respaldo y selección manual en los ajustes. Salida en H.264 o H.265. |
 | E3 | **Tests end-to-end de la UI** | Playwright + Electron, ejecutados en local (no en CI). |
 
-## 11. Fuera de alcance (backlog)
+## 11. Mejoras v3 y correcciones (decididas con el usuario)
+
+| ID | Mejora | Decisiones |
+|---|---|---|
+| E1 | **Contador de duración al marcar** | Con un inicio marcado sin fin, se muestra la duración inicio → cursor **junto al cursor en el timeline** y **en la barra inferior**. Con un clip seleccionado se muestra también su duración y cómo quedaría si el fin fuera el cursor. |
+| E2 | **Clips enlazados automáticamente** | Dos clips de la **misma fuente** se enlazan si el inicio del segundo está como mucho **N s después del fin del primero** (N configurable, 10 por defecto; 0 = desactivado), o si se solapan. Se encadenan por tiempo de la fuente. Una cadena ocupa **el mismo hueco** (columna o fila): un clip detrás de otro, con **corte directo** por defecto o transición global (ajuste del proyecto). Si las proporciones no encajan, el hueco se reajusta con la animación normal. Se puede **romper** un enlace concreto o **forzar** uno desde la lista de clips, que muestra un indicador de cadena. |
+| E3 | **Duración estimada siempre visible** | "≈ m:ss" en la barra inferior, junto a Ajustes, Vista previa y Renderizar, en ambas pestañas. Se calcula con el planificador real, con un pequeño retardo. |
+| E4 | **Duración máxima del vídeo** | Ajuste del proyecto (desactivado por defecto). Si el montaje dura más, se **corta en el límite con el *fade* de salida global** (vídeo y audio), con aviso antes de renderizar y el indicador de E3 resaltado. Con límite, el planificador **favorece más columnas** para que quepa más contenido antes del corte. |
+| E5 | **Secuencia siempre visible** | **Una por proyecto**: una lista ordenada de clips, que salen del reparto normal. En todo momento hay uno de ellos en pantalla, en un **hueco propio cuya posición decide el algoritmo** (se puede mover en los re-layouts). El resto se llena con los demás clips. **El vídeo dura lo que dure lo más largo**: si la secuencia acaba antes, su hueco se usa con normalidad; si acaba después, sigue hasta terminar. |
+| E6 | **Clips solapados** | Ya era posible duplicando (Ctrl+D) y cambiando tiempos y rectángulos. Se añade la acción **"Nuevo clip desde aquí"**: pone un inicio nuevo en el cursor aunque esté dentro de otro clip, y "Marcar fin" lo cierra como clip nuevo. Tiene atajo propio y botón en la barra inferior. |
+| B1 | **Bug: fuentes con píxeles no cuadrados (SAR ≠ 1)** | Todo trabaja en **píxeles de visualización**. El tamaño de la fuente se guarda aplicando SAR y rotación, y en ffmpeg el rectángulo se convierte a píxeles codificados en el `crop` (sin reescalar el fotograma). Miniaturas y render coherentes con el editor. |
+| B2 | **Bug: re-vincular una fuente a otra resolución** | Los rectángulos de sus clips se **escalan proporcionalmente**. Si cambia la proporción, además se ajustan al fotograma y se avisa. |
+
+## 12. Fuera de alcance (backlog)
 
 - Keyframes o paneo del rectángulo.
 - Ajustes manuales del plan de montaje.
