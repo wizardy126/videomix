@@ -32,6 +32,14 @@ describe('getThumbnailCacheKey', () => {
     expect(await getThumbnailCacheKey({ ...base, sar: { num: 1, den: 1 } })).toBe(baseKey);
     expect(await getThumbnailCacheKey({ ...base, sar: { num: 679, den: 640 } })).not.toBe(baseKey);
   });
+
+  test('E9: a turn changes the key, no turn keeps it', async () => {
+    const base = { absolutePath: '/media/a.mp4', mtimeMs: 1000, size: 12, start: 1.5, maxRect: rect };
+    const baseKey = await getThumbnailCacheKey(base);
+    expect(await getThumbnailCacheKey({ ...base, rotation: 0 })).toBe(baseKey);
+    const keys = await Promise.all(([90, 180, 270] as const).map(async (rotation) => getThumbnailCacheKey({ ...base, rotation })));
+    expect(new Set([baseKey, ...keys]).size).toBe(4);
+  });
 });
 
 describe('getThumbnailCrop', () => {
@@ -42,6 +50,15 @@ describe('getThumbnailCrop', () => {
   test('B1: coded crop plus the display aspect', () => {
     const maxRect = { x: 78, y: 14, width: 1232, height: 694 };
     expect(getThumbnailCrop(maxRect, { width: 1358, height: 720, sar: { num: 679, den: 640 } })).toEqual({ crop: { x: 74, y: 14, width: 1160, height: 694 }, aspect: 1232 / 694 });
+  });
+
+  test('E9: a turned clip crops the unturned frame and turns the crop', () => {
+    const source = { width: 1920, height: 1080 };
+    expect(getThumbnailCrop({ x: 0, y: 200, width: 1080, height: 920 }, source, 90)).toEqual({ crop: { x: 200, y: 0, width: 920, height: 1080 }, rotation: 'transpose=clock' });
+    expect(getThumbnailCrop(rect, source, 180)).toEqual({ crop: rect, rotation: 'hflip,vflip' });
+    // anamorphic: turned (14, 48) 694x1232 of the 720x1358 turned frame = display (48, 12) 1232x694 → coded
+    expect(getThumbnailCrop({ x: 14, y: 48, width: 694, height: 1232 }, { width: 1358, height: 720, sar: { num: 679, den: 640 } }, 90))
+      .toEqual({ crop: { x: 46, y: 12, width: 1160, height: 694 }, aspect: 694 / 1232, rotation: 'transpose=clock' });
   });
 });
 

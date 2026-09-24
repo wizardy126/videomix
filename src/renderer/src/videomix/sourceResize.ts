@@ -1,7 +1,8 @@
 import { clampRect } from './geometry';
 import type { Size } from './overlayMath';
 import { getCodedSize, isSquareSar } from './sampleAspect';
-import type { MixClip, MixSource, Rect } from './types';
+import { rotateSize } from './clipRotation';
+import type { MixClip, MixClipRotation, MixSource, Rect } from './types';
 import { MIN_RECT_SIZE } from './types';
 
 // B2 (v3): the size of a source changes (relinked to another file, or the file was replaced): the rects of its clips
@@ -39,6 +40,11 @@ export function getSourceFrameChange(
   const aspectChanged = Math.abs((to.width / to.height) / (from.width / from.height) - 1) > ASPECT_TOLERANCE;
   return { from, to, aspectChanged };
 }
+
+/** E9 (T38d): the change of a clip's turned frame, whose rects live in it (a quarter turn swaps the axes). */
+export const rotateFrameChange = (change: SourceFrameChange, rotation: MixClipRotation): SourceFrameChange => (
+  rotation === 0 ? change : { ...change, from: rotateSize(change.from, rotation), to: rotateSize(change.to, rotation) }
+);
 
 const roundEven = (v: number) => 2 * Math.round(v / 2) + 0;
 const floorEven = (v: number) => 2 * Math.floor(v / 2) + 0;

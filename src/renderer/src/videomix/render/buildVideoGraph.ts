@@ -1,5 +1,6 @@
 import invariant from 'tiny-invariant';
 
+import { getClipRotation, getRotationFilter, getUnrotatedCrop } from '../clipRotation';
 import { getExtendedCropForAspect } from '../geometry';
 import { getPlanAxis, getPlanAxisLengths } from '../planner/types';
 import { isSquareSar, toCodedRect } from '../sampleAspect';
@@ -22,7 +23,7 @@ export { formatNumber, toFfmpegColor } from './ffmpegArgs';
 
 export type VideoGraphSettings = Pick<MixSettings, 'fps' | 'gap' | 'transition' | 'fadeInOut' | 'fill'>;
 
-export type RenderClip = Pick<MixClip, 'id' | 'sourceId' | 'start' | 'maxRect' | 'minRect'>;
+export type RenderClip = Pick<MixClip, 'id' | 'sourceId' | 'start' | 'maxRect' | 'minRect'> & Partial<Pick<MixClip, 'rotation'>>;
 
 export interface VideoGraph {
   /** Per input: its input options followed by `-i <path>`, in input index order. */
@@ -273,11 +274,15 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, sourceFrames
     const head = `[${inputIndex}:v]${shift}fps=${fps}:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=${nf},setpts=PTS-STARTPTS`;
     const out = newLabel('clip');
     // B1: rects in display pixels → crop in coded pixels; the scale that follows (to explicit sizes, setsar=1) fixes
-    // the proportion, and the blurred cover is told the display aspect
+    // the proportion, and the blurred cover is told the display aspect.
+    // E9 (T38d): a turned clip's rects are in the turned frame: the crop is taken in the unturned frame, and only the
+    // cropped picture is turned (transpose of the crop, not of the whole frame), before any scale.
     const frame = sourceFrames?.[clip.sourceId];
     const sar = frame?.sar;
     const frameSize = frame?.width != null && frame.height != null ? { width: frame.width, height: frame.height } : undefined;
-    const cropFilterOf = (r: Rect) => cropFilter(toCodedRect(r, sar, frameSize));
+    const rotation = getClipRotation(clip);
+    const rotate = rotation !== 0 ? `,${getRotationFilter(rotation)}` : '';
+    const cropFilterOf = (r: Rect) => `${cropFilter(toCodedRect(getUnrotatedCrop(r, frameSize, rotation), sar, frameSize))}${rotate}`;
     const blurCoverOf = (w: number, h: number, r: Rect) => blurCover(w, h, isSquareSar(sar) ? undefined : r.width / r.height);
     // E7 (T38b): the crop may grow beyond the max into the rect the planner extended it to (same function as the preview)
     const cropFor = (aspect: number) => getExtendedCropForAspect(clip.maxRect, clip.minRect, p.placement.extendedMaxRect, aspect);

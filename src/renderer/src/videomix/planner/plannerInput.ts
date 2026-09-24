@@ -1,3 +1,4 @@
+import { getClipFrame } from '../clipRotation';
 import { getAspectRange } from '../geometry';
 import { getClipChains, getClipDuration } from '../project';
 import { getOutputSize } from '../types';
@@ -8,7 +9,8 @@ import type { PlanMixInput, PlannerClip, PlannerSettings } from './types';
 export const canExtendBeyondMax = (clip: Pick<MixClip, 'extendBeyondMax'>) => clip.extendBeyondMax !== false;
 
 export function toPlannerClip(clip: MixClip, source?: Pick<MixSource, 'width' | 'height'> | undefined): PlannerClip {
-  const { width, height } = source ?? {};
+  // E9 (T38d): the material available around the max is that of the turned frame, where the rects live
+  const { width, height } = getClipFrame(clip, source) ?? {};
   return {
     id: clip.id,
     duration: getClipDuration(clip),

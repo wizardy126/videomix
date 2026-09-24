@@ -112,6 +112,11 @@ const allDefaultKeyBindings: KeyBinding[] = [
   // E6 "New clip from here": unlike KeyI (setCutStart), always starts a new marker, even inside another clip.
   // ShiftLeft+KeyI is not used by any other binding or menu accelerator.
   { keys: 'ShiftLeft+KeyI', action: 'newClipFromCursor' },
+  // E9 (T38d): turn the selected clip. KeyR was LosslessCut's increaseRotation, retired in VideoMix (no default key);
+  // ShiftLeft+KeyR and AltLeft+KeyR are not used by any other binding or menu accelerator.
+  { keys: 'KeyR', action: 'rotateClipClockwise' },
+  { keys: 'ShiftLeft+KeyR', action: 'rotateClipCounterclockwise' },
+  { keys: 'AltLeft+KeyR', action: 'rotateClip180' },
 
   // VideoMix mix. Plain E ('export') also renders in VideoMix mode. Ctrl/Cmd+E, Ctrl/Cmd+P and Ctrl/Cmd+Shift+M are not
   // used by any other binding or menu accelerator (Cmd+M alone is the macOS minimize shortcut, so Shift is added).

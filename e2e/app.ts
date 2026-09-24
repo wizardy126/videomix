@@ -27,6 +27,14 @@ export function ffprobe(filePath: string) {
   };
 }
 
+/** One frame at `time` of `filePath` through the bundled ffmpeg with the filters `vf`, as raw RGB24. */
+export function ffmpegFrame(filePath: string, time: number, vf: string) {
+  return execFileSync(join(ffDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'), ['-v', 'error', '-ss', String(time), '-i', filePath, '-frames:v', '1', '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], {
+    env: { ...process.env, LD_LIBRARY_PATH: ffDir },
+    maxBuffer: 1e8,
+  });
+}
+
 export interface LaunchedApp {
   app: ElectronApplication,
   page: Page,

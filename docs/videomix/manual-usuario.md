@@ -71,7 +71,10 @@ La barra de herramientas sobre el vídeo permite:
 
 - fijar una **proporción** para el máx. (Libre, 9:16, 3:4, 1:1, 4:3, 16:9);
 - **Mín. = Máx.** (quita el mínimo) / **Añadir mín.**;
-- **Rellenar fotograma** (el máx. vuelve a ocupar todo el vídeo).
+- **Rellenar fotograma** (el máx. vuelve a ocupar todo el vídeo);
+- **girar el clip** −90°, +90° o 180° (ver abajo); si está girado, muestra el giro (p. ej. `90°`).
+
+**Girar un clip**: cada clip puede girarse +90°, −90° o 180° (por ejemplo, un vídeo grabado de lado) con los botones de giro de esta barra, con su menú contextual (lista de clips y pestaña **Montaje**) o con `R` (+90°), `Mayús+R` (−90°) y `Alt+R` (180°). Con el clip seleccionado, el reproductor muestra la imagen ya girada y los rectángulos se editan sobre ella; al girar, los rectángulos giran con la imagen, así que el encuadre se conserva. Todo lo demás usa la imagen girada: la orientación del clip (un vídeo horizontal girado 90° es vertical), el montaje, la previsualización en vivo, las miniaturas y el render. El giro se suma a la rotación que ya indique el propio fichero. Su fila de la lista muestra el giro junto a la orientación.
 
 El montaje elige, para cada clip y cada columna, un recorte que respeta el mínimo, cabe dentro del máximo y tiene la proporción de esa columna; si hace falta ampliar mucho la imagen (más de ×2), el clip lo indica en su fila de la lista.
 
@@ -238,6 +241,7 @@ Puedes ver y personalizar todos los atajos en **Ayuda → Atajos de teclado y ra
 | Dividir clip en el cursor | `B` |
 | Quitar punto de corte (elimina el clip) | `Retroceso` |
 | Duplicar / eliminar clip seleccionado | `Ctrl/Cmd+D` / `Supr` |
+| Girar el clip seleccionado +90° / −90° / 180° | `R` / `Mayús+R` / `Alt+R` |
 | Ir al clip anterior / siguiente | `↑` / `↓` |
 | Ir al primer / último clip | `Av Pág` / `Re Pág` |
 | Deshacer / rehacer | `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` |

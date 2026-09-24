@@ -45,7 +45,7 @@ interface DragState {
 
 /**
  * Editable max/min rects of a clip, drawn over the <video> (same container, absolutely positioned on top).
- * Rects are in oriented source pixels; `videoSize` is the oriented size of the source.
+ * Rects are in oriented source pixels; `videoSize` is the oriented size of the source (turned by `clipRotation`, E9).
  *
  * Controlled: `onChange` is called on every step of a drag (transient, don't record history), `onCommit` once at the
  * end of a drag or on each keyboard nudge (record it). The parent must apply both.
@@ -53,7 +53,7 @@ interface DragState {
  * Only the rects and handles take pointer events, so clicks elsewhere reach the video and the wheel bubbles to the
  * container (seek/zoom).
  */
-function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', aspectLock, cssRotation, onChange, onCommit }: {
+function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', aspectLock, cssRotation, clipRotation, onChange, onCommit }: {
   maxRect: Rect,
   minRect?: Rect | undefined,
   videoSize: Size,
@@ -63,6 +63,11 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
   aspectLock?: number | undefined,
   /** CSS rotation applied to the video by the compat player, see getVideoContentBox. */
   cssRotation?: number | undefined,
+  /**
+   * E9 (T38d): the clip's turn. The player is turned by it (useMixPlayerTurn) and `videoSize` is the turned frame;
+   * the overlay itself isn't turned, it draws on the turned picture.
+   */
+  clipRotation?: number | undefined,
   onChange: (rects: ClipRects) => void,
   /** `keyboard`: an arrow key nudge, the parent may merge repeated nudges into one undo step. */
   onCommit: (rects: ClipRects, info?: { keyboard: boolean }) => void,
@@ -88,7 +93,7 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
   const rects = useMemo<ClipRects>(() => ({ maxRect, minRect }), [maxRect, minRect]);
   const activeTarget: RectTarget = active === 'min' && minRect != null ? 'min' : 'max';
 
-  const box = useMemo(() => getVideoContentBox(containerSize, videoSize, cssRotation), [containerSize, cssRotation, videoSize]);
+  const box = useMemo(() => getVideoContentBox(containerSize, videoSize, cssRotation, clipRotation), [clipRotation, containerSize, cssRotation, videoSize]);
   const maxBox = useMemo(() => (box != null ? toScreenCoords(maxRect, box, videoSize) : undefined), [box, maxRect, videoSize]);
   const minBox = useMemo(() => (box != null && minRect != null ? toScreenCoords(minRect, box, videoSize) : undefined), [box, minRect, videoSize]);
 

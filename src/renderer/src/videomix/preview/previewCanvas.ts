@@ -1,4 +1,6 @@
-import type { Rect } from '../types';
+import { unrotateRect } from '../clipRotation';
+import { isQuarterTurn } from '../overlayMath';
+import type { MixClipRotation, Rect } from '../types';
 import type { PreviewFrameDraw } from './previewDraw';
 import type { PreviewOverlayOp } from './previewOverlays';
 
@@ -41,9 +43,36 @@ export function createBlurScratch(): BlurScratch | undefined {
   return ctx != null ? { canvas, ctx } : undefined;
 }
 
-function drawBlur(ctx: CanvasRenderingContext2D, scratch: BlurScratch | undefined, source: CanvasImageSource, src: Rect, dest: Rect, scale: number) {
-  if (scratch == null) {
+/** Size of the picture of an image source (a <video>: its display size, the frame of the clip rects). */
+function getSourceSize(source: CanvasImageSource) {
+  if ('videoWidth' in source) return { width: source.videoWidth, height: source.videoHeight };
+  if ('naturalWidth' in source) return { width: source.naturalWidth, height: source.naturalHeight };
+  const { width, height } = source as { width: unknown, height: unknown };
+  return typeof width === 'number' && typeof height === 'number' ? { width, height } : undefined;
+}
+
+/**
+ * drawImage of `src` into `dest`. E9 (T38d): with a `rotation`, `src` is a rect of the picture turned clockwise by it
+ * (a turned clip's rects): the canvas draws the matching rect of the unturned picture, turned about the centre of `dest`.
+ */
+function drawImageTurned(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D, source: CanvasImageSource, src: Rect, dest: Rect, rotation: MixClipRotation | undefined) {
+  const size = rotation != null && rotation !== 0 ? getSourceSize(source) : undefined;
+  if (rotation == null || rotation === 0 || size == null) {
     ctx.drawImage(source, src.x, src.y, src.width, src.height, dest.x, dest.y, dest.width, dest.height);
+    return;
+  }
+  const s = unrotateRect(src, size, rotation);
+  const [w, h] = isQuarterTurn(rotation) ? [dest.height, dest.width] : [dest.width, dest.height];
+  ctx.save();
+  ctx.translate(dest.x + dest.width / 2, dest.y + dest.height / 2);
+  ctx.rotate((rotation * Math.PI) / 180);
+  ctx.drawImage(source, s.x, s.y, s.width, s.height, -w / 2, -h / 2, w, h);
+  ctx.restore();
+}
+
+function drawBlur(ctx: CanvasRenderingContext2D, scratch: BlurScratch | undefined, source: CanvasImageSource, src: Rect, dest: Rect, scale: number, rotation: MixClipRotation | undefined) {
+  if (scratch == null) {
+    drawImageTurned(ctx, source, src, dest, rotation);
     return;
   }
   const w = Math.max(2, Math.round((dest.width * scale) / BLUR_DOWNSCALE));
@@ -59,7 +88,7 @@ function drawBlur(ctx: CanvasRenderingContext2D, scratch: BlurScratch | undefine
   const s = scratch.ctx;
   s.filter = `blur(${BLUR_RADIUS}px)`;
   // the blur darkens the edges (it samples transparent pixels outside): draw with a margin and keep the inside
-  s.drawImage(source, src.x, src.y, src.width, src.height, 0, 0, fullW, fullH);
+  drawImageTurned(s, source, src, { x: 0, y: 0, width: fullW, height: fullH }, rotation);
   s.filter = 'none';
   ctx.imageSmoothingQuality = 'low';
   ctx.drawImage(scratch.canvas, BLUR_MARGIN, BLUR_MARGIN, w, h, dest.x, dest.y, dest.width, dest.height);
@@ -173,10 +202,10 @@ export function drawPreviewFrame({ ctx, frame, overlays, outputWidth, resources,
     const placeholder = video == null ? resources.getPlaceholder(op.clipId) : undefined;
     if (op.kind === 'video') {
       ctx.imageSmoothingQuality = 'medium';
-      if (video != null) ctx.drawImage(video, op.src.x, op.src.y, op.src.width, op.src.height, op.dest.x, op.dest.y, op.dest.width, op.dest.height);
+      if (video != null) drawImageTurned(ctx, video, op.src, op.dest, op.rotation);
       else if (placeholder != null) drawPlaceholder(ctx, op.dest, placeholder, scale);
     } else if (video != null) {
-      drawBlur(ctx, blurScratch, video, op.src, op.dest, scale);
+      drawBlur(ctx, blurScratch, video, op.src, op.dest, scale, op.rotation);
     } else {
       fillRect(ctx, op.dest, placeholder != null ? placeholder.color : resources.fillColor);
     }

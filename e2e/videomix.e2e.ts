@@ -7,7 +7,7 @@ import type { Locator, Page } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 
 import type { LaunchedApp } from './app.ts';
-import { ffprobe, launchApp, media, mockOpenDialog, mockSaveDialog, pressShortcut, screenshot, sendMenuAction } from './app.ts';
+import { ffmpegFrame, ffprobe, launchApp, media, mockOpenDialog, mockSaveDialog, pressShortcut, screenshot, sendMenuAction } from './app.ts';
 
 // End-to-end scenarios of T33 on the real app. They run in order on one app and build one project, like a user would:
 // sources → clips → rect → reorder → save/reopen → settings → overlays → live preview → render → undo/redo.
@@ -652,6 +652,98 @@ test.describe('VideoMix (anamorphic source)', () => {
       if (await previewAnyway.isVisible()) await previewAnyway.click();
       await expect(dialogTitle).toBeVisible({ timeout: 110_000 });
       await screenshot(page, '12-stale-sar-reopened-preview');
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test.describe('VideoMix (turned clip)', () => {
+  test('13. a turned clip is edited on the turned picture and rendered turned (E9, T38d)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    const workDir = mkdtempSync(join(tmpdir(), 'videomix-e2e-rotation-'));
+    try {
+      const file = sourceFiles[0]!; // 1920x1080
+      await mockOpenDialog(ctx.app, [media(file)]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      await waitIdle(page);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(1);
+      await expect(page.getByTestId('rect-label')).toContainText('Max 1920×1080 · 16:9 · Horizontal');
+      const playerTransform = async () => page.locator('video').first().evaluate((v) => v.parentElement?.style.transform ?? '');
+      expect(await playerTransform()).toBe('');
+
+      // R (+90°), the toolbar's 180° (→ 270°), Shift+R (−90° → 180°) and the toolbar's −90° (→ 90°)
+      await pressShortcut(page, 'r');
+      await expect(page.getByTestId('rect-label')).toContainText('Max 1080×1920 · 9:16 · Vertical');
+      await page.getByTestId('rotate-clip-180').click();
+      await expect(page.getByTestId('clip-rotation')).toHaveText('270°');
+      await pressShortcut(page, 'Shift+r');
+      await expect(page.getByTestId('clip-rotation')).toHaveText('180°');
+      await expect(page.getByTestId('rect-label')).toContainText('Max 1920×1080 · 16:9 · Horizontal');
+      await page.getByTestId('rotate-clip-ccw').click();
+      await expect(page.getByTestId('clip-rotation')).toHaveText('90°');
+      await expect(page.getByTestId('clip-rotation-indicator')).toHaveText('90°');
+      await expect(page.getByTestId('rect-label')).toContainText('Max 1080×1920 · 9:16 · Vertical');
+
+      // the player shows the turned picture, and the max rect (the whole turned frame) is drawn tall over it
+      expect(await playerTransform()).toMatch(/^rotate\(90deg\) scale\([\d.]+\)$/);
+      const nw = (await page.getByTestId('rect-handle-max-nw').boundingBox())!;
+      const se = (await page.getByTestId('rect-handle-max-se').boundingBox())!;
+      expect((se.x - nw.x) / (se.y - nw.y)).toBeCloseTo(1080 / 1920, 1);
+      // the thumbnail of the row is turned too (tall)
+      await expect.poll(async () => clipRows(page).first().locator('img').evaluate((img) => (img as HTMLImageElement).naturalHeight / Math.max(1, (img as HTMLImageElement).naturalWidth)), { timeout: 20_000 }).toBeGreaterThan(1.5);
+      await screenshot(page, '13a-turned-clip-editor');
+
+      const projectPath = join(workDir, 'rotation.vmx');
+      await mockSaveDialog(ctx.app, projectPath);
+      await pressShortcut(page, 'Control+s');
+      await expect(page).toHaveTitle(/^rotation - /);
+      const saved = JSON5.parse(readFileSync(projectPath, 'utf8')) as { clips: (SavedProject['clips'][number] & { rotation?: number })[] };
+      expect(saved.clips[0]).toMatchObject({ rotation: 90, maxRect: { x: 0, y: 0, width: 1080, height: 1920 } });
+      const { start } = saved.clips[0]!;
+
+      // the live preview draws it turned, and the rendered preview shows the source turned clockwise
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      const preview = page.getByTestId('mix-live-preview');
+      await expect(preview).toBeVisible();
+      const slider = preview.getByRole('slider');
+      const sliderBox = (await slider.boundingBox())!;
+      await page.mouse.click(sliderBox.x + sliderBox.width / 2, sliderBox.y + sliderBox.height / 2);
+      // the source's colour bars (red on the left … cyan on the right) turned clockwise: red at the top, cyan at the bottom
+      const canvasColor = async (fy: number) => preview.locator('canvas').evaluate((el, y) => {
+        const canvas = el as HTMLCanvasElement;
+        const { data } = canvas.getContext('2d')!.getImageData(Math.round(canvas.width / 2) - 2, Math.round(canvas.height * y) - 2, 4, 4);
+        const [r, g, b] = [0, 1, 2].map((c) => [0, 1, 2, 3].reduce((acc, i) => acc + data[i * 16 + c]!, 0) / 4) as [number, number, number];
+        if (r > 150 && g < 100 && b < 100) return 'red';
+        if (r < 100 && g > 150 && b > 150) return 'cyan';
+        return `other ${Math.round(r)},${Math.round(g)},${Math.round(b)}`;
+      }, fy);
+      await expect.poll(async () => canvasColor(0.08)).toBe('red');
+      expect(await canvasColor(0.92)).toBe('cyan');
+      await screenshot(page, '13b-turned-clip-live-preview');
+      await textButton(page, 'Preview').click();
+      const previewAnyway = page.getByRole('button', { name: 'Preview anyway' });
+      const dialogTitle = page.getByText('Mix preview', { exact: true });
+      await expect(previewAnyway.or(dialogTitle)).toBeVisible({ timeout: 60_000 });
+      if (await previewAnyway.isVisible()) await previewAnyway.click();
+      await expect(dialogTitle).toBeVisible({ timeout: 110_000 });
+      const out = fileURLToPath(await page.getByRole('dialog').locator('video').evaluate((v) => (v as HTMLVideoElement).src));
+      expect(ffprobe(out).streams.find((s) => s.codec_type === 'video')).toMatchObject({ width: 640, height: 360 });
+      // a 100 px strip at the centre of the pillarboxed 9:16 clip (202x360 at x 219) against the source turned both ways
+      const strip = ffmpegFrame(out, 1, 'crop=100:360:270:0');
+      const turned = (transpose: string) => ffmpegFrame(media(file), start + 1, `${transpose},scale=202:360,crop=100:360:51:0`);
+      const diff = (a: Buffer, b: Buffer) => a.reduce((acc, v, i) => acc + Math.abs(v - b[i]!), 0) / a.length;
+      const clockwise = diff(strip, turned('transpose=clock'));
+      const counterclockwise = diff(strip, turned('transpose=cclock'));
+      expect(clockwise).toBeLessThan(25);
+      expect(counterclockwise).toBeGreaterThan(2 * clockwise);
+      await screenshot(page, '13c-turned-clip-preview');
       expect(ctx.consoleErrors).toEqual([]);
     } finally {
       await ctx.close();

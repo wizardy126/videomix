@@ -322,3 +322,74 @@ describe('extension beyond the max (E7, T38b)', () => {
     graphs.forEach((g) => expect(verifyFilterGraph(g, { sourceSizes: g.inputs.map(() => full) })).toEqual([]));
   });
 });
+
+describe('turned clips (E9, T38d)', () => {
+  // h1080 is 1920x1080; turned a quarter, the clip's frame is 1080x1920
+  const frames = { h1080: { width: 1920, height: 1080 } };
+  const source = { width: 1920, height: 1080 };
+  const settings = testSettings({ gap: { width: 0, color: '#000000' }, fill: { mode: 'blur', color: '#000000' } });
+  const single = (width: number, height: number, extra: Partial<MixPlan> = {}): MixPlan => ({
+    width,
+    height,
+    duration: 3,
+    placements: [{ clipId: 't', column: 0, startTime: 0, endTime: 3, transitionIn: 0 }],
+    layouts: [{ time: 0, transitionDuration: 0, columns: [{ column: 0, x: 0, width }], fills: [] }],
+    warnings: [],
+    ...extra,
+  });
+  const graphsOf = (p: MixPlan, clip: RenderClip) => {
+    const tl = getRenderTimeline(p, { fps: 30, gap: 0, transitionDuration: 0.5 });
+    return getRenderChunks(tl, { maxChunkSeconds: 5 }).map((chunk) => buildVideoGraph({ timeline: tl, clips: [clip], sourcePaths: testSourcePaths('/m'), sourceFrames: frames, settings, chunk }));
+  };
+
+  test('the crop is in the unturned frame and only the crop is turned, before the scale', () => {
+    // a max of the turned frame: turned 90° clockwise, its y 200..1120 is the source's x 200..1120 (x 800..1720 at 270°)
+    const maxRect = { x: 0, y: 200, width: 1080, height: 920 };
+    const expected = {
+      90: 'crop=920:1080:200:0,transpose=clock,scale=360:306',
+      180: 'crop=1080:920:840:160,hflip,vflip,scale=360:306',
+      270: 'crop=920:1080:800:0,transpose=cclock,scale=360:306',
+    } as const;
+    for (const [rotation, filters] of Object.entries(expected)) {
+      const clip: RenderClip = { id: 't', sourceId: 'h1080', start: 0, maxRect: rotation === '180' ? { x: 0, y: 0, width: 1080, height: 920 } : maxRect, rotation: Number(rotation) as 90 | 180 | 270 };
+      const [graph] = graphsOf(single(360, 306), clip);
+      expect(graph!.filterComplex, rotation).toContain(filters);
+      expect(verifyFilterGraph(graph!, { sourceSizes: [source] })).toEqual([]);
+    }
+  });
+
+  test('pillarbox: the blurred cover is turned too; the unturned clip is unchanged', () => {
+    const maxRect = { x: 0, y: 420, width: 1080, height: 1080 };
+    const [graph] = graphsOf(single(640, 360), { id: 't', sourceId: 'h1080', start: 0, maxRect, rotation: 90 });
+    // turned y 420..1500 = source x 420..1500, turned x 0..1080 = source y 0..1080
+    expect(graph!.filterComplex).toContain('crop=1080:1080:420:0,transpose=clock,split');
+    expect(verifyFilterGraph(graph!, { sourceSizes: [source] })).toEqual([]);
+    const [plain] = graphsOf(single(640, 360), { id: 't', sourceId: 'h1080', start: 0, maxRect: { x: 420, y: 0, width: 1080, height: 1080 } });
+    expect(plain!.filterComplex).not.toMatch(/transpose|hflip/);
+  });
+
+  test('re-layout (column layer): the union crop is turned back into the source frame', () => {
+    const clip: RenderClip = { id: 't', sourceId: 'h1080', start: 0, maxRect: { x: 0, y: 0, width: 1080, height: 1920 }, minRect: { x: 0, y: 420, width: 1080, height: 1080 }, rotation: 270 };
+    const p = single(640, 360, {
+      layouts: [
+        { time: 0, transitionDuration: 0, columns: [{ column: 0, x: 0, width: 202 }], fills: [{ x: 202, width: 438 }] },
+        { time: 1, transitionDuration: 0.5, columns: [{ column: 0, x: 0, width: 360 }], fills: [{ x: 360, width: 280 }] },
+      ],
+    });
+    const graphs = graphsOf(p, clip);
+    const animated = graphs.find((g) => g.filterComplex.includes('eval=frame'))!;
+    expect(animated.filterComplex).toMatch(/crop=\d+:1080:\d+:0,transpose=cclock,scale=w=/);
+    graphs.forEach((g) => expect(verifyFilterGraph(g, { sourceSizes: g.inputs.map(() => source) })).toEqual([]));
+  });
+
+  test('turned anamorphic source: the unturned crop goes to coded pixels', () => {
+    // 1280x720 coded at 679:640 → 1358x720; turned 90° the clip frame is 720x1358
+    const ana = { h720: { width: 1358, height: 720, sar: { num: 679, den: 640 } } };
+    const clip: RenderClip = { id: 't', sourceId: 'h720', start: 0, maxRect: { x: 14, y: 48, width: 694, height: 1232 }, rotation: 90 };
+    const tl = getRenderTimeline(single(360, 640), { fps: 30, gap: 0, transitionDuration: 0.5 });
+    const graph = buildVideoGraph({ timeline: tl, clips: [clip], sourcePaths: testSourcePaths('/m'), sourceFrames: ana, settings, chunk: { f0: 0, f1: tl.totalFrames } });
+    // turned (14, 48) 694x1232 = display (48, 12) 1232x694 → coded x 46..1206
+    expect(graph.filterComplex).toContain('crop=1160:694:46:12,transpose=clock,scale=360:640');
+    expect(verifyFilterGraph(graph, { sourceSizes: [{ width: 1280, height: 720 }] })).toEqual([]);
+  });
+});

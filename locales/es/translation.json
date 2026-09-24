@@ -1320,5 +1320,13 @@
   "Extend beyond the max if needed: off. Click to turn it on": "Ampliar más allá del máx. si hace falta: desactivado. Haz clic para activarlo",
   "Extend beyond the max if needed: on. To avoid fill, the clip may show more of its source than its max rectangle. Click to turn it off": "Ampliar más allá del máx. si hace falta: activado. Para evitar relleno, el clip puede mostrar más de su fuente que su rectángulo máximo. Haz clic para desactivarlo",
   "Shows {{pixels}} px above and below its max rectangle from {{from}} to {{to}}, to avoid fill": "Muestra {{pixels}} px por encima y por debajo de su rectángulo máximo de {{from}} a {{to}}, para evitar relleno",
-  "Shows {{pixels}} px beside its max rectangle from {{from}} to {{to}}, to avoid fill": "Muestra {{pixels}} px a los lados de su rectángulo máximo de {{from}} a {{to}}, para evitar relleno"
+  "Shows {{pixels}} px beside its max rectangle from {{from}} to {{to}}, to avoid fill": "Muestra {{pixels}} px a los lados de su rectángulo máximo de {{from}} a {{to}}, para evitar relleno",
+  "Rotate +90°": "Girar +90°",
+  "Rotate −90°": "Girar −90°",
+  "Rotate 180°": "Girar 180°",
+  "Rotate clip +90°": "Girar el clip +90°",
+  "Rotate clip −90°": "Girar el clip −90°",
+  "Rotate clip 180°": "Girar el clip 180°",
+  "Rotated {{degrees}}°": "Girado {{degrees}}°",
+  "The size of the video of this clip is not known yet": "Todavía no se conoce el tamaño del vídeo de este clip"
 }

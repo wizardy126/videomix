@@ -8,6 +8,7 @@ import type { MixProjectAction } from '../projectReducer';
 import type { MixClip } from '../types';
 import { getClipPinTime, getGroupColors, getGroupMembers, getPinClipAction, getSelectionRange, getUnpinClipAction } from '../clipGroups';
 import { canExtendBeyondMax } from '../planner/plannerInput';
+import { addRotation, getClipRotation } from '../clipRotation';
 
 const { getCurrentWindow, Menu } = window.require('@electron/remote');
 
@@ -24,10 +25,15 @@ export const getToggleExtendBeyondMaxAction = (clip: Pick<MixClip, 'id' | 'exten
   { type: 'updateClip', clipId: clip.id, patch: { extendBeyondMax: canExtendBeyondMax(clip) ? false : undefined } }
 );
 
+/** E9 (T38d): turn a clip by `delta` degrees (clockwise, any multiple of 90); its rects turn with the picture. */
+export const getRotateClipAction = (clip: Pick<MixClip, 'id' | 'rotation'>, delta: number): MixProjectAction => (
+  { type: 'rotateClip', clipId: clip.id, rotation: addRotation(getClipRotation(clip), delta) }
+);
+
 /**
  * Pinned and grouped clips (A4, T30) in the clip list and the Mix view: a multi-selection on top of the selected clip
  * (which stays the current segment of its source), the clip menu entries ("Pin here" at the Mix view cursor, "Unpin",
- * "Group selected clips", "Ungroup", and E7's "Extend beyond the max if needed"), the group colours and pinning by dragging a block. Each edit is one undo step.
+ * "Group selected clips", "Ungroup", E7's "Extend beyond the max if needed" and E9's turns), the group colours and pinning by dragging a block. Each edit is one undo step.
  */
 export default function useMixClipPins({ clips, selectedClipId, cursorTime, selectClip, dispatchStep }: {
   clips: MixClip[],
@@ -99,6 +105,11 @@ export default function useMixClipPins({ clips, selectedClipId, cursorTime, sele
     { type: 'separator' },
     // E7 (T38b): on by default (only `false` is stored)
     { label: i18n.t('Extend beyond the max if needed'), type: 'checkbox', checked: canExtendBeyondMax(clip), click: () => dispatchStep(getToggleExtendBeyondMaxAction(clip)) },
+    { type: 'separator' },
+    // E9 (T38d)
+    { label: i18n.t('Rotate +90°'), click: () => dispatchStep(getRotateClipAction(clip, 90)) },
+    { label: i18n.t('Rotate −90°'), click: () => dispatchStep(getRotateClipAction(clip, -90)) },
+    { label: i18n.t('Rotate 180°'), click: () => dispatchStep(getRotateClipAction(clip, 180)) },
   ], [cursorTime, dispatchStep, groupColors, pinTimes, selectedClipIds.size, userGroupSelectedClips, userPinClip, userUngroupClip, userUnpinClip]);
 
   /**

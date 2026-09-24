@@ -9,8 +9,13 @@ import type { StateSegment } from '../../types';
 import type { UseMixProject } from './useMixProject';
 import type { MixClipPatch, MixProjectAction } from '../projectReducer';
 import type { ClipRects, Size } from '../overlayMath';
+import { aspectPresets, isQuarterTurn } from '../overlayMath';
 import { getSyncStep } from '../clipSegments';
+import { getRotateClipAction } from './useMixClipPins';
 import { createClip, getDefaultClipName, getDuplicateClipName, getNewClipRange, getNextClipColor, getSplitClipAction } from '../clips';
+
+/** An aspect turned a quarter (1 / aspect), as the preset value when it is one, so the toolbar still shows it. */
+const getTurnedAspect = (aspect: number) => aspectPresets.find(({ value }) => Math.abs(value * aspect - 1) < 1e-9)?.value ?? 1 / aspect;
 
 // Commit a merged (transient) edit when nothing happened for this long. See ADR-002.
 const TIMELINE_IDLE_COMMIT_MS = 700;
@@ -245,6 +250,7 @@ export default function useMixClips({ mixProject, currentSourceId, activateSourc
   const userUpdateClip = useCallback((clipId: string, patch: MixClipPatch) => dispatchStep({ type: 'updateClip', clipId, patch }), [dispatchStep]);
   const userReorderClips = useCallback((ids: string[]) => dispatchStep({ type: 'reorderClips', ids }), [dispatchStep]);
 
+
   // Aspect lock of the max rect, per clip (UI state of this session, not saved)
   const [aspectLocks, setAspectLocks] = useState<ReadonlyMap<string, number>>(() => new Map());
   const aspectLock = selectedClipId != null ? aspectLocks.get(selectedClipId) : undefined;
@@ -257,6 +263,22 @@ export default function useMixClips({ mixProject, currentSourceId, activateSourc
       return ret;
     });
   }, [selectedClipId]);
+
+  /**
+   * E9 (T38d): turn a clip (the selected one by default) by `delta` degrees clockwise; its rects turn with it, and so
+   * does its aspect lock (a 16:9 lock becomes 9:16 on a quarter turn).
+   */
+  const userRotateClip = useCallback((delta: number, clipId = selectedClipId) => {
+    const clip = project.clips.find((c) => c.id === clipId);
+    if (clip == null) return;
+    if (project.sources.find((s) => s.id === clip.sourceId)?.width == null) {
+      errorToast(i18n.t('The size of the video of this clip is not known yet'));
+      return;
+    }
+    dispatchStep(getRotateClipAction(clip, delta));
+    const lock = aspectLocks.get(clip.id);
+    if (lock != null && isQuarterTurn(delta)) setAspectLocks((existing) => new Map(existing).set(clip.id, getTurnedAspect(lock)));
+  }, [aspectLocks, dispatchStep, project.clips, project.sources, selectedClipId]);
 
   const getRectsAction = useCallback((clipId: string, rects: ClipRects): MixProjectAction => (
     { type: 'updateClip', clipId, patch: { maxRect: rects.maxRect, minRect: rects.minRect } }
@@ -297,6 +319,7 @@ export default function useMixClips({ mixProject, currentSourceId, activateSourc
     userSplitClip,
     userUpdateClip,
     userReorderClips,
+    userRotateClip,
     aspectLock,
     setAspectLock,
     handleRectsChange,

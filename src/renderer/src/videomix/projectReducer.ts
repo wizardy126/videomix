@@ -1,6 +1,6 @@
 import isEqual from 'lodash/isEqual';
 
-import type { LoudnessMeasurement, MixClip, MixMusicPlaylist, MixMusicTrack, MixOverlay, MixProject, MixSettings, MixSource } from './types';
+import type { LoudnessMeasurement, MixClip, MixClipRotation, MixMusicPlaylist, MixMusicTrack, MixOverlay, MixProject, MixSettings, MixSource } from './types';
 import { getOutputSize } from './types';
 import { detachOverlayReferences } from './overlays/anchors';
 import type { OverlayTimeRange } from './overlays/anchors';
@@ -8,7 +8,8 @@ import { isVisualOverlay } from './overlays/factories';
 import { refitImageOverlayBox } from './overlayTimeline';
 import type { Size } from './overlayMath';
 import { normalizeSar } from './sampleAspect';
-import { getSourceFrameChange, rescaleClipRects } from './sourceResize';
+import { getSourceFrameChange, rescaleClipRects, rotateFrameChange } from './sourceResize';
+import { getClipRotation, getSourceFrame, rotateClipRects } from './clipRotation';
 
 /** Fields of a clip that can be edited after creation. */
 export type MixClipPatch = Partial<Omit<MixClip, 'id' | 'sourceId'>>;
@@ -46,6 +47,11 @@ export type MixProjectAction =
   /** Inserted at `index`, or appended. */
   | { type: 'addClip', clip: MixClip, index?: number | undefined }
   | { type: 'updateClip', clipId: string, patch: MixClipPatch }
+  /**
+   * E9 (T38d): turns the clip's picture to `rotation` (clockwise), turning its rects with it so they keep the same
+   * framing. Nothing happens while the size of its source is unknown (the rects can't be turned without it).
+   */
+  | { type: 'rotateClip', clipId: string, rotation: MixClipRotation }
   | { type: 'removeClip', clipId: string, resolved?: ResolvedOverlayTimesForRemoval }
   /** The copy is inserted right after the original. */
   | { type: 'duplicateClip', clipId: string, newId: string, name?: string | undefined }
@@ -122,7 +128,7 @@ export function dissolveSingleClipGroups(clips: MixClip[]): MixClip[] {
   return clips.map((clip) => (clip.groupId != null && counts.get(clip.groupId) === 1 ? withoutUndefined({ ...clip, groupId: undefined }, ['groupId']) : clip));
 }
 
-const clipOptionalKeys: (keyof MixClip)[] = ['minRect', 'pinTime', 'groupId', 'link', 'extendBeyondMax'];
+const clipOptionalKeys: (keyof MixClip)[] = ['minRect', 'pinTime', 'groupId', 'link', 'extendBeyondMax', 'rotation'];
 
 function updateMusicPlaylist(project: MixProject, musicPlaylist: MixMusicPlaylist): MixProject {
   return { ...project, settings: { ...project.settings, musicPlaylist } };
@@ -174,7 +180,8 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
       // B2: a new frame size scales the rects of the source's clips
       const change = getSourceFrameChange(source, patch);
       if (change == null) return { ...project, sources };
-      const clips = project.clips.map((c) => (c.sourceId === source.id ? withoutUndefined({ ...c, ...rescaleClipRects(c, change) }, clipOptionalKeys) : c));
+      // E9: a turned clip's rects live in the turned frame, which changes the same way turned
+      const clips = project.clips.map((c) => (c.sourceId === source.id ? withoutUndefined({ ...c, ...rescaleClipRects(c, rotateFrameChange(change, getClipRotation(c))) }, clipOptionalKeys) : c));
       return { ...project, sources, clips };
     }
 
@@ -192,6 +199,15 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
       const clips = [...project.clips];
       clips[index] = withoutUndefined({ ...clip, ...action.patch }, clipOptionalKeys);
       return { ...project, clips };
+    }
+
+    case 'rotateClip': {
+      const clip = project.clips.find((c) => c.id === action.clipId);
+      const frame = getSourceFrame(project.sources.find((s) => s.id === clip?.sourceId));
+      if (clip == null || frame == null || getClipRotation(clip) === action.rotation) return project;
+      const rects = rotateClipRects(clip, frame, getClipRotation(clip), action.rotation);
+      // only a turn is stored (missing = 0)
+      return mixProjectReducer(project, { type: 'updateClip', clipId: clip.id, patch: { ...rects, rotation: action.rotation !== 0 ? action.rotation : undefined } });
     }
 
     case 'removeClip': {

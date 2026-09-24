@@ -14,6 +14,7 @@ Ubicación: `src/renderer/src/videomix/types.ts`, o `src/common/videomix/types.t
 - Los rectángulos se expresan en **píxeles de visualización de la fuente**: tras aplicar la rotación de metadatos y la proporción de píxel (SAR), como la muestra el `<video>` (`videoWidth`/`videoHeight`, y `drawImage` en la previsualización en vivo).
   - Con píxeles cuadrados coinciden con los que da ffmpeg con autorotate, que es su comportamiento por defecto.
   - **Fuentes anamórficas (B1, T35)**: `MixSource.sar` guarda el SAR del fotograma ya orientado (el autorotate de ffmpeg lo invierte en un cuarto de vuelta). El tamaño de visualización sigue la regla de Chromium: se agranda una dimensión (SAR > 1, el ancho; SAR < 1, el alto). En el render y las miniaturas el rectángulo se convierte a píxeles codificados **solo en el `crop`** (`sampleAspect.toCodedRect`); el escalado posterior a tamaño explícito con `setsar=1` corrige la proporción.
+- **Clips girados (E9, T38d)**: los rectángulos de un clip con `rotation` están en el fotograma de visualización **girado** por ese giro (sentido horario), y todo lo que solo mira los rectángulos (intervalos de proporción, orientación, planificador) no cambia. Ver §2.6.
 - Se guardan como números enteros y se normalizan a valores pares al generar el grafo, porque yuv420p lo exige.
 
 ```ts
@@ -46,6 +47,7 @@ interface MixClip {
   pinTime?: number | undefined,  // v3 (A4): inicio fijado en el vídeo final (s)
   groupId?: string | undefined,  // v3 (A4): los clips con el mismo id empiezan juntos (≥ 2 clips)
   extendBeyondMax?: boolean | undefined,  // v4 (E7, T38b): ampliar más allá del máx. si hace falta; sin definir = true
+  rotation?: 90 | 180 | 270 | undefined,  // v4 (E9, T38d): giro horario de la imagen; sin definir = 0 (solo se guarda un giro)
 }
 
 type TransitionType = 'fade' | 'dissolve' | 'fadeblack' | 'wipeleft' | 'wiperight' | 'wipeup' | 'wipedown'
@@ -85,7 +87,7 @@ interface MixProject {
 
 **Reglas de validación** (zod más funciones puras):
 - `0 ≤ start < end ≤ duración de la fuente`.
-- `maxRect` dentro del fotograma de la fuente.
+- `maxRect` dentro del fotograma de la fuente (girado por el giro del clip, E9).
 - `minRect ⊆ maxRect`.
 - Anchos y altos ≥ 16 px.
 - Duración del clip > 2 × duración de la transición. Si no se cumple, se avisa y la transición de ese clip se acorta.
@@ -143,6 +145,18 @@ El planificador intenta evitar estos casos, pero el generador debe soportarlos.
 - **Dirección**: el eje principal del plan (`horizontal` en columnas, `vertical` en filas). `getExtensionRoom(max, fuente, dirección)`: píxeles pares que le quedan a la fuente fuera del máx. en esa dirección (los dos lados juntos; 0 si el máx. no está dentro del fotograma).
 - **Máx. ampliado**: `extendMaxRect(max, fuente, dirección, extra)`: el máx. normalizado crece `extra` (par, como mucho `room`), **centrado en el máx.** y desplazado (asimétrico) si un lado llega al borde; conserva la posición y el tamaño en el otro eje.
 - **Recorte**: `getExtendedCropForAspect(max, mín, máxAmpliado, a)` es `getCropForAspect` salvo cuando la celda es más larga en el eje principal de lo que permite el máx. (pillarbox en columnas, letterbox en filas). Entonces parte del recorte del límite del intervalo (el ancho del máx. con la altura del mín., y su posición) y lo alarga hasta la proporción de la celda, centrado en el máx. y desplazado dentro del máx. ampliado. Si no llega, usa todo el ampliado y el resto sigue siendo pillarbox/letterbox. Continuo con el recorte normal en `aMax` (sirve para las animaciones). Todo en píxeles de visualización; el render lo pasa a codificados en el `crop` (T35).
+
+### 2.6 Girar un clip (E9, T38d)
+
+Detalle y verificación en las notas de [T38d](execution/T38d-v3-girar-clip.md). Módulo `clipRotation.ts` (puro).
+
+- **Fotograma del clip**: `getClipFrame(clip, fuente)` = tamaño de visualización de la fuente (§1.1) girado por `rotation`. Lo usan la validación (`max-rect-outside-frame`), `getPlannerInput` (material de E7, §2.5 y §3.8) y el reescalado de B2 (`rotateFrameChange`).
+- **Cambiar el giro**: `rotateClipRects(rects, fuente, de, a)` gira el máx. y el mín. con la imagen (`rotateRect`), así que se conserva el encuadre. Es exacto (ida y vuelta, pares) con un fotograma par; uno impar se ajusta a pares (±1 px). Acción del reducer `rotateClip` (no hace nada si no se conoce el tamaño de la fuente); duplicar o dividir un clip copia el giro.
+- **Lectura de la imagen**: el rectángulo se lleva al fotograma sin girar (`getUnrotatedCrop`, inversa de `rotateRect`), se recorta ahí y se gira solo el recorte.
+  - **Render**: `crop` (en píxeles codificados, T35) → `transpose=clock` / `transpose=cclock` / `hflip,vflip` → `scale` explícito + `setsar=1`. El `transpose` invierte el SAR, pero el escalado a tamaño explícito lo ignora; el fondo desenfocado recibe la proporción girada.
+  - **Miniaturas**: el mismo `crop` más el filtro de giro (`getThumbnailCrop`); el giro entra en la clave de caché solo si lo hay.
+  - **Previsualización en vivo**: las operaciones de dibujo llevan `rotation` y el canvas dibuja el rectángulo sin girar del `<video>` girado alrededor del centro del destino.
+  - **Editor**: con un clip girado seleccionado, el reproductor (el `<video>` y el reproductor compat, dentro de un envoltorio común) se gira con CSS `rotate(giro) scale(k)` para que la imagen girada quepa (`getTurnedVideoView`), y el overlay, sin girar, trabaja en el fotograma girado.
 
 ## 3. Planificador de montaje (puro)
 
@@ -356,7 +370,7 @@ Decidido en el spike T09: **[ADR-001](decisiones/ADR-001-render.md)**, con las m
 - **Entrada por clip**: `-ss <s−p> -t <dur+0,5+p> -i`, con un margen previo `p = min(0,1 s, s)`.
   - Cabecera: `setpts=PTS-p/TB,fps=F:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=N,setpts=PTS-STARTPTS`.
   - Nunca `setpts=PTS-STARTPTS` antes de `fps`: desincroniza hasta un fotograma.
-- **Columna de ancho constante en el bloque**: `crop` (de `geometry.ts`) → `scale=w:H` → `setsar=1`. En pillarbox/letterbox, sobre el fondo desenfocado del propio clip.
+- **Columna de ancho constante en el bloque**: `crop` (de `geometry.ts`) → `scale=w:H` → `setsar=1`. En pillarbox/letterbox, sobre el fondo desenfocado del propio clip. Un clip girado (E9, §2.6) añade el giro del recorte justo después del `crop`.
 - **Columna de ancho variable** (re-layout animado): técnica **"capa de columna"**.
   1. Por fotograma se calcula `w(t)` (`smoothstep` entre `LayoutKeyframe`), `C(t) = getCropForAspect(max, min, w/H)` y la escala `H/C.h`.
   2. Se aplica `crop` fijo de la unión de los `C(t)`.

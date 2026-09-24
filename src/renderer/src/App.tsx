@@ -48,6 +48,9 @@ import useMixDuration from './videomix/hooks/useMixDuration';
 import useMixLivePreview from './videomix/hooks/useMixLivePreview';
 import MixLivePreview from './videomix/components/MixLivePreview';
 import useClipThumbnails from './videomix/hooks/useClipThumbnails';
+import useMixVideoSize from './videomix/hooks/useMixVideoSize';
+import useMixPlayerTurn from './videomix/hooks/useMixPlayerTurn';
+import { getClipRotation } from './videomix/clipRotation';
 import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
 import { isKeyboardActionRetired } from '../../common/videomix/legacyUi';
 import TopMenu from './TopMenu';
@@ -1606,6 +1609,16 @@ function App() {
   // VideoMix: clips of the project <-> segments of the active source's timeline, selected clip and clip actions (ADR-002)
   const mixClips = useMixClips({ mixProject, currentSourceId: mixWorkspace.currentSourceId, activateSource: mixWorkspace.userActivateSource, cutSegments, setCutSegments, currentCutSeg, setCurrentSegIndex, fileDuration, getRelevantTime, seekAbs });
 
+  // VideoMix: display size of the video in the player (the rect editor's frame) and, while a turned clip is selected
+  // (E9, T38d), the turn of the player: the rect editor works on the turned picture
+  const mixVideoSize = useMixVideoSize({ videoRef, compatPlayerEnabled, videoStream: activeVideoStream });
+  const mixPlayerTurnStyle = useMixPlayerTurn({
+    containerRef: videoContainerRef,
+    videoSize: mixVideoSize,
+    cssRotation: compatPlayerEnabled ? effectiveRotation : undefined,
+    rotation: filePath != null && mixClips.selectedClip != null ? getClipRotation(mixClips.selectedClip) : 0,
+  });
+
   // VideoMix: duration counter next to the playhead and in the bottom bar (E1): the marked start's elapsed time, or the
   // selected clip's duration and what it would become if its end moved to the cursor. Tracks the playhead (not the
   // mouse hover), so it also updates while playing.
@@ -2291,6 +2304,10 @@ function App() {
       addClip: mixClips.userAddClip,
       duplicateCurrentClip: () => mixClips.userDuplicateClip(mixClips.selectedClipId),
       removeCurrentClip: () => mixClips.userRemoveClip(mixClips.selectedClipId),
+      // E9 (T38d)
+      rotateClipClockwise: () => mixClips.userRotateClip(90),
+      rotateClipCounterclockwise: () => mixClips.userRotateClip(-90),
+      rotateClip180: () => mixClips.userRotateClip(180),
       // E6 "New clip from here": unlike setCutStart (I), always starts a new marker, even inside another clip
       // (addSegment always appends one, ignoring the current segment; setCutStart only falls back to it past the end)
       newClipFromCursor: () => { if (checkFileOpened()) addSegment(); },
@@ -2700,36 +2717,37 @@ function App() {
                     {!isFileOpened && <NoFileLoaded mifiLink={mifiLink} currentCutSeg={currentCutSeg} onClick={openFilesDialog} darkMode={darkMode} keyBindingByAction={keyBindingByAction} />}
 
                     <div className="no-user-select" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, visibility: !isFileOpened || !hasVideo || bigWaveformEnabled ? 'hidden' : undefined }} onWheel={onTimelineWheel}>
-                      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                      <video
-                        className={styles['video']}
-                        tabIndex={-1}
-                        muted={playbackVolume === 0 || compatPlayerEnabled}
-                        ref={videoRef}
-                        style={videoStyle}
-                        onPlay={onStartPlaying}
-                        onPause={onStopPlaying}
-                        onAbort={onVideoAbort}
-                        onDurationChange={onDurationChange}
-                        onTimeUpdate={onTimeUpdate}
-                        onError={onVideoError}
-                        onClick={onVideoClick}
-                        onDoubleClick={toggleFullscreenVideo}
-                        onFocusCapture={onVideoFocus}
-                        onSeeked={onSeeked}
-                      >
-                        {renderSubtitles()}
-                      </video>
+                      {/* VideoMix (E9): turned with the selected clip, see useMixPlayerTurn */}
+                      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, ...mixPlayerTurnStyle }}>
+                        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                        <video
+                          className={styles['video']}
+                          tabIndex={-1}
+                          muted={playbackVolume === 0 || compatPlayerEnabled}
+                          ref={videoRef}
+                          style={videoStyle}
+                          onPlay={onStartPlaying}
+                          onPause={onStopPlaying}
+                          onAbort={onVideoAbort}
+                          onDurationChange={onDurationChange}
+                          onTimeUpdate={onTimeUpdate}
+                          onError={onVideoError}
+                          onClick={onVideoClick}
+                          onDoubleClick={toggleFullscreenVideo}
+                          onFocusCapture={onVideoFocus}
+                          onSeeked={onSeeked}
+                        >
+                          {renderSubtitles()}
+                        </video>
 
-                      {filePath != null && compatPlayerEnabled && <MediaSourcePlayer rotate={effectiveRotation} filePath={filePath} videoStream={activeVideoStream} audioStreams={activeAudioStreams} masterVideoRef={videoRef} mediaSourceQuality={mediaSourceQuality} ffmpegHwaccel={ffmpegHwaccel} />}
+                        {filePath != null && compatPlayerEnabled && <MediaSourcePlayer rotate={effectiveRotation} filePath={filePath} videoStream={activeVideoStream} audioStreams={activeAudioStreams} masterVideoRef={videoRef} mediaSourceQuality={mediaSourceQuality} ffmpegHwaccel={ffmpegHwaccel} />}
+                      </div>
 
                       {/* VideoMix: max/min rects of the selected clip over the video */}
                       {filePath != null && mixClips.selectedClip != null && (
                         <ClipRectEditor
-                          videoRef={videoRef}
-                          compatPlayerEnabled={compatPlayerEnabled}
+                          videoSize={mixVideoSize}
                           cssRotation={compatPlayerEnabled ? effectiveRotation : undefined}
-                          videoStream={activeVideoStream}
                           clip={mixClips.selectedClip}
                           color={segColorsContext.getSegColor({ segColorIndex: mixClips.selectedClip.color }).hex()}
                           aspectLock={mixClips.aspectLock}
@@ -2737,6 +2755,7 @@ function App() {
                           onChange={mixClips.handleRectsChange}
                           onCommit={mixClips.handleRectsCommit}
                           onEdit={mixClips.handleRectsEdit}
+                          onRotate={mixClips.userRotateClip}
                         />
                       )}
                     </div>

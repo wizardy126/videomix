@@ -18,11 +18,16 @@ export interface ThumbnailCrop {
  * thumbnail is then scaled to it with square pixels (`scale=-2` would keep the coded proportion, with a JPEG SAR that
  * <img> ignores).
  */
-export function getThumbnailArgs({ filePath, timestamp, crop, aspect, outPath, qscale }: {
+export function getThumbnailArgs({ filePath, timestamp, crop, aspect, rotation, outPath, qscale }: {
   filePath: string,
   timestamp: number,
   crop: ThumbnailCrop,
   aspect?: number | undefined,
+  /**
+   * E9 (T38d): ffmpeg filter that turns the cropped picture (the renderer's `getRotationFilter`), for a turned clip:
+   * `crop` is then in the unturned frame and `aspect` (if any) is the turned one.
+   */
+  rotation?: string | undefined,
   outPath: string,
   /** `-q:v` of the mjpeg encoder. */
   qscale: number,
@@ -32,7 +37,7 @@ export function getThumbnailArgs({ filePath, timestamp, crop, aspect, outPath, q
     '-ss', String(timestamp),
     '-i', filePath,
     '-frames:v', '1',
-    '-vf', `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},${scale}`,
+    '-vf', `crop=${crop.width}:${crop.height}:${crop.x}:${crop.y},${rotation ? `${rotation},` : ''}${scale}`,
     '-q:v', String(qscale),
     '-y', outPath,
   ];

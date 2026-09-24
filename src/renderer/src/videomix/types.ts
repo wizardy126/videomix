@@ -47,6 +47,11 @@ export type MixSource = z.infer<typeof mixSourceSchema>;
 
 export const mixClipLinkTypes = ['break', 'force'] as const;
 
+/** E9 (T38d): clockwise turns of a clip's picture, in degrees. */
+export const mixClipRotations = [0, 90, 180, 270] as const;
+
+export type MixClipRotation = typeof mixClipRotations[number];
+
 export const mixClipSchema = z.object({
   /** Also used as segId in the timeline. */
   id: z.string().min(1),
@@ -79,6 +84,11 @@ export const mixClipSchema = z.object({
    * (up to the source frame), as a last resort. Missing = true (on by default); only `false` is stored.
    */
   extendBeyondMax: z.boolean().optional(),
+  /**
+   * E9 (v4, T38d): the clip's picture turned clockwise by this many degrees, on top of the source's rotation metadata.
+   * Its rects are in the turned frame (see clipRotation.ts). Missing = 0 (only a turn is stored).
+   */
+  rotation: z.literal(mixClipRotations).optional(),
 });
 
 export type MixClip = z.infer<typeof mixClipSchema>;

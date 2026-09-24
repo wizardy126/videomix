@@ -48,15 +48,7 @@ const normalizeRotation = (rotation: number | undefined) => (((rotation ?? 0) % 
 /** Whether a rotation (degrees, any sign) swaps width and height. */
 export const isQuarterTurn = (rotation: number | undefined) => normalizeRotation(rotation) % 180 === 90;
 
-/**
- * Where the image is drawn inside a video element of `container` size with `object-fit: contain` (centered).
- * `videoSize` is the oriented size.
- *
- * `cssRotation` covers the compat player (MediaSourcePlayer), which decodes without autorotate and rotates the whole
- * element with a CSS transform: the raw (unrotated) frame is fitted to the container first and then turned, so for
- * 90/270° the scale is `min(cw / vh, ch / vw)` instead of `min(cw / vw, ch / vh)` (and the image may overflow).
- */
-export function getVideoContentBox(container: Size, videoSize: Size, cssRotation?: number | undefined): Box | undefined {
+function getUnturnedContentBox(container: Size, videoSize: Size, cssRotation: number | undefined): Box | undefined {
   if (container.width <= 0 || container.height <= 0 || videoSize.width <= 0 || videoSize.height <= 0) return undefined;
   const scale = isQuarterTurn(cssRotation)
     ? Math.min(container.width / videoSize.height, container.height / videoSize.width)
@@ -64,6 +56,40 @@ export function getVideoContentBox(container: Size, videoSize: Size, cssRotation
   const width = videoSize.width * scale;
   const height = videoSize.height * scale;
   return { x: (container.width - width) / 2, y: (container.height - height) / 2, width, height };
+}
+
+/**
+ * E9 (T38d): the player showing a turned clip. The whole player (the <video>, or the compat player with its own
+ * `cssRotation`) is turned clockwise by `clipRotation` about the centre of the container and scaled by `scale` so that
+ * the turned picture fits it (contain): CSS `rotate(clipRotation) scale(scale)`. `videoSize` is the turned frame (the
+ * one the clip's rects live in); `box` is where the turned picture ends up, for the rect overlay, which isn't turned.
+ */
+export function getTurnedVideoView(container: Size, videoSize: Size, cssRotation: number | undefined, clipRotation: number | undefined): { box: Box, scale: number } | undefined {
+  const quarter = isQuarterTurn(clipRotation);
+  // the picture the player shows before it's turned, placed as usual
+  const unturned = getUnturnedContentBox(container, quarter ? { width: videoSize.height, height: videoSize.width } : videoSize, cssRotation);
+  if (unturned == null) return undefined;
+  const turned = quarter ? { width: unturned.height, height: unturned.width } : unturned;
+  const scale = Math.min(container.width / turned.width, container.height / turned.height);
+  const width = turned.width * scale;
+  const height = turned.height * scale;
+  return { box: { x: (container.width - width) / 2, y: (container.height - height) / 2, width, height }, scale };
+}
+
+/**
+ * Where the image is drawn inside a video element of `container` size with `object-fit: contain` (centered).
+ * `videoSize` is the oriented size.
+ *
+ * `cssRotation` covers the compat player (MediaSourcePlayer), which decodes without autorotate and rotates the whole
+ * element with a CSS transform: the raw (unrotated) frame is fitted to the container first and then turned, so for
+ * 90/270° the scale is `min(cw / vh, ch / vw)` instead of `min(cw / vw, ch / vh)` (and the image may overflow).
+ *
+ * `clipRotation` (E9): the player is turned with a turned clip, see {@link getTurnedVideoView}; `videoSize` is then the
+ * turned frame.
+ */
+export function getVideoContentBox(container: Size, videoSize: Size, cssRotation?: number | undefined, clipRotation?: number | undefined): Box | undefined {
+  if (normalizeRotation(clipRotation) !== 0) return getTurnedVideoView(container, videoSize, cssRotation, clipRotation)?.box;
+  return getUnturnedContentBox(container, videoSize, cssRotation);
 }
 
 /** Screen point → source point (not rounded, may fall outside the frame). */

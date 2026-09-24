@@ -1,6 +1,7 @@
 import { MIN_RECT_SIZE, MIX_PROJECT_VERSION, OVERLAY_COLOR_REGEX, defaultMixSettings, defaultMusicPlaylist, mixProjectSchema } from './types';
 import type { MixClip, MixOverlay, MixProject, MixSettings, Rect } from './types';
 import { rectContains } from './geometry';
+import { getClipFrame } from './clipRotation';
 import { findOverlayCycleIds, getOverlaysById } from './overlays/anchors';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v != null && !Array.isArray(v);
@@ -367,7 +368,8 @@ export function validateMixProject(project: MixProject, { sourceDurations = {}, 
       error('rect-too-small', `Clip ${clipId} has a rect smaller than ${MIN_RECT_SIZE}px`);
     }
 
-    const size = sourceSizes[clip.sourceId] ?? (source?.width != null && source.height != null ? { width: source.width, height: source.height } : undefined);
+    // E9: the rects live in the frame turned by the clip's rotation
+    const size = getClipFrame(clip, sourceSizes[clip.sourceId] ?? source);
     if (size != null && !rectContains({ x: 0, y: 0, ...size }, clip.maxRect)) {
       error('max-rect-outside-frame', `Clip ${clipId} max rect is outside the source frame`);
     }

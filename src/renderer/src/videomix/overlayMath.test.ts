@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest';
 
 import {
   applyAspect, applyRectDrag, createDefaultMin, fillFrame, formatAspect, getFrameRect, getOrientedSize, getStreamRotation,
-  getVideoContentBox, resizeHandles, toScreenCoords, toSourceCoords,
+  getTurnedVideoView, getVideoContentBox, resizeHandles, toScreenCoords, toSourceCoords,
 } from './overlayMath';
 import type { ClipRects, DragHandle, RectTarget, Size } from './overlayMath';
 import { rectContains } from './geometry';
@@ -55,6 +55,42 @@ describe('getVideoContentBox', () => {
     // 180° doesn't change the box
     expect(getVideoContentBox({ width: 1000, height: 1000 }, hd, 180)).toEqual(getVideoContentBox({ width: 1000, height: 1000 }, hd));
     expect(getVideoContentBox({ width: 1000, height: 1000 }, hd, -90)).toEqual(getVideoContentBox({ width: 1000, height: 1000 }, hd, 270));
+  });
+});
+
+describe('getTurnedVideoView (E9)', () => {
+  test('a quarter turn: the turned picture is scaled to fit the container', () => {
+    // 1920x1080 video turned 90° (rects in 1080x1920) in a 1000x500 container: unturned it's 888.9x500, turned 500x888.9,
+    // scaled by 500 / 888.9 to 281.25x500
+    const view = getTurnedVideoView({ width: 1000, height: 500 }, { width: 1080, height: 1920 }, undefined, 90)!;
+    expect(view.scale).toBeCloseTo(500 / 888.888);
+    expect(view.box.width).toBeCloseTo(281.25);
+    expect(view.box.height).toBeCloseTo(500);
+    expect(view.box.x).toBeCloseTo((1000 - 281.25) / 2);
+    // the same box as an unturned vertical video: the overlay is placed as usual
+    const box = getVideoContentBox({ width: 1000, height: 500 }, { width: 1080, height: 1920 }, undefined, 90)!;
+    expect(box).toEqual(view.box);
+    const vertical = getVideoContentBox({ width: 1000, height: 500 }, { width: 1080, height: 1920 })!;
+    expect(box.width).toBeCloseTo(vertical.width);
+    expect(box.x).toBeCloseTo(vertical.x);
+  });
+
+  test('a half turn keeps the box, 0 is the plain box', () => {
+    const container = { width: 1000, height: 1000 };
+    const view = getTurnedVideoView(container, hd, undefined, 180)!;
+    const box = getVideoContentBox(container, hd)!;
+    expect(view.scale).toBeCloseTo(1);
+    (['x', 'y', 'width', 'height'] as const).forEach((key) => expect(view.box[key]).toBeCloseTo(box[key]));
+    expect(getVideoContentBox(container, hd, undefined, 0)).toEqual(getVideoContentBox(container, hd));
+  });
+
+  test('with the compat player\'s own CSS rotation', () => {
+    // raw 1920x1080 shown turned 90° by the compat player (oriented 1080x1920), and the clip turned 90° more: 1920x1080
+    const view = getTurnedVideoView({ width: 1000, height: 1000 }, hd, 90, 90)!;
+    expect(view.box.width).toBeCloseTo(1000);
+    expect(view.box.height).toBeCloseTo(562.5);
+    // the compat player shows the raw frame fitted (1000/1920), turned: 562.5 wide; turned again and fitted
+    expect(view.scale).toBeCloseTo(1);
   });
 });
 

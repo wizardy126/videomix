@@ -2,7 +2,7 @@ import type { ChangeEventHandler, CSSProperties, FocusEventHandler, KeyboardEven
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FaClone, FaExclamationTriangle, FaGripVertical, FaInfoCircle, FaMinus, FaPlus, FaThumbtack, FaVolumeMute, FaVolumeUp } from 'react-icons/fa';
-import { MdCropLandscape, MdCropPortrait, MdOpenInFull } from 'react-icons/md';
+import { MdCropLandscape, MdCropPortrait, MdOpenInFull, MdRotate90DegreesCw } from 'react-icons/md';
 import type { DragEndEvent, DragStartEvent, UniqueIdentifier } from '@dnd-kit/core';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
@@ -218,6 +218,13 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
         </select>
         <div style={{ flexGrow: 1 }} />
         {pinTime != null && <FaThumbtack style={{ ...iconStyle, color: 'var(--cyan-11)' }} title={t('Pinned at {{time}} of the video', { time: formatTime(pinTime) })} />}
+        {/* E9 (T38d): the clip is turned (its orientation is that of the turned frame) */}
+        {clip.rotation != null && clip.rotation !== 0 && (
+          <span data-testid="clip-rotation-indicator" title={t('Rotated {{degrees}}°', { degrees: clip.rotation })} style={{ display: 'flex', alignItems: 'center', gap: '.1em', whiteSpace: 'nowrap' }}>
+            <MdRotate90DegreesCw style={iconStyle} />
+            {`${clip.rotation}°`}
+          </span>
+        )}
         <OrientationIcon style={iconStyle} title={`${orientation === 'horizontal' ? t('Horizontal') : t('Vertical')} ${clip.maxRect.width}×${clip.maxRect.height}`} />
         {warnings.noMin && <FaInfoCircle style={{ ...iconStyle, opacity: 0.6 }} title={t('No min rectangle: the clip can only be shown with its max rectangle, it will not be cropped any further')} />}
         {warnings.tooShort && <FaExclamationTriangle style={{ ...iconStyle, color: warningColor }} title={t('The clip is not longer than two transitions ({{duration}} s), its transitions will be shortened', { duration: 2 * settings.transition.duration })} />}

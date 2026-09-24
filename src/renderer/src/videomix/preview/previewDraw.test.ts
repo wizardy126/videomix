@@ -132,3 +132,26 @@ describe('extension beyond the max (E7, T38b)', () => {
     expect(ops.filter((op) => op.kind === 'blur' && op.clipId === 'v' && op.dest.x === 160)).toEqual([]);
   });
 });
+
+describe('turned clips (E9, T38d)', () => {
+  test('the ops of a turned clip carry its turn (the canvas turns the picture); src stays in the turned frame', () => {
+    const t = { id: 't', sourceId: 'h1080', start: 0, maxRect: { x: 0, y: 420, width: 1080, height: 1080 }, rotation: 90 as const };
+    const plan: MixPlan = {
+      width: 640,
+      height: 360,
+      duration: 3,
+      placements: [{ clipId: 't', column: 0, startTime: 0, endTime: 3, transitionIn: 0 }],
+      layouts: [{ time: 0, transitionDuration: 0, columns: [{ column: 0, x: 0, width: 640 }], fills: [] }],
+      warnings: [],
+    };
+    const settings = testSettings({ fill: { mode: 'blur', color: '#000000' } });
+    const tl = getRenderTimeline(plan, { fps: 30, gap: 0, transitionDuration: 0.5 });
+    const { ops } = getPreviewDrawList(createPreviewDrawModel(tl, [t], settings), 1);
+    expect(videos(ops)).toEqual([{ kind: 'video', key: 'p0', clipId: 't', src: t.maxRect, dest: { x: 140, y: 0, width: 360, height: 360 }, alpha: 1, rotation: 90 }]);
+    // its pillarbox background too
+    expect(ops).toContainEqual(expect.objectContaining({ kind: 'blur', clipId: 't', rotation: 90 }));
+    // unturned: no rotation key at all
+    const { ops: plain } = getPreviewDrawList(createPreviewDrawModel(tl, [{ ...t, rotation: undefined }], settings), 1);
+    expect(plain.every((op) => !('rotation' in op))).toBe(true);
+  });
+});

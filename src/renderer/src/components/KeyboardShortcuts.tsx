@@ -796,6 +796,19 @@ const KeyboardShortcuts = memo(({
         name: t('New clip from here'),
         category: mixProjectCategory,
       },
+      rotateClipClockwise: {
+        // E9 (T38d): the selected clip, its rects turn with the picture
+        name: t('Rotate clip +90°'),
+        category: mixProjectCategory,
+      },
+      rotateClipCounterclockwise: {
+        name: t('Rotate clip −90°'),
+        category: mixProjectCategory,
+      },
+      rotateClip180: {
+        name: t('Rotate clip 180°'),
+        category: mixProjectCategory,
+      },
       showMixSettings: {
         name: t('Mix settings'),
         category: mixProjectCategory,

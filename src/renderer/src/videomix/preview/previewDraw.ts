@@ -3,7 +3,7 @@ import { getPlanAxis } from '../planner/types';
 import { getGlobalFadeDuration } from '../render/buildAudioGraph';
 import { getColumnsAtFrame, getFillSpansAtFrame, getKeyframeIndexAtFrame } from '../render/renderTimeline';
 import type { ColumnGeometry, PlacementFrames, RenderTimeline } from '../render/renderTimeline';
-import type { MixClip, MixSettings, Rect } from '../types';
+import type { MixClip, MixClipRotation, MixSettings, Rect } from '../types';
 import { getPreviewFrameIndex } from './previewSchedule';
 
 // Draw list of one frame of the live preview (A1, T32): what previewCanvas.ts paints on the canvas, computed with the
@@ -20,10 +20,13 @@ const MIN_BLUR_FILL_WIDTH = 16;
 
 export type PreviewDrawOp =
   | { kind: 'color', rect: Rect, color: string, alpha: number }
-  /** The `src` rect of a clip's video (the element of `key`) drawn into `dest`. */
-  | { kind: 'video', key: string, clipId: string, src: Rect, dest: Rect, alpha: number }
+  /**
+   * The `src` rect of a clip's video (the element of `key`) drawn into `dest`. E9 (T38d): with `rotation`, `src` is in
+   * the video's frame turned clockwise by it (where the clip's rects live), and the canvas turns the picture.
+   */
+  | { kind: 'video', key: string, clipId: string, src: Rect, dest: Rect, alpha: number, rotation?: MixClipRotation }
   /** Blurred cover of a clip's video: `src` (already of `dest`'s aspect) scaled up to `dest` and blurred. */
-  | { kind: 'blur', key: string, clipId: string, src: Rect, dest: Rect, alpha: number };
+  | { kind: 'blur', key: string, clipId: string, src: Rect, dest: Rect, alpha: number, rotation?: MixClipRotation };
 
 export interface PreviewFrameDraw {
   ops: PreviewDrawOp[],
@@ -31,7 +34,7 @@ export interface PreviewFrameDraw {
   fadeAlpha: number,
 }
 
-export type PreviewDrawClip = Pick<MixClip, 'id' | 'maxRect' | 'minRect'>;
+export type PreviewDrawClip = Pick<MixClip, 'id' | 'maxRect' | 'minRect'> & Partial<Pick<MixClip, 'rotation'>>;
 export type PreviewDrawSettings = Pick<MixSettings, 'gap' | 'fill' | 'transition' | 'fadeInOut'>;
 
 /** Per plan: the timeline and its placements by column, so a frame only looks at its own columns. */
@@ -48,6 +51,9 @@ export function createPreviewDrawModel(tl: RenderTimeline, clips: readonly Previ
   for (const list of byColumn.values()) list.sort((a, b) => a.f0 - b.f0);
   return { tl, clips: new Map(clips.map((c) => [c.id, c])), settings, byColumn };
 }
+
+/** E9: the clip's turn on its draw ops, only when it has one (so unturned ops stay as they were). */
+const turnOf = (clip: PreviewDrawClip): { rotation?: MixClipRotation } => (clip.rotation != null && clip.rotation !== 0 ? { rotation: clip.rotation } : {});
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
@@ -156,7 +162,7 @@ export function getPreviewDrawList(model: PreviewDrawModel, time: number): Previ
     const top = active.at(-1);
     const clip = top != null ? clips.get(top.placement.clipId) : undefined;
     if (top == null || clip == null || geom.width < MIN_BLUR_FILL_WIDTH) return [];
-    return [{ column, geom, key: `p${top.index}`, clipId: clip.id, crop: getClipCellDraw({ clip, cell, rows, collapsing: collapsing.has(column), extendedMaxRect: top.placement.extendedMaxRect }).crop }];
+    return [{ column, geom, key: `p${top.index}`, clipId: clip.id, ...turnOf(clip), crop: getClipCellDraw({ clip, cell, rows, collapsing: collapsing.has(column), extendedMaxRect: top.placement.extendedMaxRect }).crop }];
   });
   /** Fill of `rect` (at `geom` along the main axis); a column's own fill never takes its (ending) clip as source. */
   const fillOp = (rect: Rect, geom: ColumnGeometry, ownColumn?: number): PreviewDrawOp => {
@@ -170,7 +176,7 @@ export function getPreviewDrawList(model: PreviewDrawModel, time: number): Previ
           bestDist = dist;
         }
       }
-      if (best != null) return { kind: 'blur', key: best.key, clipId: best.clipId, src: getCoverSource(best.crop, rect), dest: rect, alpha: 1 };
+      if (best != null) return { kind: 'blur', key: best.key, clipId: best.clipId, src: getCoverSource(best.crop, rect), dest: rect, alpha: 1, ...(best.rotation != null && { rotation: best.rotation }) };
     }
     return { kind: 'color', rect, color: settings.fill.color, alpha: 1 };
   };
@@ -196,10 +202,10 @@ export function getPreviewDrawList(model: PreviewDrawModel, time: number): Previ
       const { crop, draw, background } = getClipCellDraw({ clip, cell, rows, collapsing: collapsing.has(column), extendedMaxRect: p.placement.extendedMaxRect });
       if (background) {
         ops.push(settings.fill.mode === 'blur' && geom.width >= MIN_BLUR_FILL_WIDTH
-          ? { kind: 'blur', key, clipId: clip.id, src: getCoverSource(crop, cell), dest: cell, alpha }
+          ? { kind: 'blur', key, clipId: clip.id, src: getCoverSource(crop, cell), dest: cell, alpha, ...turnOf(clip) }
           : { kind: 'color', rect: cell, color: settings.fill.color, alpha });
       }
-      if (draw != null) ops.push({ kind: 'video', key, clipId: clip.id, src: draw.src, dest: draw.dest, alpha });
+      if (draw != null) ops.push({ kind: 'video', key, clipId: clip.id, src: draw.src, dest: draw.dest, alpha, ...turnOf(clip) });
     });
   });
 
