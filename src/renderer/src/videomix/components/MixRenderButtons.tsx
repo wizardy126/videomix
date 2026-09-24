@@ -37,6 +37,7 @@ function MixRenderButtons({ onSettings, onPreview, onRender, disabled, estimate,
     <div style={{ display: 'flex', alignItems: 'center', marginLeft: '.4em' }}>
       {estimateLabel != null && (
         <span
+          data-testid="mix-duration-estimate"
           title={t('{{count}} clips', { count: estimate.clipCount })}
           style={{ marginRight: '.6em', whiteSpace: 'nowrap', fontFamily: 'monospace', color: exceeds ? dangerColor : 'var(--gray-11)' }}
         >

@@ -65,6 +65,9 @@ describe.skipIf(!available)('render with ffmpeg', () => {
     ['fills', half(testPlans.fills), testSettings({ gap: { width: 4, color: '#303030' } })],
     ['fills (colour)', half(testPlans.fills), testSettings({ gap: { width: 4, color: '#303030' }, fill: { mode: 'color', color: '#224466' } })],
     ['removal', half(testPlans.removal), testSettings({ gap: { width: 4, color: '#303030' } })],
+    // T40: a chain (E2) handing off to a plain crossfade used to fail here with an ffmpeg "xfade timebase" error
+    // (`concat`'s output wasn't normalized to 1/fps, see buildVideoGraph.ts's chainSegments).
+    ['chainThenSwitch', half(testPlans.chainThenSwitch), testSettings({ gap: { width: 4, color: '#303030' } })],
   ] as const)('%s', async (_name, plan, settings) => {
     const { job, probe } = await render(plan, settings);
     const video = probe.streams.find((s) => s.codec_type === 'video')!;

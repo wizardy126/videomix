@@ -108,6 +108,17 @@ export const testPlans = {
     kf(0, 0, [col(0, 0, 202), col(1, 210, 202), col(2, 420, 220)]),
     kf(2, 0.5, [col(0, 0, 276), col(2, 284, 356)]),
   ]),
+
+  /**
+   * A chain (E2, T39: two placements of the same column that touch, `transitionIn: 0`) handing off to a third
+   * placement with a real crossfade: the `concat` of the chain's two segments feeds the following `xfade` (T40:
+   * `concat`'s output timebase isn't normalized to 1/fps on its own, which an `xfade` right after it used to reject).
+   */
+  chainThenSwitch: plan(640, 360, [
+    place('b', 0, 0, 3),
+    place('a', 0, 3, 6),
+    place('c', 0, 5.5, 9, 0.5),
+  ], [kf(0, 0, [col(0, 0, 430)])]),
 } satisfies Record<string, MixPlan>;
 
 /**

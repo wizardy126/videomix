@@ -462,7 +462,7 @@ function Timeline({
 
           {/* E1: duration counter next to the playhead, e.g. a marker's elapsed time or a clip's duration */}
           {commandedTimePercent !== undefined && cursorDurationLabel != null && (
-            <div style={{ position: 'absolute', left: commandedTimePercent, top: 1, transform: 'translateX(4px)', fontSize: 10, lineHeight: '14px', fontFamily: 'monospace', color: 'var(--gray-12)', background: 'var(--gray-3)', padding: '0 3px', borderRadius: 3, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+            <div data-testid="timeline-cursor-duration" style={{ position: 'absolute', left: commandedTimePercent, top: 1, transform: 'translateX(4px)', fontSize: 10, lineHeight: '14px', fontFamily: 'monospace', color: 'var(--gray-12)', background: 'var(--gray-3)', padding: '0 3px', borderRadius: 3, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
               {cursorDurationLabel}
             </div>
           )}

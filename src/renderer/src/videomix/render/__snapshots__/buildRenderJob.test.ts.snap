@@ -1,5 +1,45 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`buildRenderJob > chainThenSwitch plan: args and graphs 1`] = `
+{
+  "audio": "-hide_banner -nostdin -y -f lavfi -i anullsrc=r=48000:cl=stereo -/filter_complex /work/audio.graph.txt -map [aout] -c:a aac -b:a 192k -ar 48000 -ac 2 /work/audio.m4a",
+  "chunks": [
+    {
+      "animated": false,
+      "args": "-hide_banner -nostdin -y -ss 0 -t 3.5 -i /media/v-1080x1920-12s.mp4 -ss 0.9 -t 3.6 -i /media/h-1080p-10s.mp4 -ss 0 -t 4 -i /media/h-720p-25fps-8s.mp4 -/filter_complex /work/chunk-0000.graph.txt -map [vout] -frames:v 270 -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -r 30 -an /work/chunk-0000.mp4",
+      "f0": 0,
+      "f1": 270,
+      "index": 0,
+    },
+  ],
+  "concat": "-hide_banner -nostdin -y -f concat -safe 0 -i /work/chunks.txt -i /work/audio.m4a -map 0:v -map 1:a -c copy -t 9 -movflags +faststart /out/mix.mp4",
+  "files": {
+    "/work/audio.graph.txt": "[0:a]atrim=duration=9[aout]",
+    "/work/chunk-0000.graph.txt": "[0:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=90,setpts=PTS-STARTPTS,crop=1080:1400:0:260,split[s3][s4];
+[s3]scale=278:360:flags=bicubic,setsar=1[fg1];
+[s4]scale=54:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=54:46,boxblur=luma_radius=6:luma_power=2,scale=430:360:flags=bilinear,setsar=1[bg2];
+[bg2][fg1]overlay=x=76:y=0:shortest=1[clip0];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=90,setpts=PTS-STARTPTS,crop=1290:1080:316:0,scale=430:360:flags=bicubic,setsar=1[clip5];
+[2:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=105,setpts=PTS-STARTPTS,crop=860:720:210:0,scale=430:360:flags=bicubic,setsar=1[clip6];
+[clip0][clip5]concat=n=2:v=1:a=0,fps=30[x7];
+[x7][clip6]xfade=transition=fade:duration=0.5:offset=5.5[x8];
+[fsrc10]scale=26:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=26:46,boxblur=luma_radius=6:luma_power=2,scale=210:360:flags=bilinear,setsar=1[fill9];
+[x8]split=2[m11][fsrc10];
+color=c=0x303030:s=640x360:r=30:d=9.033333,trim=end_frame=270,format=yuv420p[cv12];
+[cv12][m11]overlay=x=0:y=0:eof_action=pass[cv13];
+[cv13][fill9]overlay=x=430:y=0[cv14];
+color=c=black:s=640x360:r=30:d=0.533333,format=yuva420p,fade=t=out:start_frame=0:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=15,setpts=PTS-STARTPTS[fade15];
+[cv14][fade15]overlay=x=0:y=0:eof_action=pass[cv16];
+color=c=black:s=640x360:r=30:d=9.033333,format=yuva420p,fade=t=in:start_frame=255:nb_frames=15:alpha=1,trim=start_frame=0:end_frame=270,setpts=PTS-STARTPTS[fade17];
+[cv16][fade17]overlay=x=0:y=0:eof_action=pass[cv18];
+[cv18]format=yuv420p[vout]",
+    "/work/chunks.txt": "file 'chunk-0000.mp4'
+",
+  },
+  "totalFrames": 270,
+}
+`;
+
 exports[`buildRenderJob > colour fill mode, no gap, fade in/out off 1`] = `
 "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1080:1080:0:0,scale=360:360:flags=bicubic,setsar=1[fg1];
 color=c=0x112233:s=440x360:r=30:d=2.033333,trim=end_frame=60[bg2];

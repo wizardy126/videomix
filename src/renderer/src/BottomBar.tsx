@@ -625,7 +625,7 @@ function BottomBar({
               {isZoomed && <span style={{ marginLeft: '.5em' }}>{Math.round((displayTime / fileDurationNonZero) * 100)}<span style={{ opacity: 0.5, userSelect: 'none' }}>%</span></span>}
             </span>
             {/* E1: duration counter (marker's elapsed time, or a clip's duration and what it'd be if its end moved here) */}
-            {cursorDurationLabel != null && <span style={{ marginLeft: '.6em', opacity: 0.7 }}>{cursorDurationLabel}</span>}
+            {cursorDurationLabel != null && <span data-testid="cursor-duration" style={{ marginLeft: '.6em', opacity: 0.7 }}>{cursorDurationLabel}</span>}
           </div>
         </div>
 

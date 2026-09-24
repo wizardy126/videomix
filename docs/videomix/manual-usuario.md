@@ -36,6 +36,8 @@ Si al abrir un proyecto falta un fichero de fuente, la fila lo indica con un avi
 
 **Abrir carpeta** (menú Archivo) añade como fuentes todos los vídeos de una carpeta (y sus subcarpetas); los ficheros de imagen se ignoran.
 
+Las fuentes con **píxeles no cuadrados** (relación de aspecto de muestra o SAR distinta de 1:1, algo habitual en vídeo anamórfico o grabado con ciertas cámaras) se gestionan de forma automática: no hace falta hacer nada especial. El reproductor, los rectángulos, las miniaturas y el render usan siempre los píxeles "de visualización" (los que se ven, con la fuente ya estirada a su proporción real), igual que la rotación del vídeo.
+
 ### Música de fondo
 
 Si sueltas o añades un fichero de audio (mp3, m4a, aac, wav, flac, ogg, opus...), se te preguntará si quieres usarlo como música del proyecto (o sustituir la música actual). El volumen y el bucle de la música se ajustan en **Ajustes de montaje** (ver §5).
@@ -57,6 +59,17 @@ Con una fuente activa, la línea de tiempo inferior funciona como en cualquier e
 | Eliminar el clip seleccionado | `Supr` / `Cmd+Retroceso` |
 
 Al crear un clip se le asigna un nombre por defecto (`<fuente> #n`) y un color de una paleta; su rectángulo máximo ocupa inicialmente el fotograma completo.
+
+**Contador de duración**: con un inicio marcado y sin fin (tras `I`), junto al cabezal de la línea de tiempo y en la barra inferior se muestra la duración desde ese inicio hasta el cursor, que se actualiza mientras te mueves. Con un clip ya creado seleccionado se muestra en su lugar la duración real del clip y, a su lado (con una flecha `→`), la duración que tendría si su fin se moviera al cursor actual; así puedes ver el efecto de un recorte antes de aplicarlo.
+
+### Clips solapados y "Nuevo clip desde aquí"
+
+Normalmente un clip nuevo empieza donde termina la línea de tiempo libre. Para encuadrar el **mismo metraje de otra forma** (otro rectángulo, otro tiempo) puedes crear un clip que se solape con otro ya existente:
+
+- **Duplicar** (`Ctrl/Cmd+D`) el clip y luego cambiar sus tiempos y/o su rectángulo.
+- **Nuevo clip desde aquí** (`Mayús+I`, o el botón dedicado de la barra inferior junto a "Marcar inicio"): pone un inicio nuevo en el cursor aunque caiga dentro de otro clip (a diferencia de `I`, que si el cursor cae dentro de un clip lo selecciona en vez de marcar). Con el inicio marcado, **Marcar fin** (`O`) cierra ese tramo como un clip nuevo e independiente, solapado con el que ya hubiera ahí.
+
+Los clips solapados de una misma fuente **no se enlazan automáticamente** (ver más abajo): al crearse a propósito para volver a encuadrar el mismo metraje, encadenarlos repetiría contenido en el vídeo final.
 
 ### Recortar en espacio: rectángulos máximo y mínimo
 
@@ -104,6 +117,25 @@ Con el menú contextual de un clip (clic derecho, en la lista o en la pestaña *
 
 Un clip fijado o agrupado se distingue por el icono de chincheta (con el instante en el *tooltip*) y, si está agrupado, por el borde/franja del color del grupo. Arrastrar un bloque en la vista **Montaje** (§6) lo fija en su nuevo instante al soltarlo.
 
+### Clips enlazados
+
+Dos clips de la **misma fuente** se enlazan automáticamente si el inicio del segundo está, como mucho, un número de segundos configurable después del fin del primero (el ajuste **Enlazar clips de una fuente separados hasta (s)** de §5, 10 s por defecto; `0` lo desactiva). Los clips enlazados forman una **cadena** que ocupa **el mismo hueco** del montaje (la misma columna o fila): se muestran uno detrás de otro, con **corte directo** o con la transición global del proyecto, según el ajuste **Entre clips enlazados** (§5). Si la proporción del hueco no coincide con la del clip siguiente de la cadena, el hueco se reajusta con la animación normal de recolocación.
+
+Los clips que **se solapan no se enlazan nunca automáticamente** (ver "Clips solapados" en §3): están pensados para volver a encuadrar el mismo metraje, y encadenarlos repetiría contenido.
+
+En la lista de clips, un icono de eslabón 🔗 con la posición y el tamaño de la cadena (p. ej. `2/3`) indica que un clip está enlazado con el anterior de su fuente; un clic sobre el icono **rompe** el enlace. Un clip cuyo enlace automático se rompió a mano se marca con un icono de eslabón roto; un clic sobre él **restablece** el enlace. También se puede **forzar** un enlace entre dos clips que no cumplirían la regla automática (por ejemplo, si están más separados que el margen configurado, o incluso si se solapan) desde el menú contextual del clip (**Forzar enlace con el clip anterior** / **Romper enlace con el clip anterior**).
+
+### Secuencia siempre visible
+
+El proyecto puede tener **una** secuencia: una lista ordenada de clips que se sacan del reparto normal de columnas o filas. En todo momento hay uno de sus clips en pantalla, en un **hueco propio** cuya posición decide el algoritmo de montaje (puede cambiar de sitio en los re-layouts); el resto de clips se reparte con normalidad en los demás huecos. Si la secuencia termina antes que el resto del montaje, su hueco pasa a usarse con normalidad; si termina después, el vídeo sigue hasta que termine ella. En conjunto, **el vídeo dura lo que dure lo más largo** entre la secuencia y el resto del montaje.
+
+La secuencia aparece como una sección propia ("Siempre visible") encima de la lista de clips, en el panel derecho:
+
+- **Añadir** un clip arrastrándolo desde la lista hasta la sección, o con **Añadir a la secuencia siempre visible** de su menú contextual (también con varios clips seleccionados a la vez).
+- **Reordenar** arrastrando sus filas (tienen su propia asa `⋮⋮`) y **quitar** con la **✕** de su fila o **Quitar de la secuencia siempre visible** del menú contextual.
+
+En la lista de clips normal, un clip que está en la secuencia muestra su posición (número) en un indicador propio.
+
 ## 4. Orden de los clips
 
 El orden de la lista de clips es la base del montaje, pero el algoritmo puede reordenar para encajar los tamaños de columna, dentro de una "ventana de reordenación" configurable: un número de posiciones (sin tope práctico; 3 por defecto) o **Ilimitado**, que permite traer clips de cualquier punto del proyecto para rellenar los huecos. Aun así, entre opciones igual de buenas se sigue prefiriendo el orden de la lista. También existe un **orden aleatorio** reproducible (con una semilla guardada en el proyecto y un botón para "barajar de nuevo"); se elige en Ajustes de montaje.
@@ -114,15 +146,22 @@ Se abren con **Proyecto → Ajustes de montaje...** (`Ctrl/Cmd+Shift+M`) o el bo
 
 | Sección | Ajustes |
 |---|---|
-| **Salida** | **proporción** (16:9 horizontal con clips lado a lado, 9:16 vertical con clips apilados, 1:1 cuadrado — el montaje elige lado a lado o apilados, lo que mejor encaje), resolución (lado corto: 720p / 1080p / 4K), fotogramas por segundo, calidad (CRF), preset de velocidad, **códec de vídeo** (H.264 / H.265-HEVC) y **codificador** (Automático, Solo software, o uno de hardware — NVIDIA NVENC, Intel Quick Sync, Apple VideoToolbox, VAAPI — marcado como detectado o no según el equipo) |
+| **Salida** | **proporción** (16:9 horizontal con clips lado a lado, 9:16 vertical con clips apilados, 1:1 cuadrado — el montaje elige lado a lado o apilados, lo que mejor encaje), resolución (lado corto: 720p / 1080p / 4K), fotogramas por segundo, calidad (CRF), preset de velocidad, **códec de vídeo** (H.264 / H.265-HEVC), **codificador** (Automático, Solo software, o uno de hardware — NVIDIA NVENC, Intel Quick Sync, Apple VideoToolbox, VAAPI — marcado como detectado o no según el equipo) y **límite de duración del vídeo** (desactivado por defecto; ver más abajo) |
 | **Composición** | máximo de columnas o filas visibles (1–6, según la proporción), separación entre columnas o filas en px (y su color), relleno del hueco (desenfoque o color sólido) |
 | **Orden** | orden de la lista o aleatorio (con semilla y "barajar de nuevo"), ventana de reordenación (número de posiciones o casilla "Ilimitado") |
+| **Enlaces** | margen para enlazar automáticamente clips de una misma fuente (segundos; 10 por defecto, `0` lo desactiva) y transición entre clips enlazados (corte directo o la transición global) — ver "Clips enlazados" en §3 |
 | **Transición** | tipo (fundido, disolución, barridos, deslizamientos...) y duración; fundido de entrada/salida al principio y final del vídeo |
 | **Música** | **lista de reproducción** de varias pistas (añadir, reordenar, quitar, volumen por pista), fundido cruzado entre pistas, repetir la lista si es más corta que el vídeo y **ducking** (bajar automáticamente la música mientras se oye algún clip) — ver §5.1 |
 
 Cada cambio se guarda en el historial (se puede deshacer) y marca el proyecto como modificado. Cambiar la **proporción** de salida reajusta además, para conservar su forma sin deformarla, la caja de cualquier imagen superpuesta cuyo fichero se pueda volver a leer en ese momento (véase §7).
 
 En 1:1 el montaje decide, proyecto a proyecto, si sale mejor en columnas o en filas (según el tipo de clips); no hay un selector manual de eje.
+
+### Duración estimada y duración máxima
+
+Junto a los botones **Ajustes**, **Vista previa** y **Renderizar** de la barra inferior (en ambas pestañas, **Fuente** y **Montaje**) se muestra siempre la **duración estimada** del montaje actual ("≈ m:ss"), calculada con el planificador real (con un pequeño retardo tras cada cambio) para tener en cuenta clips, cadenas, secuencia y ajustes.
+
+El interruptor **Limitar la duración del vídeo** de la sección **Salida** (desactivado por defecto) fija una **duración máxima**. Si el montaje calculado dura más, el vídeo final se **corta en ese límite** aplicando el *fade* de salida global (vídeo y audio) en el corte; el indicador de duración estimada se resalta en ese caso y muestra a qué instante se recorta (`→ cortado en m:ss`). El aviso también aparece en la confirmación previa a previsualizar o renderizar (§8). Con un límite activo, el planificador **favorece disposiciones con más columnas o filas** para que quepa más contenido antes del corte.
 
 ### 5.1 Música: lista de reproducción y *ducking*
 
@@ -237,6 +276,7 @@ Puedes ver y personalizar todos los atajos en **Ayuda → Atajos de teclado y ra
 | Fotograma anterior / siguiente | `,` / `.` |
 | Retroceder / avanzar | `←` / `→` |
 | Marcar inicio / marcar fin del clip | `I` / `O` |
+| Nuevo clip desde aquí (aunque el cursor esté dentro de otro clip) | `Mayús+I` |
 | Añadir clip | `N` |
 | Dividir clip en el cursor | `B` |
 | Quitar punto de corte (elimina el clip) | `Retroceso` |

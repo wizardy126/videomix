@@ -159,11 +159,19 @@ test.describe.serial('VideoMix (English UI)', () => {
   test('2. create clips with I/O/N and drag a rect', async () => {
     // source 1: I at 0 s, O at 2 s
     await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+    // no clips yet: the mix duration estimate isn't shown
+    await expect(page.getByTestId('mix-duration-estimate')).toHaveCount(0);
     await pressShortcut(page, 'i');
+    // E1: with a start marked and no end, the counter (elapsed time to the cursor) shows in the bottom bar (and, the
+    // same value, next to the playhead in the timeline: see cursorDuration.ts), and grows as the cursor moves
+    await expect(page.getByTestId('cursor-duration')).toHaveText('0:00');
     await seekBy(page, 2);
+    await expect(page.getByTestId('cursor-duration')).toHaveText('0:02');
     await pressShortcut(page, 'o');
     await expect(clipRows(page)).toHaveCount(1);
     await expect(clipRows(page).nth(0)).toContainText('0:00 – 0:02');
+    // E3: the estimated duration is now shown next to Settings/Preview/Render, with the project's single clip
+    await expect(page.getByTestId('mix-duration-estimate')).toHaveText('≈ 0:02');
 
     // source 2: I at 1 s, O at 3 s
     await activateSource(page, 1, sourceFiles[1]!);
@@ -442,21 +450,33 @@ test.describe.serial('VideoMix (English UI)', () => {
     const slider = preview.getByRole('slider');
     const sliderBox = (await slider.boundingBox())!;
     const seekTo = async (fraction: number) => page.mouse.click(sliderBox.x + sliderBox.width * fraction, sliderBox.y + sliderBox.height / 2);
+    // T40: this used to take a single fixed-length measurement right after clicking Play, which is intermittently
+    // flaky (an exact 0, or a peak just under a threshold): both seeks below are genuinely silent while the element
+    // is still seeking/decoding (nothing to measure yet, correctly), and how long that takes depends on the machine
+    // and its current load, not on the app — a single short window can start (and end) entirely inside it. So both
+    // measurements below poll in the same short windows, for a generous budget, until they actually hear the clip; a
+    // real regression (frozen forever, as before the seek lead fix, T33) still fails once its budget runs out. See
+    // docs/videomix/execution/T40-v3-cierre.md for the analysis (measured seek/decode durations under load).
     // two clips at once (≈ 1.9–3.5 s)
     await seekTo(0.4);
     await preview.getByTitle('Play').click();
-    const twoClips = (await measurePeakRms(page, 1000)).peak;
+    let twoClips = 0;
+    await expect.poll(async () => {
+      twoClips = (await measurePeakRms(page, 1000)).peak;
+      return twoClips;
+    }, { timeout: 10_000 }).toBeGreaterThan(0.05);
     await preview.getByTitle('Pause').click();
     // then (paused seek, play) where only the vertical clip plays, ≈ 7.5 s into its source: 7 s of decoding from the
-    // previous keyframe. Before the fix of the seek lead (T33), its element kept seeking and never played there:
-    // silence (and a frozen frame) until the end
+    // previous keyframe (a much longer seek than above, so a longer budget)
     await seekTo(0.7);
     await preview.getByTitle('Play').click();
-    const farFromKeyframe = (await measurePeakRms(page, 1500)).peak;
+    let farFromKeyframe = 0;
+    await expect.poll(async () => {
+      farFromKeyframe = (await measurePeakRms(page, 1500)).peak;
+      return farFromKeyframe;
+    }, { timeout: 30_000 }).toBeGreaterThan(0.02);
     await preview.getByTitle('Pause').click();
     console.log('Live preview audio, normalized:', JSON.stringify({ twoClips, farFromKeyframe }));
-    expect(twoClips).toBeGreaterThan(0.05);
-    expect(farFromKeyframe).toBeGreaterThan(0.02);
   });
 
   test('8b. render and check the file with ffprobe', async () => {

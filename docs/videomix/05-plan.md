@@ -73,7 +73,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T38c | v3: ventana de reorden ilimitada y ampliable (E8) | M9 | Opus | T38b | hecha |
 | T38d | v3: girar un clip (E9) | M9 | Opus | T38c, T35b | hecha |
 | T39 | v3: UI de cadenas y secuencia, y render cortado al límite (E2, E4, E5) | M9 | Opus | T37, T38 | hecha |
-| T40 | v3: i18n, manual, e2e y cierre | M9 | Sonnet | T35–T39 | pendiente |
+| T40 | v3: i18n, manual, e2e y cierre | M9 | Sonnet | T35–T39 | hecha |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 

@@ -367,7 +367,10 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, sourceFrames
       invariant(overlap >= 0, 'Gap between clips of a column');
       filters.push(overlap > 0
         ? `[${cur}][${next.label}]xfade=transition=${transitionType}:duration=${sec(overlap)}:offset=${sec(next.start - colStart)}[${out}]`
-        : `[${cur}][${next.label}]concat=n=2:v=1:a=0[${out}]`);
+        // T40: `concat`'s output timebase isn't guaranteed to be a clean 1/fps (unlike every clip/fill layer, which
+        // goes through an explicit `fps=` filter); a later `xfade` against it (this segment replaced by a
+        // non-chained one, e.g. E2's chain handing off to a plain clip) can then reject it as a timebase mismatch.
+        : `[${cur}][${next.label}]concat=n=2:v=1:a=0,fps=${fps}[${out}]`);
       cur = out;
       curEnd = next.end;
     }
