@@ -92,3 +92,4 @@
 | T40 | [T40-v3-cierre.md](T40-v3-cierre.md) |
 | T41 | [T41-modal-render.md](T41-modal-render.md) |
 | T42 | [T42-html5ify-cache.md](T42-html5ify-cache.md) |
+| T43 | [T43-capas-preview.md](T43-capas-preview.md) |

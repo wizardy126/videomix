@@ -23,7 +23,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M7 · Overlays** | Imágenes PNG, contadores, barras de progreso y efectos de sonido sobre el vídeo final | T19–T23 |
 | **M8 · Mejoras v2** | A1, A2, A4, B1, B2, B5, C1, C2, D1, D2, E3 | T24–T34 |
 | **M9 · Mejoras v3 y correcciones** | E1–E9, B1, B2 | T35–T40 |
-| **M10 · Render y conversiones** | Modal de progreso del render, vídeos convertidos en la caché del proyecto | T41, T42 |
+| **M10 · Render y conversiones** | Modal de progreso del render, vídeos convertidos en la caché del proyecto | T41–T43 |
 
 ## Tareas
 
@@ -77,6 +77,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T40 | v3: i18n, manual, e2e y cierre | M9 | Sonnet | T35–T39 | hecha |
 | T41 | Modal de progreso del render | M10 | Opus | — | hecha |
 | T42 | Vídeos convertidos en la carpeta de caché del proyecto | M10 | Opus | — | hecha |
+| T43 | Diálogos tapados por la previsualización en vivo; conservar conversiones al borrar caché | M10 | Opus | T41, T42 | en curso |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 
@@ -128,6 +129,7 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 ## Oleadas de M10
 
 1. T41 ∥ T42.
+2. T43.
 
 ## Pendientes al integrar en la rama por defecto
 
