@@ -13,10 +13,6 @@ import type { MixRenderStatus } from '../render/renderStatus';
 // m:ss (h:mm:ss from an hour on)
 const formatTime = (ms: number, round: (v: number) => number) => formatDuration({ seconds: round(Math.max(0, ms) / 1000), showFraction: false, shorten: true });
 
-// Above the Mix view's live preview (MixLivePreview, z-index 1 in the page's stacking context), which otherwise covers
-// the middle of the window, where the dialog is
-const LAYER = 2;
-
 const barStyle: CSSProperties = { height: '.6em', borderRadius: '.3em', background: 'var(--gray-6)', overflow: 'hidden' };
 const rowStyle: CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: '1em', fontSize: '.9em', color: 'var(--gray-11)' };
 
@@ -76,11 +72,11 @@ function RenderProgressDialog({ status, progress, onCancel }: {
   return (
     <Dialog.Root open={phase !== 'confirm'}>
       <Dialog.Portal>
-        <Dialog.Overlay style={{ zIndex: LAYER }} />
+        <Dialog.Overlay />
         <Dialog.Content
           data-testid="render-progress"
           aria-describedby={undefined}
-          style={{ width: '26em', zIndex: LAYER }}
+          style={{ width: '26em' }}
           onOpenAutoFocus={handleOpenAutoFocus}
           onEscapeKeyDown={preventDefault}
           onPointerDownOutside={preventDefault}

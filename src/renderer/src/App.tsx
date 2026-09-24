@@ -2766,9 +2766,6 @@ function App() {
                       )}
                     </div>
 
-                    {/* VideoMix: live preview of the mix over the player while the Mix tab is shown (T32) */}
-                    {mixPreviewActive && <MixLivePreview preview={mixLivePreview} clips={mixProject.project.clips} />}
-
                     {bigWaveformEnabled && <BigWaveform waveforms={waveforms} relevantTime={relevantTime} playing={playing} fileDurationNonZero={fileDurationNonZero} zoom={zoomUnrounded} seekRel={seekRel} darkMode={darkMode} />}
 
                     {compatPlayerEnabled && (
@@ -2813,6 +2810,11 @@ function App() {
                     {fullscreen && (
                       <div style={{ position: 'absolute', bottom: 0, left: 0, height: '.1em', backgroundColor: 'var(--red-9)', width: calculateTimelinePercent(playerTime, fileDuration) }} />
                     )}
+
+                    {/* VideoMix: live preview of the mix over the player while the Mix tab is shown (T32). Last, so it covers
+                    the player's controls by document order alone, without a z-index that would also put it above Working
+                    and the dialogs (T43) */}
+                    {mixPreviewActive && <MixLivePreview preview={mixLivePreview} clips={mixProject.project.clips} />}
                   </div>
 
                   {/* VideoMix: all the clips of the project (any source) replace the segments of the current file */}

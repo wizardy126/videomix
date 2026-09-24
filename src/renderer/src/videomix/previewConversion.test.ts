@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 
-import { getPreviewConversionDir } from './previewConversion';
-import { getProjectCacheRoot, pruneRenderCache } from './render/renderCache';
+import { getPreviewConversionDir, PREVIEW_CONVERSION_DIR_NAME } from './previewConversion';
+import { clearRenderCache, getProjectCacheRoot, pruneRenderCache } from './render/renderCache';
 import type { CacheDirEntry } from './render/renderCache';
 
 const posix = {
@@ -72,5 +72,52 @@ describe('getPreviewConversionDir', () => {
     });
     expect(removed).toEqual([posix.join(renderDir, `v-${'a'.repeat(40)}.mp4`)]);
     expect(result.totalBytes).toBe(0);
+  });
+});
+
+describe('clearRenderCache', () => {
+  const file = (name: string, size: number): CacheDirEntry => ({ name, size, mtimeMs: 0, isDirectory: false });
+  const dir = (name: string): CacheDirEntry => ({ name, size: 0, mtimeMs: 0, isDirectory: true });
+
+  const fakeFs = (tree: Record<string, CacheDirEntry[]>) => {
+    const removed: string[] = [];
+    return {
+      removed,
+      deps: {
+        list: async (d: string) => tree[d] ?? [],
+        rm: async (filePath: string) => { removed.push(filePath); },
+      },
+    };
+  };
+
+  test('keeps the converted previews (T43) and frees the rest', async () => {
+    const { removed, deps } = fakeFs({
+      [cacheRoot]: [dir('render'), dir('preview-640x360'), dir(PREVIEW_CONVERSION_DIR_NAME), file('stray.tmp', 5)],
+      [posix.join(cacheRoot, 'render')]: [file('a.mp4', 100), file('b.m4a', 20)],
+      [posix.join(cacheRoot, 'preview-640x360')]: [file('c.mp4', 7)],
+      [posix.join(cacheRoot, 'converted')]: [dir('0123456789abcdef')],
+      [posix.join(cacheRoot, 'converted', '0123456789abcdef')]: [file('clip-converted.mkv', 10_000)],
+    });
+    const bytes = await clearRenderCache({ root: cacheRoot, keep: [PREVIEW_CONVERSION_DIR_NAME], deps, join: posix.join });
+    expect(bytes).toBe(132);
+    expect([...removed].sort()).toEqual([posix.join(cacheRoot, 'preview-640x360'), posix.join(cacheRoot, 'render'), posix.join(cacheRoot, 'stray.tmp')]);
+  });
+
+  test('removes the whole root when there is nothing to keep', async () => {
+    const { removed, deps } = fakeFs({
+      [cacheRoot]: [dir('render')],
+      [posix.join(cacheRoot, 'render')]: [file('a.mp4', 100)],
+    });
+    expect(await clearRenderCache({ root: cacheRoot, keep: [PREVIEW_CONVERSION_DIR_NAME], deps, join: posix.join })).toBe(100);
+    expect(removed).toEqual([cacheRoot]);
+  });
+
+  test('only converted previews: nothing to free, nothing removed', async () => {
+    const { removed, deps } = fakeFs({
+      [cacheRoot]: [dir(PREVIEW_CONVERSION_DIR_NAME)],
+      [posix.join(cacheRoot, 'converted')]: [file('x.mkv', 50)],
+    });
+    expect(await clearRenderCache({ root: cacheRoot, keep: [PREVIEW_CONVERSION_DIR_NAME], deps, join: posix.join })).toBe(0);
+    expect(removed).toEqual([]);
   });
 });

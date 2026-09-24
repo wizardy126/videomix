@@ -77,7 +77,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T40 | v3: i18n, manual, e2e y cierre | M9 | Sonnet | T35–T39 | hecha |
 | T41 | Modal de progreso del render | M10 | Opus | — | hecha |
 | T42 | Vídeos convertidos en la carpeta de caché del proyecto | M10 | Opus | — | hecha |
-| T43 | Diálogos tapados por la previsualización en vivo; conservar conversiones al borrar caché | M10 | Opus | T41, T42 | en curso |
+| T43 | Diálogos tapados por la previsualización en vivo; conservar conversiones al borrar caché | M10 | Opus | T41, T42 | hecha |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 

@@ -277,7 +277,7 @@ VideoMix guarda en una carpeta oculta junto al proyecto (`.<nombre>.vmx.cache/`,
 
 **Proyecto → Vaciar caché de render** borra toda la caché de render de este proyecto (y la de los proyectos sin guardar que ya no se usan); el próximo render vuelve a codificar todo desde cero. No hace falta usarlo en el uso normal: la caché se recorta ella sola por tamaño (un límite por proyecto; los fragmentos menos usados recientemente se borran primero) y las cachés de proyectos sin guardar y abandonados se limpian solas al cabo de unos días.
 
-En la misma carpeta, `converted/` guarda las versiones convertidas para el reproductor de las fuentes que no se pueden ver directamente (ver la sección 2). El recorte automático por tamaño no las toca; **Vaciar caché de render** sí las borra, y se vuelven a crear la próxima vez que se active esa fuente.
+En la misma carpeta, `converted/` guarda las versiones convertidas para el reproductor de las fuentes que no se pueden ver directamente (ver la sección 2). No son caché de render: ni el recorte automático por tamaño ni **Vaciar caché de render** las borran (convertir una fuente puede ser lento). Si se quiere liberar ese espacio, se puede borrar la carpeta `converted/` a mano con el proyecto cerrado; se vuelven a crear la próxima vez que se active cada fuente.
 
 ## 9. Atajos de teclado
 

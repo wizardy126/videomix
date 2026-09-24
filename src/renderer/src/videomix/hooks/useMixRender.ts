@@ -29,7 +29,8 @@ import { RenderAbortedError, runRenderJob } from '../render/runRenderJob';
 import type { RenderRunnerDeps } from '../render/runRenderJob';
 import type { MixRenderPhase, MixRenderStatus } from '../render/renderStatus';
 import type { CacheDirEntry, RenderCacheFsDeps } from '../render/renderCache';
-import { DEFAULT_RENDER_CACHE_MAX_BYTES, applyRenderCache, getFileIdentity, getProjectCacheRoot, getRenderCacheDir, getRenderCacheFileNames, getRenderCacheKeys, getStaleUnsavedCaches, getUnsavedCacheParent, pruneRenderCache } from '../render/renderCache';
+import { DEFAULT_RENDER_CACHE_MAX_BYTES, applyRenderCache, clearRenderCache, getFileIdentity, getProjectCacheRoot, getRenderCacheDir, getRenderCacheFileNames, getRenderCacheKeys, getStaleUnsavedCaches, getUnsavedCacheParent, pruneRenderCache } from '../render/renderCache';
+import { PREVIEW_CONVERSION_DIR_NAME } from '../previewConversion';
 import { askForRenderWarnings, getIssueText, getRenderWarningText, showHardwareEncoderFallbackWarning, showRenderProblems } from '../renderDialogs';
 import { showMixPreviewDialog } from '../components/MixPreviewDialog';
 import { detectEncoders } from '../encoders';
@@ -492,11 +493,9 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     await withErrorHandling(async () => {
       const unsavedParent = getUnsavedCacheParent(path, remote.app.getPath('userData'));
       const roots = [...(projectPath != null ? [getProjectCacheRoot(path, projectPath)] : []), unsavedParent];
-      const sizeOf = async (dir: string): Promise<number> => (await Promise.all((await cacheFsDeps.list(dir)).map(async (entry) => (
-        entry.isDirectory ? sizeOf(path.join(dir, entry.name)) : entry.size
-      )))).reduce((acc, size) => acc + size, 0);
-      const bytes = (await Promise.all(roots.map(async (root) => sizeOf(root)))).reduce((acc, size) => acc + size, 0);
-      await Promise.all(roots.map(async (root) => fs.rm(root, { recursive: true, force: true })));
+      // the converted previews of the sources (T42) stay: they aren't render cache (T43)
+      const bytes = (await Promise.all(roots.map(async (root) => clearRenderCache({ root, keep: [PREVIEW_CONVERSION_DIR_NAME], deps: cacheFsDeps, join: path.join }))))
+        .reduce((acc, size) => acc + size, 0);
       getSwal().toast.fire({ icon: 'success', timer: 4000, title: i18n.t('Render cache cleared ({{size}} MB freed)', { size: Math.round(bytes / 1024 ** 2) }) });
     }, i18n.t('Failed to clear the render cache'));
   }, [projectPath, withErrorHandling, workingRef]);

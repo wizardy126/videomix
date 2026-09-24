@@ -93,7 +93,7 @@ function MixLivePreview({ preview, clips }: {
   const timeText = useMemo(() => `${formatDuration({ seconds: time, shorten: true })} / ${formatDuration({ seconds: duration, shorten: true })}`, [duration, time]);
 
   return (
-    <div className="no-user-select" data-testid="mix-live-preview" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: 'black', zIndex: 1 }}>
+    <div className="no-user-select" data-testid="mix-live-preview" style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: 'black' }}>
       <div ref={areaRef} style={{ flexGrow: 1, minHeight: 0, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
         {hasPlan ? (
           <canvas

@@ -217,6 +217,32 @@ export async function pruneRenderCache({ root, dir, keep, maxBytes, now, deps, j
   return { removedFiles, removedBytes, totalBytes };
 }
 
+/**
+ * "Clear render cache" (T28): removes the entries of the cache `root`, except the ones named in `keep` (T43: the
+ * converted previews of the sources, T42, which aren't render cache and can be slow to make again). The root itself
+ * goes too when nothing is kept. Returns the bytes freed.
+ */
+export async function clearRenderCache({ root, keep, deps, join }: {
+  root: string,
+  keep: Iterable<string>,
+  deps: RenderCacheFsDeps,
+  join: (parent: string, name: string) => string,
+}) {
+  const keepSet = new Set(keep);
+  const sizeOf = async (dir: string): Promise<number> => (await Promise.all((await deps.list(dir)).map(async (entry) => (
+    entry.isDirectory ? sizeOf(join(dir, entry.name)) : entry.size
+  )))).reduce((acc, size) => acc + size, 0);
+
+  const entries = await deps.list(root);
+  const toRemove = entries.filter((entry) => !keepSet.has(entry.name));
+  const bytes = (await Promise.all(toRemove.map(async (entry) => (entry.isDirectory ? sizeOf(join(root, entry.name)) : entry.size))))
+    .reduce((acc, size) => acc + size, 0);
+  await (toRemove.length === entries.length
+    ? deps.rm(root)
+    : Promise.all(toRemove.map(async (entry) => deps.rm(join(root, entry.name)))));
+  return bytes;
+}
+
 /** Caches of unsaved projects not used for `maxAgeMs` (entries of userData/videomix-cache). Returns their names. */
 export const getStaleUnsavedCaches = (entries: CacheDirEntry[], now: number, maxAgeMs = UNSAVED_CACHE_MAX_AGE_MS) => (
   entries.filter((e) => e.isDirectory && now - e.mtimeMs > maxAgeMs).map((e) => e.name)

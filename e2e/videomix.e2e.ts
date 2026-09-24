@@ -55,6 +55,20 @@ async function seekBy(page: Page, seconds: number) {
 const playerSrc = async (page: Page) => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).src).then((src) => (src.startsWith('file:') ? fileURLToPath(src.replace(/\?.*$/, '')) : src));
 
 /**
+ * What's at the middle of the element is the element itself: nothing covers it, e.g. the Mix view's live preview
+ * (T41, T43). A modal dialog turns off the pointer events of the rest of the page, which hit testing skips: on again
+ * for the check.
+ */
+const isOnTop = async (locator: Locator) => locator.evaluate((el) => {
+  const r = el.getBoundingClientRect();
+  const { pointerEvents } = document.body.style;
+  document.body.style.pointerEvents = 'auto';
+  const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  document.body.style.pointerEvents = pointerEvents;
+  return el.contains(top);
+});
+
+/**
  * The render progress dialog (T41) is shown, on top (not hidden behind the Mix view), with its title, a progress bar
  * and the times.
  */
@@ -67,17 +81,8 @@ async function expectRenderProgress(page: Page, title: string) {
   await expect(dialog.getByTestId('render-progress-percent')).toHaveText(/^\d+\.\d %$/);
   await expect(dialog.getByTestId('render-progress-elapsed')).toHaveText(/^\d+:\d\d$/);
   await expect(dialog.getByTestId('render-progress-remaining')).toHaveText(/^(Calculating…|≈ \d+:\d\d)$/);
-  // what's at the middle of the dialog is the dialog itself: nothing covers it (the Working overlay the render used
-  // before was hidden behind the Mix view's live preview). The modal dialog turns off the pointer events of the rest
-  // of the page, which hit testing skips: on again for the check.
-  expect(await dialog.evaluate((el) => {
-    const r = el.getBoundingClientRect();
-    const { pointerEvents } = document.body.style;
-    document.body.style.pointerEvents = 'auto';
-    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-    document.body.style.pointerEvents = pointerEvents;
-    return el.contains(top);
-  })).toBe(true);
+  // (the Working overlay the render used before was hidden behind the Mix view's live preview)
+  expect(await isOnTop(dialog)).toBe(true);
 }
 
 /** Until the "working" overlay (loading a source, rendering…), which covers the whole window, is gone. */
@@ -470,6 +475,8 @@ test.describe.serial('VideoMix (English UI)', () => {
     expect(Number(probe.format.duration)).toBeCloseTo(expectedDuration, 0);
     // it plays (autoplay)
     await expect.poll(async () => dialogVideo.evaluate((v) => (v as HTMLVideoElement).currentTime)).toBeGreaterThan(0.5);
+    // not hidden behind the live preview (T43)
+    expect(await isOnTop(page.getByRole('dialog'))).toBe(true);
     await screenshot(page, '08a-preview-dialog');
     await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
     await expect(dialogTitle).toBeHidden();
@@ -507,6 +514,31 @@ test.describe.serial('VideoMix (English UI)', () => {
     }, { timeout: 30_000 }).toBeGreaterThan(0.02);
     await preview.getByTitle('Pause').click();
     console.log('Live preview audio, normalized:', JSON.stringify({ twoClips, farFromKeyframe }));
+
+    // T43: the Working overlay (here loading another source, with the Mix tab shown) is above the live preview. It's
+    // usually gone too fast to poll for, so the check runs in the page as soon as it's added: what's at the middle of
+    // the preview is Working
+    const current = await playerSrc(page);
+    const other = sourceFiles.findIndex((name) => !current.endsWith(name));
+    await page.evaluate(() => {
+      const w = globalThis as unknown as { e2eWorkingOnTop: Promise<boolean> };
+      w.e2eWorkingOnTop = new Promise((resolve) => {
+        const observer = new MutationObserver(() => {
+          const working = document.querySelector('[data-testid="working"]');
+          const livePreview = document.querySelector('[data-testid="mix-live-preview"]');
+          if (working == null || livePreview == null) return;
+          observer.disconnect();
+          const r = livePreview.getBoundingClientRect();
+          resolve(working.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)));
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      });
+    });
+    await page.getByTestId('source-row').nth(other).click();
+    expect(await page.evaluate(async () => (globalThis as unknown as { e2eWorkingOnTop: Promise<boolean> }).e2eWorkingOnTop)).toBe(true);
+    await expect.poll(async () => playerSrc(page)).toContain(sourceFiles[other]!);
+    await waitIdle(page);
+    await expect(preview).toBeVisible();
   });
 
   test('8b. a render can be cancelled from its progress dialog (T41)', async () => {
