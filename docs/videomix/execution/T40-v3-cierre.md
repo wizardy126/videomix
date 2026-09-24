@@ -10,7 +10,8 @@
    - clips enlazados, secuencia siempre visible, duración estimada y máxima;
    - nota sobre las fuentes anamórficas.
 3. **Nuevos escenarios e2e**: contador visible al marcar un inicio, "Nuevo clip desde aquí" dentro de un clip, indicador de duración estimada y aviso de duración máxima.
-4. Proyecto de ejemplo que use cadenas, secuencia y límite: renderizado y revisado.
+4. **Estabilizar el e2e 8a** (nivel de audio de la previsualización en vivo tras un *seek*): falla de forma intermitente (≈0,019 frente a un umbral de 0,02, o `farFromKeyframe` = 0). Hay que buscar la causa: si es del test, ajustar la medida; si es de la app, corregirla.
+5. Proyecto de ejemplo que use cadenas, secuencia y límite: renderizado y revisado.
 
 ## Criterios de aceptación
 

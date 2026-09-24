@@ -23,6 +23,7 @@ interface SavedProject {
     preset: string,
     transition: { type: string },
     fill: { mode: string },
+    reorderWindow: number | 'unlimited',
   },
   overlays: ({ id: string, type: string, name: string, duration?: number, anchor: { kind: string, time?: number, clipId?: string, elementId?: string, edge?: string, offset?: number } })[],
 }
@@ -264,6 +265,18 @@ test.describe.serial('VideoMix (English UI)', () => {
     await settingsField(dialog, 'Encoding speed preset').selectOption('ultrafast');
     await settingsField(dialog, 'Transition type').selectOption('dissolve');
     await settingsField(dialog, 'Fill empty space with').selectOption('color');
+    // E8 (T38c): a number without practical limit, or unlimited; unchecking goes back to the number. It ends at 3 (the
+    // default) so the later scenarios keep their plan.
+    const reorderWindow = dialog.locator('label', { hasText: 'Reorder window' }).locator('input');
+    const unlimited = dialog.getByRole('checkbox', { name: 'Unlimited' });
+    await reorderWindow.fill('25');
+    await unlimited.click();
+    await expect(reorderWindow).toBeDisabled();
+    await expect(dialog).toContainText('Clips may come from anywhere in the project');
+    await unlimited.click();
+    await expect(reorderWindow).toBeEnabled();
+    await expect(reorderWindow).toHaveValue('25');
+    await reorderWindow.fill('3');
     await screenshot(page, '05-settings');
     await dialog.getByRole('button', { name: 'Close', exact: true }).first().click();
     await expect(dialog).toBeHidden();
@@ -277,6 +290,7 @@ test.describe.serial('VideoMix (English UI)', () => {
     expect(settings.preset).toBe('ultrafast');
     expect(settings.transition.type).toBe('dissolve');
     expect(settings.fill.mode).toBe('color');
+    expect(settings.reorderWindow).toBe(3);
   });
 
   test('6. overlays: countdown, text and sound, anchored', async () => {

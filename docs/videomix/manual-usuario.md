@@ -103,7 +103,7 @@ Un clip fijado o agrupado se distingue por el icono de chincheta (con el instant
 
 ## 4. Orden de los clips
 
-El orden de la lista de clips es la base del montaje, pero el algoritmo puede reordenar ligeramente para encajar los tamaños de columna (dentro de una "ventana de reordenación" configurable). También existe un **orden aleatorio** reproducible (con una semilla guardada en el proyecto y un botón para "barajar de nuevo"); se elige en Ajustes de montaje.
+El orden de la lista de clips es la base del montaje, pero el algoritmo puede reordenar para encajar los tamaños de columna, dentro de una "ventana de reordenación" configurable: un número de posiciones (sin tope práctico; 3 por defecto) o **Ilimitado**, que permite traer clips de cualquier punto del proyecto para rellenar los huecos. Aun así, entre opciones igual de buenas se sigue prefiriendo el orden de la lista. También existe un **orden aleatorio** reproducible (con una semilla guardada en el proyecto y un botón para "barajar de nuevo"); se elige en Ajustes de montaje.
 
 ## 5. Ajustes de montaje
 
@@ -113,7 +113,7 @@ Se abren con **Proyecto → Ajustes de montaje...** (`Ctrl/Cmd+Shift+M`) o el bo
 |---|---|
 | **Salida** | **proporción** (16:9 horizontal con clips lado a lado, 9:16 vertical con clips apilados, 1:1 cuadrado — el montaje elige lado a lado o apilados, lo que mejor encaje), resolución (lado corto: 720p / 1080p / 4K), fotogramas por segundo, calidad (CRF), preset de velocidad, **códec de vídeo** (H.264 / H.265-HEVC) y **codificador** (Automático, Solo software, o uno de hardware — NVIDIA NVENC, Intel Quick Sync, Apple VideoToolbox, VAAPI — marcado como detectado o no según el equipo) |
 | **Composición** | máximo de columnas o filas visibles (1–6, según la proporción), separación entre columnas o filas en px (y su color), relleno del hueco (desenfoque o color sólido) |
-| **Orden** | orden de la lista o aleatorio (con semilla y "barajar de nuevo"), ventana de reordenación |
+| **Orden** | orden de la lista o aleatorio (con semilla y "barajar de nuevo"), ventana de reordenación (número de posiciones o casilla "Ilimitado") |
 | **Transición** | tipo (fundido, disolución, barridos, deslizamientos...) y duración; fundido de entrada/salida al principio y final del vídeo |
 | **Música** | **lista de reproducción** de varias pistas (añadir, reordenar, quitar, volumen por pista), fundido cruzado entre pistas, repetir la lista si es más corta que el vídeo y **ducking** (bajar automáticamente la música mientras se oye algún clip) — ver §5.1 |
 

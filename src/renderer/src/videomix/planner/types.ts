@@ -35,8 +35,11 @@ export interface PlannerSettings {
   maxColumns: number,
   /** Separation between adjacent columns, px. */
   gap: number,
-  /** A clip may start at most this many positions before/after its index in the base list. */
-  reorderWindow: number,
+  /**
+   * A clip may start at most this many positions before/after its index in the base list. E8 (T38c): `'unlimited'` lifts
+   * the limit (see {@link getReorderWindowSize}).
+   */
+  reorderWindow: number | 'unlimited',
   order: { mode: 'list' | 'random', seed: number },
   /** Global transition duration (s). Shortened per clip when clips are short. */
   transitionDuration: number,
@@ -197,3 +200,6 @@ export function getDefaultAxis({ width, height }: { width: number, height: numbe
   if (width < height) return 'rows';
   return undefined;
 }
+
+/** E8 (T38c): the reorder window as a number of positions (`Infinity` when unlimited). */
+export const getReorderWindowSize = (window: PlannerSettings['reorderWindow']) => (window === 'unlimited' ? Infinity : window);

@@ -6,7 +6,7 @@ import { extendPlan } from './extendPlan';
 import { getColumnFit, getPlanWarnings } from './planWarnings';
 import { getPlanLinks, getPlanUnits } from './units';
 import { validatePlan } from './validatePlan';
-import { getDefaultAxis } from './types';
+import { getDefaultAxis, getReorderWindowSize } from './types';
 import type { ColumnPlacement, LayoutKeyframe, MixPlan, PlanMixInput, PlannerClip } from './types';
 
 // Montage planner (04-diseno §3): an event simulation over "a column's clip ends" events. Each event is resolved by
@@ -90,10 +90,27 @@ const CLEAR_FILL_REDUCTION = 0.5;
 
 /**
  * Pruning: at most this many candidate subsets per event. The candidate list (clips in the reorder window, in base
- * order) is cut so that Σ C(candidates, m) over the subset sizes stays below it. The earliest clips are kept, so
- * the clips the window forces are always candidates.
+ * order) is cut so that Σ C(candidates, m) over the subset sizes stays below it. The earliest clips are kept, so the
+ * clips the window forces are always candidates. With a large window (E8), see {@link OLDEST_SHARE}.
  */
 const SUBSET_BUDGET = 1000;
+/**
+ * E8 (T38c): a reorder window larger than this (the old slider's maximum), up to unlimited, is "large". Up to it, the
+ * planner works exactly as before (same plans). With a large window:
+ * - the order cost of a pick is how far ahead of its position it is, up to this many positions, and a clip left behind
+ *   costs nothing. So a clip that fits can come from anywhere at a bounded price (about 3 re-layouts), and a skipped
+ *   clip comes back as soon as it is as good as the others (list order among equally good options);
+ * - pruning keeps the clips that fit, not just the oldest ones (see {@link OLDEST_SHARE}).
+ */
+const LARGE_WINDOW = 10;
+/**
+ * E8 (T38c): with a large window that doesn't fit in {@link SUBSET_BUDGET}, share of the candidates kept for the
+ * clips the window forces and the oldest ones (the ones the list order prefers). The rest go to the clips that best
+ * fit the free widths, wherever they are in the window, so a clip that fits can come from far away. Measured on random
+ * projects of 100–200 clips against keeping only the oldest: about −4 to −6 % of plan score and −9 to −12 % of fill
+ * score (shares from 0.5 to 0.85 are alike; see T38c's notes).
+ */
+const OLDEST_SHARE = 0.75;
 
 const EPS = 1e-9;
 
@@ -197,17 +214,26 @@ function combinations(n: number, k: number): number {
   return result;
 }
 
-/** All k-subsets of [0, n) in lexicographic order. */
-function* subsets(n: number, k: number): Generator<number[]> {
+/**
+ * Calls `fn` with every k-subset of `items` (keeping their order), in lexicographic order of the indices. The array
+ * passed is reused between calls (it is the hot loop of the planner): `fn` must not keep it.
+ */
+function forEachSubset<T>(items: readonly T[], k: number, fn: (subset: readonly T[]) => void) {
+  const n = items.length;
   if (k > n || k < 0) return;
   const idx = Array.from({ length: k }, (_v, i) => i);
-  while (true) {
-    yield [...idx];
+  const subset = idx.map((i) => items[i]!);
+  for (;;) {
+    fn(subset);
     let i = k - 1;
     while (i >= 0 && idx[i] === n - k + i) i -= 1;
     if (i < 0) return;
     idx[i]! += 1;
-    for (let j = i + 1; j < k; j += 1) idx[j] = idx[j - 1]! + 1;
+    subset[i] = items[idx[i]!]!;
+    for (let j = i + 1; j < k; j += 1) {
+      idx[j] = idx[j - 1]! + 1;
+      subset[j] = items[idx[j]!]!;
+    }
   }
 }
 
@@ -247,7 +273,9 @@ export interface PlanScore {
 
 /** {@link planMix} along a given main axis, with the plan's score. */
 export function planMixAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput, axis: LayoutAxis): { plan: MixPlan, score: PlanScore } {
-  const { maxColumns, gap, reorderWindow: N, transitionDuration: D } = settings;
+  const { maxColumns, gap, transitionDuration: D } = settings;
+  /** E8 (T38c): `Infinity` for an unlimited window. */
+  const N = getReorderWindowSize(settings.reorderWindow);
   const { main: W, cross: H } = getAxisLengths(axis, settings);
   invariant(maxColumns >= 1 && Number.isInteger(maxColumns), 'maxColumns must be a positive integer');
   invariant(N >= 0 && D >= 0 && W > 0 && H > 0 && gap >= 0, 'Invalid planner settings');
@@ -353,6 +381,14 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
 
   // --- helpers ---
 
+  /**
+   * Order cost (before {@link ORDER_WEIGHT}) of starting the unit with base index `base` at order position `position`:
+   * the distance, or with a large window (E8) the distance ahead capped at {@link LARGE_WINDOW} and 0 behind.
+   */
+  const orderDistance = (position: number, base: number) => (N > LARGE_WINDOW
+    ? Math.min(LARGE_WINDOW, Math.max(0, base - position))
+    : Math.abs(position - base));
+
   const fillCost = (fill: number, seconds: number) => FILL_WEIGHT * (fill / W) * Math.max(0, seconds);
 
   /** Fill a clip leaves in a column of `width` px (pillarbox/letterbox) during `seconds`, without the letterbox extra. */
@@ -407,26 +443,29 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
    * a group more than N positions early, or a single clip left behind that could no longer fit in its window.
    * A group may start late (it waits for room), which costs like being away from its position.
    */
-  function getOrderCost(atOnce: Unit[], later: Unit[] = []) {
+  function getOrderCost(atOnce: readonly Unit[], later: readonly Unit[] = []) {
     let single = singlePosition;
     let unit = unitPosition;
     let cost = 0;
-    for (const u of [...atOnce, ...later]) {
-      if (u.pinTime == null && !u.started) {
-        if (isSingle(u)) {
-          const delta = Math.abs(single - u.singleBase);
-          if (delta > N) return undefined;
-          cost += delta;
-          single += 1;
-        } else {
-          if (unit < u.unitBase - N) return undefined;
-          cost += Math.abs(unit - u.unitBase);
+    for (const list of [atOnce, later]) {
+      for (const u of list) {
+        if (u.pinTime == null && !u.started) {
+          if (isSingle(u)) {
+            if (Math.abs(single - u.singleBase) > N) return undefined;
+            cost += orderDistance(single, u.singleBase);
+            single += 1;
+          } else {
+            if (unit < u.unitBase - N) return undefined;
+            cost += orderDistance(unit, u.unitBase);
+          }
+          unit += 1;
         }
-        unit += 1;
       }
     }
-    const leftBehind = remaining.find((u) => isSingle(u) && !atOnce.includes(u) && !later.includes(u));
-    if (leftBehind != null && single > leftBehind.singleBase + N) return undefined;
+    if (Number.isFinite(N)) {
+      const leftBehind = remaining.find((u) => isSingle(u) && !atOnce.includes(u) && !later.includes(u));
+      if (leftBehind != null && single > leftBehind.singleBase + N) return undefined;
+    }
     return cost * ORDER_WEIGHT;
   }
 
@@ -439,15 +478,85 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     ? unit.singleBase <= singlePosition + N + maxPicks - 1
     : unit.started || (unit.unitBase <= unitPosition + N + maxPicks - 1 && !isWaitingChunk(unit))));
 
-  /** Cut the window so the subset enumeration stays within {@link SUBSET_BUDGET}. */
-  function pruneCandidates<T>(window: T[], sizes: number[]) {
-    let n = window.length;
-    const count = (c: number) => sizes.reduce((acc, m) => acc + combinations(c, m), 0);
-    while (n > 1 && count(n) > SUBSET_BUDGET) n -= 1;
-    return window.slice(0, n);
+  /**
+   * A unit the window may force within the next `maxPicks` picks (it would be left too far behind, or a group at the end
+   * of its window), or the rest of a split group. Never a single clip with an unlimited window.
+   */
+  const isUrgent = (unit: Unit, maxPicks: number) => unit.started || (isSingle(unit)
+    ? unit.singleBase + N < singlePosition + maxPicks
+    : unit.unitBase + N < unitPosition + maxPicks);
+
+  /** Widths of `count` columns sharing `space` px equally (with their gaps): 1 column, 2 columns… */
+  const shares = (space: number, count: number) => range1(count).map((k) => (space - (k - 1) * gap) / k);
+
+  /**
+   * `space` and what is left of it next to the first 1, 2… (up to `count` − 1) single clips of `window` (at their
+   * preferred widths, with the gaps): the widths that fill it exactly, alone or with the oldest candidates.
+   */
+  function getFillingWidths(space: number, window: Unit[], count: number) {
+    const result = [space];
+    let left = space;
+    for (const unit of window) {
+      if (result.length >= count) break;
+      if (isSingle(unit)) {
+        left -= unit.clips[0]!.widths.preferred + gap;
+        result.push(left);
+      }
+    }
+    return result;
   }
 
-  const clipCount = (units: Unit[]) => units.reduce((acc, unit) => acc + unit.clips.length, 0);
+  /** Free widths a candidate may take (see {@link getFitKey}). */
+  interface FitTargets {
+    /** Widths that fill the free space (no fill left). */
+    filling: number[],
+    /** Other useful widths: a freed column, an equal share of the free space. */
+    fitting: number[],
+  }
+
+  /**
+   * E8 (T38c): how well a unit fits the free space, lower is better: 0 if one of its clips can take one of the
+   * `filling` widths (its aspect range admits it: it removes the fill, alone or with the oldest clips), 1 if it can take
+   * one of the `fitting` widths, else 2 + the smallest log ratio between a clip's width range and any of them.
+   */
+  function getFitKey(unit: Unit, { filling, fitting }: FitTargets) {
+    const distance = (targets: number[]) => {
+      let best = Infinity;
+      unit.clips.forEach(({ widths: { min, max } }) => targets.forEach((target) => {
+        if (target >= 2) best = Math.min(best, target < min ? Math.log(min / target) : (target > max ? Math.log(target / max) : 0));
+      }));
+      return best;
+    };
+    const toFill = distance(filling);
+    if (toFill === 0) return 0;
+    const toFit = distance(fitting);
+    return toFit === 0 ? 1 : 2 + Math.min(toFill, toFit);
+  }
+
+  /**
+   * Cut the window (in base order) so the subset enumeration over the given subset sizes stays within
+   * {@link SUBSET_BUDGET}. A window that fits is kept whole; with a window up to {@link LARGE_WINDOW}, the oldest units
+   * are kept (T10). With a large window (E8), the candidates are, by priority: the units the window forces (`isUrgent`
+   * within `maxPicks`), the oldest ones up to {@link OLDEST_SHARE} of them, and the ones that best fit the free
+   * space (`targets`, {@link getFitKey}; ties: the oldest). They are returned in base order. Deterministic.
+   */
+  function pruneCandidates(window: Unit[], sizes: number[], maxPicks: number, targets: () => FitTargets) {
+    const count = (c: number) => sizes.reduce((acc, m) => acc + combinations(c, m), 0);
+    let n = window.length;
+    while (n > 1 && count(n) > SUBSET_BUDGET) n -= 1;
+    if (n === window.length) return window;
+    if (N <= LARGE_WINDOW) return window.slice(0, n);
+    const oldest = Math.ceil(n * OLDEST_SHARE);
+    const fit = targets();
+    return window
+      .map((unit, i) => ({ unit, i, key: isUrgent(unit, maxPicks) ? -2 : (i < oldest ? -1 : getFitKey(unit, fit)) }))
+      .sort((a, b) => a.key - b.key || a.i - b.i)
+      .slice(0, n)
+      .sort((a, b) => a.i - b.i)
+      .map(({ unit }) => unit);
+  }
+
+  const clipCount = (units: readonly Unit[]) => units.reduce((acc, unit) => acc + unit.clips.length, 0);
 
   /** Demand of each pending pin at its time: its clips plus the earlier pinned clips still playing then. */
   let pinDemands: number[] = [];
@@ -586,14 +695,18 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     const window = getWindow(room);
     updateLimitPressure(0);
     const sizes = [...(pinnedClips.length > 0 ? [0] : []), ...range1(room)];
-    const candidates = pruneCandidates(window, sizes);
+    // E8: clips that fill the frame (next to the pinned clips), alone or with the oldest ones, or an equal share of it
+    const candidates = pruneCandidates(window, sizes, room, () => {
+      const space = pinnedClips.reduce((acc, clip) => acc - clip.widths.preferred - gap, W);
+      return { filling: getFillingWidths(space, window, room), fitting: shares(space, Math.max(1, room)) };
+    });
     let best: { option: Option, missing: number, clips: Clip[], widths: number[], fill: number } | undefined;
     // clips that can't share the row even at their min rects only go in squeezed when nothing else fits (pins, groups)
     for (const squeeze of [false, true]) {
       if (best != null) break;
       for (const m of sizes) {
-        for (const idx of subsets(candidates.length, m)) {
-          const units = idx.map((i) => candidates[i]!);
+        // eslint-disable-next-line no-loop-func -- called synchronously, `best` is meant to be shared across the loops
+        forEachSubset(candidates, m, (units) => {
           const picked = units.flatMap((unit) => unit.clips);
           const orderCost = picked.length <= room ? getOrderCost(units) : undefined;
           const clips = [...picked, ...pinnedClips];
@@ -607,7 +720,7 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
               best = { option, missing, clips, widths: dist.widths, fill: dist.fill };
             }
           }
-        }
+        });
       }
     }
     invariant(best != null, 'No initial row');
@@ -761,6 +874,11 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     const consider = (option: Option) => {
       if (isBetter(option, best)) best = option;
     };
+    /**
+     * Every term of a cost is ≥ 0, so an option whose cost is at least `lowerBound` can't beat the best one when that
+     * has no violation. Skipping it early doesn't change the choice (E8: many subsets with large windows).
+     */
+    const cannotBeat = (lowerBound: number) => best != null && best.violation === 0 && lowerBound >= best.cost - EPS;
     if (direct != null && !restricted && !moreColumns) consider(direct);
 
     // 2a. In place with fill (pillarbox/letterbox), no layout change.
@@ -805,36 +923,73 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
       if (g - 1 <= R) removeSizes.add(g - 1);
       else removeSizes.add(R);
     }
-    const window = getWindow(Math.max(maxPicks, g - 1, 1));
+    const windowPicks = Math.max(maxPicks, g - 1, 1);
+    const window = getWindow(windowPicks);
     // a row squeezed for a pin or a group may stay squeezed until its clips end
     const squeezed = isRowSqueezed();
     const hasGroups = window.some((unit) => !isSingle(unit));
     // subsets are enumerated by number of units; without groups a unit is a clip
     const replaceCounts = hasGroups ? range1(Math.max(0, ...sizes)) : [...sizes].sort((a, b) => a - b);
-    const candidates = pruneCandidates(window, [...new Set([...replaceCounts, ...removeSizes])]);
+    // E8: clips that fill the freed column and the row fill (alone or with the oldest ones in new columns), or that fit
+    // a freed column or an equal share of that space
+    const candidates = pruneCandidates(window, [...new Set([...replaceCounts, ...removeSizes])], windowPicks, () => {
+      const newColumns = Math.max(1, 1 + maxPicks - g);
+      return {
+        filling: getFillingWidths(w1 + rowFill, window, newColumns),
+        fitting: [...group.map((col) => widthOf.get(col.id)!), ...shares(w1 + rowFill, newColumns)],
+      };
+    });
 
-    const evaluate = (family: 'replace' | 'remove', units: Unit[]) => {
+    // E8: width sums of the clips that stay in the row, for the bounds below: the kept columns, and the other group
+    // columns from the r-th on (the first r of them get a pick)
+    const fillSeconds = rowFillSeconds(e1, kept);
+    const sumWidths = (clips: Clip[]) => clips.reduce((acc, clip) => ({ min: acc.min + clip.widths.min, max: acc.max + clip.widths.max }), { min: 0, max: 0 });
+    const keptWidths = sumWidths(kept.map((id) => columns.get(id)!.clip));
+    const groupWidths = range1(g).map((r) => sumWidths(group.slice(r).map((col) => col.clip)));
+
+    const evaluate = (family: 'replace' | 'remove', units: readonly Unit[]) => {
       const m = clipCount(units);
       if (family === 'replace' && !sizes.has(m)) return;
       // Slots in start order: trigger, new columns (both at the animation start), then the other group columns.
       // Groups must start together, so they only go in the first ones.
-      let atOnce: Unit[] = [];
-      let later: Unit[];
+      let atOnce: readonly Unit[] = [];
+      let later: readonly Unit[];
+      const withGroups = units.some((unit) => !isSingle(unit));
       if (family === 'replace') {
         const T = 1 + Math.max(0, m - g);
-        const groups = units.filter((unit) => !isSingle(unit));
-        const singles = units.filter((unit) => isSingle(unit));
-        const groupClips = clipCount(groups);
-        if (groupClips > T) return;
-        atOnce = [...groups, ...singles.slice(0, T - groupClips)].sort((a, b) => a.unitBase - b.unitBase);
-        later = singles.slice(T - groupClips);
+        if (withGroups) {
+          const groups = units.filter((unit) => !isSingle(unit));
+          const singles = units.filter((unit) => isSingle(unit));
+          const groupClips = clipCount(groups);
+          if (groupClips > T) return;
+          atOnce = [...groups, ...singles.slice(0, T - groupClips)].sort((a, b) => a.unitBase - b.unitBase);
+          later = singles.slice(T - groupClips);
+        } else {
+          // units come in base order: the first ones start at once
+          atOnce = units.slice(0, T);
+          later = units.slice(T);
+        }
       } else {
-        if (units.some((unit) => !isSingle(unit))) return;
+        if (withGroups) return;
         later = units;
       }
       const orderCost = getOrderCost(atOnce, later);
       if (orderCost == null) return;
-      const picks = [...atOnce, ...later].flatMap((unit) => unit.clips);
+      // without groups, a unit is one clip (a chain carries the rest) and atOnce + later = units
+      const picks = withGroups ? [...atOnce, ...later].flatMap((unit) => unit.clips) : units.map((unit) => unit.clips[0]!);
+      // Bounds before building the option (E8: many subsets with large windows). The new row has the picks and the
+      // clips of the columns that don't get one; as in distributeWidths, it doesn't fit if they are too wide at their
+      // min rects, and its fill is at least what their max rects leave. With the order, the re-layout (new columns or a
+      // removed one change the widths) and the column count, that is a lower bound of the cost.
+      const newColumns = family === 'replace' ? Math.max(0, picks.length - g) : 0;
+      const rowLength = order.length - 1 + (family === 'replace' ? 1 + newColumns : 0);
+      const replaced = Math.min(g - 1, picks.length - (family === 'replace' ? 1 + newColumns : 0));
+      const rowWidths = sumWidths(picks);
+      const usable = W - (rowLength - 1) * gap;
+      if (!squeezed && rowLength > 1 && rowWidths.min + keptWidths.min + groupWidths[replaced]!.min > floorEven(usable)) return;
+      const minFill = Math.max(0, usable - rowWidths.max - keptWidths.max - groupWidths[replaced]!.max);
+      if (minFill > maxRelayoutFill) return;
+      if (cannotBeat(orderCost + fillCost(minFill, fillSeconds) + (family === 'remove' || newColumns > 0 ? RELAYOUT_WEIGHT : 0) + columnCountCost(rowLength))) return;
 
       const assignments: Assignment[] = [];
       let time: number;
@@ -848,9 +1003,8 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
         if (e1 < animationEnd || (D > 0 && duration <= EPS)) return;
         time = e1 - duration;
         assignments.push({ column: trigger.id, clip: first, start: time, transitionIn: duration });
-        const newCount = Math.max(0, picks.length - g);
-        others.slice(0, newCount).forEach((clip) => assignments.push({ column: undefined, clip, start: time, transitionIn: 0 }));
-        rest = others.slice(newCount);
+        others.slice(0, newColumns).forEach((clip) => assignments.push({ column: undefined, clip, start: time, transitionIn: 0 }));
+        rest = others.slice(newColumns);
         prev = time;
       } else {
         duration = getTransition(a1, undefined, e1, Math.max(lastStart, animationEnd));
@@ -905,7 +1059,7 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
 
       const unchanged = family === 'replace' && newClips.length === 0 && dist.fill === rowFill
         && row.every((item, i) => widthOf.get(item.column!) === dist.widths[i]);
-      let cost = orderCost + fillCost(dist.fill, rowFillSeconds(e1, kept))
+      let cost = orderCost + fillCost(dist.fill, fillSeconds)
         + (unchanged ? 0 : RELAYOUT_WEIGHT)
         + rowCost(row.map((item, i) => ({ clip: item.clip, width: dist.widths[i]!, seconds: Math.min(item.clip.duration, item.end - e1) })));
       row.forEach((item, i) => {
@@ -921,10 +1075,10 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     };
 
     for (const u of replaceCounts) {
-      for (const idx of subsets(candidates.length, u)) evaluate('replace', idx.map((i) => candidates[i]!));
+      forEachSubset(candidates, u, (units) => evaluate('replace', units));
     }
     for (const m of removeSizes) {
-      for (const idx of subsets(candidates.length, m)) evaluate('remove', idx.map((i) => candidates[i]!));
+      forEachSubset(candidates, m, (units) => evaluate('remove', units));
     }
     // with pins pending, removing just this column (no merged event) also frees room
     if (hasPendingPins() && g > 1) {
@@ -1022,15 +1176,22 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
       // new columns take clips of the window (a unit that can't wait is left for the next normal event)
       const canPick = room > 0 && time >= lastStart - EPS && getForcedUnit() == null;
       const unitCounts = canPick ? range1(room) : [];
-      const candidates = canPick ? pruneCandidates(getWindow(room), unitCounts) : [];
+      // E8: clips for new columns that fill the room the chain's clip leaves plus the fill, or an equal share of the row
+      const window = canPick ? getWindow(room) : [];
+      const candidates = canPick ? pruneCandidates(window, unitCounts, room, () => ({
+        filling: getFillingWidths(rowFill + Math.max(0, w1 - next.widths.max) - gap, window, room),
+        fitting: range1(room).map((k) => (W - (order.length + k - 1) * gap) / (order.length + k)),
+      })) : [];
       const squeezed = isRowSqueezed();
 
-      const evaluate = (units: Unit[]) => {
+      const evaluate = (units: readonly Unit[]) => {
         const atOnce = [...units].sort((a, b) => a.unitBase - b.unitBase);
         const orderCost = atOnce.length > 0 ? getOrderCost(atOnce) : 0;
         if (orderCost == null) return;
         const picks = atOnce.flatMap((unit) => unit.clips);
         if (picks.length > room) return;
+        // every term is ≥ 0: it can't beat a best option without violation that costs less (see resolveNormalEvent)
+        if (best != null && best.violation === 0 && orderCost + RELAYOUT_WEIGHT + columnCountCost(order.length + picks.length) >= best.cost - EPS) return;
         const row: RowItem[] = [];
         order.forEach((id) => {
           const col = columns.get(id)!;
@@ -1064,7 +1225,7 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
 
       evaluate([]);
       for (const k of unitCounts) {
-        for (const idx of subsets(candidates.length, k)) evaluate(idx.map((i) => candidates[i]!));
+        forEachSubset(candidates, k, (units) => evaluate(units));
       }
     }
     if (best == null || (restricted && best.violation > 0)) return inPlace;
@@ -1205,10 +1366,10 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     const clip = allClips.get(placement.clipId)!;
     if (clip.unitBase >= 0 && !startedUnits.has(clip.unitBase)) {
       if (clip.singleBase >= 0) {
-        score.order += ORDER_WEIGHT * Math.abs(singleIndex - clip.singleBase);
+        score.order += ORDER_WEIGHT * orderDistance(singleIndex, clip.singleBase);
         singleIndex += 1;
       } else {
-        score.order += ORDER_WEIGHT * Math.abs(startedUnits.size - clip.unitBase);
+        score.order += ORDER_WEIGHT * orderDistance(startedUnits.size, clip.unitBase);
       }
       startedUnits.add(clip.unitBase);
     }

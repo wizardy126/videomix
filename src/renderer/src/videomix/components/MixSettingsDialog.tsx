@@ -5,6 +5,7 @@ import { FaRandom } from 'react-icons/fa';
 
 import * as Dialog from '../../components/Dialog';
 import Button from '../../components/Button';
+import Checkbox from '../../components/Checkbox';
 import Select from '../../components/Select';
 import Switch from '../../components/Switch';
 import { formatDuration, parseDuration } from '../../util/duration';
@@ -16,6 +17,8 @@ import MixMusicSection from './MixMusicSection';
 
 // E4: sensible starting point when the switch is turned on with no previous value.
 const DEFAULT_MAX_DURATION = 60;
+// E8: the window "Unlimited" goes back to when unchecked with no previous number (the default window).
+const DEFAULT_REORDER_WINDOW = 3;
 
 // e.g. "1080p (1920×1080)", "4K (3840×2160)"
 function getResolutionLabel(output: MixOutput) {
@@ -77,6 +80,13 @@ function Section({ title, children }: { title: string, children: ReactNode }) {
 }
 
 // clamp to a non-negative even number (yuv420p needs even widths, see validateMixProject)
+// E8: an integer ≥ 0 (the schema's rule), without practical upper limit; undefined while the field isn't a number
+function toReorderWindow(value: string) {
+  const n = Math.round(Number(value));
+  if (value.trim() === '' || !Number.isFinite(n)) return undefined;
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, n));
+}
+
 function toEvenNonNegative(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.round(value / 2) * 2);
@@ -191,9 +201,26 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ order: { ...settings.order, seed: Math.floor(Math.random() * 2 ** 31) } });
   }, [onChange, settings.order]);
 
+  // E8: numeric window, or unlimited. The last number is kept to go back to it when "Unlimited" is unchecked.
+  const reorderUnlimited = settings.reorderWindow === 'unlimited';
+  const [lastReorderWindow, setLastReorderWindow] = useState(() => (typeof settings.reorderWindow === 'number' ? settings.reorderWindow : DEFAULT_REORDER_WINDOW));
+  const reorderWindowNumber = typeof settings.reorderWindow === 'number' ? settings.reorderWindow : lastReorderWindow;
+  // local draft while the field is being edited (it may be empty for a moment); each valid number is applied
+  const [reorderWindowText, setReorderWindowText] = useState<string>();
+
   const handleReorderWindowChange = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    onChange({ reorderWindow: Math.max(0, Math.min(10, Math.round(Number(e.target.value)))) });
+    setReorderWindowText(e.target.value);
+    const reorderWindow = toReorderWindow(e.target.value);
+    if (reorderWindow == null) return;
+    setLastReorderWindow(reorderWindow);
+    onChange({ reorderWindow });
   }, [onChange]);
+
+  const handleReorderWindowBlur = useCallback(() => setReorderWindowText(undefined), []);
+
+  const handleReorderUnlimitedChange = useCallback((checked: boolean | 'indeterminate') => {
+    onChange({ reorderWindow: checked === true ? 'unlimited' : lastReorderWindow });
+  }, [lastReorderWindow, onChange]);
 
   const handleTransitionTypeChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
     onChange({ transition: { ...settings.transition, type: e.target.value as TransitionType } });
@@ -372,12 +399,22 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
               )}
             </div>
 
-            {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
-            <label style={rowStyle}>
-              {t('Reorder window (± positions)')}: {settings.reorderWindow}<br />
-              <input type="range" min={0} max={10} step={1} style={{ width: '100%' }} value={settings.reorderWindow} onChange={handleReorderWindowChange} />
-              <div style={detailsStyle}>{t('How far a clip may move from its position in the list to fit the layout.')}</div>
-            </label>
+            {/* E8: no practical upper limit, or unlimited */}
+            <div style={rowStyle}>
+              <div style={{ ...inlineRowStyle, alignItems: 'flex-end', marginBottom: 0 }}>
+                {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
+                <label>
+                  {t('Reorder window (± positions)')}<br />
+                  <input type="number" min={0} step={1} style={{ width: '6em' }} disabled={reorderUnlimited} value={reorderWindowText ?? reorderWindowNumber} onChange={handleReorderWindowChange} onBlur={handleReorderWindowBlur} />
+                </label>
+                <Checkbox label={t('Unlimited')} checked={reorderUnlimited} onCheckedChange={handleReorderUnlimitedChange} />
+              </div>
+              <div style={detailsStyle}>
+                {reorderUnlimited
+                  ? t('Clips may come from anywhere in the project to fill the gaps. Among equally good options, the list order still wins.')
+                  : t('How far a clip may move from its position in the list to fit the layout.')}
+              </div>
+            </div>
           </Section>
 
           <Section title={t('Transition')}>

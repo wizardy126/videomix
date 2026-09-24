@@ -1,5 +1,5 @@
 import { normalizeClipRects, rectContains } from '../geometry';
-import { getDefaultAxis, getPlanAxis, getPlanAxisLengths } from './types';
+import { getDefaultAxis, getPlanAxis, getPlanAxisLengths, getReorderWindowSize } from './types';
 import type { ColumnPlacement, MixPlan, PlanMixInput } from './types';
 import { getEffectiveGroups, getEffectivePins, getPlanLinks, getPlanUnits } from './units';
 
@@ -40,7 +40,8 @@ export function validatePlan(plan: MixPlan, input: PlanMixInput): string[] {
   // E2/E5 (T38): chains and sequence as the planner reads them (sequence clips lose their pins and groups)
   const links = getPlanLinks(input.clips, input);
   const { clips } = links;
-  const { maxColumns, gap, reorderWindow: N, transitionDuration: D } = settings;
+  const { maxColumns, gap, transitionDuration: D } = settings;
+  const N = getReorderWindowSize(settings.reorderWindow);
   const { placements, layouts } = plan;
   // layouts are along the main axis (T29): W is the frame's width for columns, its height for rows
   const { main: W } = getPlanAxisLengths(plan);

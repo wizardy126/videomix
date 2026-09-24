@@ -59,7 +59,7 @@ interface MixSettings {
   preset: 'ultrafast' | 'veryfast' | 'fast' | 'medium' | 'slow',  // medium
   maxColumns: number,                       // 3
   gap: { width: number, color: string },    // { 0, '#000000' }
-  reorderWindow: number,                    // 3
+  reorderWindow: number | 'unlimited',      // 3; E8 (T38c): entero ≥ 0 sin tope, o ilimitada (aditivo, sigue en v4)
   order: { mode: 'list' | 'random', seed: number },
   transition: { type: TransitionType, duration: number },  // fade, 0.5
   fadeInOut: boolean,                       // true
@@ -208,7 +208,7 @@ interface MixPlan {
 2. **Nunca hay más de `maxColumns` columnas visibles**, tampoco durante una animación (unión de las columnas de los dos keyframes).
 3. En cada keyframe, columnas + huecos entre columnas + relleno cubren `[0, W]` sin solaparse.
 4. **Sustitución en columna**: el clip entrante empieza `transitionIn` antes de que termine el saliente, con `transitionIn = min(D, saliente/2, entrante/2)` (se acorta además en los casos límite descritos en §3.3). Ese solape es el xfade.
-5. **El orden solo se altera dentro de la ventana `reorderWindow`**: ordenando por `startTime` (empates por índice), ningún clip queda a más de N posiciones de su índice en la lista base. En modo aleatorio, la lista base es la permutación determinista de la semilla.
+5. **El orden solo se altera dentro de la ventana `reorderWindow`**: ordenando por `startTime` (empates por índice), ningún clip queda a más de N posiciones de su índice en la lista base. En modo aleatorio, la lista base es la permutación determinista de la semilla. Con `'unlimited'` (E8), N = ∞ (`getReorderWindowSize`).
 6. **Inicio**: todas las columnas iniciales empiezan en `t = 0`; las columnas nuevas empiezan en el `time` de su keyframe.
 7. **Final**: no hay keyframes después del inicio del último clip; una columna que queda sin clip no desaparece (salvo si la quitó un re-layout justo cuando terminaba su último clip).
 8. **Determinismo**: la misma entrada produce el mismo plan.
@@ -245,7 +245,7 @@ Simulación por eventos "termina el clip de una columna". `D` = duración de la 
    4. **Orden de inicio monótono**: el xfade se acorta si hace falta para que ningún clip empiece antes que el último elegido, y una opción se descarta si algún clip de la fila terminaría antes del último inicio. Así el orden de elección coincide con el de inicio. Un re-layout tampoco puede empezar antes de que acabe la animación anterior (se acorta su xfade o se descarta la opción).
 4. **Cola vacía**: las columnas se van quedando sin clip y su área es relleno; no hay más keyframes. Al final, una pasada marca con `transitionOut` los clips que hacen fundido al relleno (§3.1).
 
-**Poda y complejidad**: por evento se evalúan como mucho `SUBSET_BUDGET` = 1000 subconjuntos (la lista de candidatos se recorta, conservando los más antiguos, que son los que la ventana obliga a tomar). Cada evaluación cuesta `O(maxColumns)` más `distributeWidths`. Total `O(clips × 1000 × maxColumns)` en el peor caso; 200 clips con `maxColumns` = 6 y ventana 10 se planifican en unos 100 ms.
+**Poda y complejidad**: por evento se evalúan como mucho `SUBSET_BUDGET` = 1000 subconjuntos (la lista de candidatos se recorta, conservando los más antiguos, que son los que la ventana obliga a tomar; con una ventana grande, ver §3.9). Cada evaluación cuesta `O(maxColumns)` más `distributeWidths`. Total `O(clips × 1000 × maxColumns)` en el peor caso. Desde T38c, antes de construir cada opción de re-layout se descartan las que no pueden ganar (cota inferior exacta, §3.9), sin cambiar ningún plan. 200 clips con `maxColumns` = 6 y ventana 10 se planifican en unos 100–450 ms (primera llamada, con la validación de desarrollo; el peor caso es 1:1 con fijados, grupos y cadenas).
 
 ### 3.4 Puntuación (menor es mejor; constantes en `planMix.ts`)
 
@@ -325,6 +325,19 @@ Detalle y ejemplos en las notas de [T38b](execution/T38b-v3-ampliar-max.md).
 - **Avisos**: `extended` por clip (píxeles de fuente fuera del máx. y tramo en que se usan); `pillarbox`/`letterbox`, `upscale` y `fill` se calculan con los recortes y keyframes ampliados. `truncatePlan` recorta el tramo al límite.
 - **Render y previsualización en vivo** usan `placement.extendedMaxRect` con la misma función (`buildVideoGraph`, `previewDraw.getClipCellDraw`), así que no pueden divergir.
 - Sin clips ampliables, el plan es el mismo (mismos snapshots).
+
+### 3.9 Ventana de reorden grande o ilimitada (E8, T38c)
+
+Detalle, mediciones y justificación en las notas de [T38c](execution/T38c-v3-reorden-ilimitado.md).
+
+- **Modelo**: `settings.reorderWindow: number | 'unlimited'` (entero ≥ 0 sin tope; ampliación aditiva, sigue en v4). En el planificador, `getReorderWindowSize` da `Infinity` para `'unlimited'`; `validatePlan` lo acepta igual (regla 5 con N = ∞).
+- **Hasta `LARGE_WINDOW` = 10** (el máximo de la antigua barra) el planificador es exactamente el de antes: mismos planes (comprobado con miles de proyectos aleatorios con fijados, grupos, cadenas, secuencia y límite) y mismos snapshots.
+- **Ventana grande** (> 10, o ilimitada):
+  - **Coste de orden**: la distancia hacia delante, con tope en 10 posiciones; un clip que se ha quedado atrás cuesta 0. Así un clip que encaja puede venir de cualquier sitio a un precio acotado (unos 3 re-layouts), y el orden de la lista sigue desempatando entre opciones igual de buenas: el más antiguo gana los empates y un clip saltado vuelve en cuanto es tan bueno como los demás. La ventana (regla 5) sigue siendo un límite duro si es finita. La puntuación global (`PlanScore`) usa la misma medida.
+  - **Poda por encaje**: si la ventana no cabe en `SUBSET_BUDGET`, los candidatos son, por prioridad, los que la ventana obliga a tomar, los más antiguos hasta `OLDEST_SHARE` = 75 % del cupo y, el resto, los que mejor **encajan** en el hueco (`getFitKey`): primero los que llenan el espacio libre sin relleno (columna liberada + relleno, solos o junto a los candidatos más antiguos), luego los que caben en una columna liberada o en un reparto a partes iguales del espacio, y después por cercanía (log del cociente de anchos); empates por antigüedad. Se devuelven en orden base y el resultado es determinista. En la fila inicial el espacio es el fotograma (menos los fijados en 0); en un cambio de cadena, lo que deja el clip de la cadena más el relleno.
+  - La sustitución directa y las opciones "en su sitio" ya recorrían toda la ventana: con ventana ilimitada, la sustitución directa toma el primer clip de la lista (en cualquier posición) que encaja en el hueco.
+- **Cotas** (todas las ventanas): cada término del coste es ≥ 0, así que una opción de re-layout se descarta antes de construirla si su orden + re-layout + número de columnas + el relleno mínimo que dejan los máx. de su fila ya no mejora la mejor opción sin violación; y si los mín. de su fila no caben (como en `distributeWidths`). Es exacto: no cambia ningún plan.
+- **Rendimiento** (200 clips, primera llamada, con la validación de desarrollo): < 1 s en todos los casos. Con ventana ilimitada, 90–210 ms sin fijados ni grupos y 140–590 ms con fijados, grupos, cadenas, secuencia y límite. El peor caso es 1:1 con 6 columnas, que planifica los dos ejes.
 
 ## 4. Render de vídeo con ffmpeg
 

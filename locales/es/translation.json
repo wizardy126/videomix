@@ -957,6 +957,8 @@
   "Gap between columns or rows (px)": "Separación entre columnas o filas (px)",
   "Gap color": "Color de la separación",
   "How far a clip may move from its position in the list to fit the layout.": "Cuánto puede alejarse un clip de su posición en la lista para encajar en el montaje.",
+  "Unlimited": "Ilimitado",
+  "Clips may come from anywhere in the project to fill the gaps. Among equally good options, the list order still wins.": "Los clips pueden venir de cualquier punto del proyecto para rellenar los huecos. Entre opciones igual de buenas, sigue mandando el orden de la lista.",
   "Later": "Más tarde",
   "List order": "Orden de la lista",
   "Locate {{name}}": "Localizar {{name}}",

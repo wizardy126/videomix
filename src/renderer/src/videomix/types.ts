@@ -198,8 +198,11 @@ export const mixSettingsSchema = z.object({
   maxColumns: z.number().int().min(1),
   /** Separation between columns. `width` should be even (yuv420p), see validateMixProject. */
   gap: z.object({ width: z.number().int().nonnegative(), color: hexColorSchema }),
-  /** A clip may move at most this many positions from its list index. */
-  reorderWindow: z.number().int().nonnegative(),
+  /**
+   * A clip may move at most this many positions from its list index. E8 (v4, T38c): no upper bound, or `'unlimited'`
+   * (clips may come from anywhere in the project to fill the gaps; see 04-diseno §3.9).
+   */
+  reorderWindow: z.union([z.number().int().nonnegative(), z.literal('unlimited')]),
   order: z.object({ mode: z.enum(['list', 'random']), seed: z.number().int() }),
   /** Global transition; `duration` in seconds. */
   transition: z.object({ type: transitionTypeSchema, duration: z.number().nonnegative() }),

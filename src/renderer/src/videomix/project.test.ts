@@ -195,6 +195,15 @@ describe('parseMixProject', () => {
     expect(parsed.settings.fps).toBe(60);
   });
 
+  test('reorder window (E8, v4): any integer ≥ 0 or "unlimited", additive (no version change)', () => {
+    for (const reorderWindow of [0, 3, 10, 11, 250, 100_000, 'unlimited'] as const) {
+      const project = { ...makeProject(), settings: { ...defaultMixSettings, reorderWindow } };
+      expect(parseMixProject(JSON5.parse(JSON5.stringify(project))).settings.reorderWindow).toBe(reorderWindow);
+    }
+    // a v4 file saved before E8 (a number) still opens as it was
+    expect(parseMixProject({ ...makeProject(), settings: { ...defaultMixSettings, reorderWindow: 7 } }).settings.reorderWindow).toBe(7);
+  });
+
   test('rejects non-objects and bad versions', () => {
     expect(() => parseMixProject(null)).toThrow('not an object');
     expect(() => parseMixProject([])).toThrow('not an object');
@@ -228,6 +237,9 @@ describe('parseMixProject', () => {
     ['unknown hardware encoder', broken((p) => Object.assign(p.settings.encoder, { hardware: 'amf' }))],
     ['music track without id', broken((p) => p.settings.musicPlaylist.tracks.push({ path: 'm.mp3', absolutePath: '/m.mp3', volumeDb: 0 } as never))],
     ['negative crossfade', broken((p) => Object.assign(p.settings.musicPlaylist, { crossfade: -1 }))],
+    ['negative reorder window', broken((p) => Object.assign(p.settings, { reorderWindow: -1 }))],
+    ['fractional reorder window', broken((p) => Object.assign(p.settings, { reorderWindow: 2.5 }))],
+    ['unknown reorder window', broken((p) => Object.assign(p.settings, { reorderWindow: 'infinite' }))],
     ['empty group id', broken((p) => Object.assign(p.clips[0]!, { groupId: '' }))],
     ['bad text entry', broken((p) => p.overlays.push({ ...createTextOverlay({ id: 'o', name: '', text: 'a' }), entry: { kind: 'bounce', duration: 1 } } as unknown as MixOverlay))],
     ['bad text entry side', broken((p) => p.overlays.push({ ...createTextOverlay({ id: 'o', name: '', text: 'a' }), entry: { kind: 'slide', from: 'center', duration: 1 } } as unknown as MixOverlay))],
