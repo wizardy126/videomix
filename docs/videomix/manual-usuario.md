@@ -75,6 +75,8 @@ La barra de herramientas sobre el vídeo permite:
 
 El montaje elige, para cada clip y cada columna, un recorte que respeta el mínimo, cabe dentro del máximo y tiene la proporción de esa columna; si hace falta ampliar mucho la imagen (más de ×2), el clip lo indica en su fila de la lista.
 
+**Ampliar más allá del máx. si hace falta** (activado por defecto en cada clip): si, respetando los máximos, una disposición dejaría relleno (o franjas a los lados o arriba y abajo de un clip), el montaje muestra como último recurso más material de la fuente de los clips que lo permiten, a lo ancho en columnas y a lo alto en filas, centrado en el máximo (si a un lado no hay más imagen, se amplía por el otro). No se aplica al final del vídeo. Se desactiva por clip con el icono de ampliar de su fila o con su menú contextual, y los clips ampliados se marcan en la pestaña **Montaje** (con el tramo y los píxeles ampliados) y en la confirmación previa al render.
+
 ### La lista de clips
 
 El panel derecho lista **todos** los clips del proyecto, de cualquier fuente, en el orden en que se montarán (reordenable arrastrando el asa `⋮⋮`), con una **miniatura** del fotograma de inicio ya recortado a su rectángulo máximo. Por cada clip se puede:
@@ -82,6 +84,7 @@ El panel derecho lista **todos** los clips del proyecto, de cualquier fuente, en
 - cambiar su **nombre** (clic sobre el nombre, escribe y pulsa Intro);
 - cambiar su **color** (clic en el número de la fila);
 - **silenciar** su audio o ajustar su **ganancia** (−20…+20 dB);
+- activar o desactivar **Ampliar más allá del máx. si hace falta** (ver arriba);
 - ver su **duración** y avisos (clip muy corto, sin mínimo definido, etc.);
 - con el menú contextual (clic derecho): duplicar, eliminar, ir a su fuente, **fijar** o **agrupar** (ver más abajo).
 

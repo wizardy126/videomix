@@ -45,6 +45,7 @@ interface MixClip {
   gainDb: number,          // ganancia manual adicional (0 por defecto)
   pinTime?: number | undefined,  // v3 (A4): inicio fijado en el vídeo final (s)
   groupId?: string | undefined,  // v3 (A4): los clips con el mismo id empiezan juntos (≥ 2 clips)
+  extendBeyondMax?: boolean | undefined,  // v4 (E7, T38b): ampliar más allá del máx. si hace falta; sin definir = true
 }
 
 type TransitionType = 'fade' | 'dissolve' | 'fadeblack' | 'wipeleft' | 'wiperight' | 'wipeup' | 'wipedown'
@@ -137,6 +138,12 @@ El planificador intenta evitar estos casos, pero el generador debe soportarlos.
 - **Escalado**: `factor = min(anchoCelda / C.w, H / C.h)` cubre los tres casos (`getScaleFactor`).
 - **Separación impar**: con un número impar de huecos entre columnas, el ancho útil es impar y queda 1 px de relleno; `validateMixProject` avisa (`odd-gap`).
 
+### 2.5 Ampliar más allá del máx. (E7, T38b)
+
+- **Dirección**: el eje principal del plan (`horizontal` en columnas, `vertical` en filas). `getExtensionRoom(max, fuente, dirección)`: píxeles pares que le quedan a la fuente fuera del máx. en esa dirección (los dos lados juntos; 0 si el máx. no está dentro del fotograma).
+- **Máx. ampliado**: `extendMaxRect(max, fuente, dirección, extra)`: el máx. normalizado crece `extra` (par, como mucho `room`), **centrado en el máx.** y desplazado (asimétrico) si un lado llega al borde; conserva la posición y el tamaño en el otro eje.
+- **Recorte**: `getExtendedCropForAspect(max, mín, máxAmpliado, a)` es `getCropForAspect` salvo cuando la celda es más larga en el eje principal de lo que permite el máx. (pillarbox en columnas, letterbox en filas). Entonces parte del recorte del límite del intervalo (el ancho del máx. con la altura del mín., y su posición) y lo alarga hasta la proporción de la celda, centrado en el máx. y desplazado dentro del máx. ampliado. Si no llega, usa todo el ampliado y el resto sigue siendo pillarbox/letterbox. Continuo con el recorte normal en `aMax` (sirve para las animaciones). Todo en píxeles de visualización; el render lo pasa a codificados en el `crop` (T35).
+
 ## 3. Planificador de montaje (puro)
 
 Carpeta: `src/renderer/src/videomix/planner/` (implementado en T10 y ajustado en T10b; detalles y justificación en [T10](execution/T10-planificador.md) y [T10b](execution/T10b-ajuste-planificador.md)).
@@ -154,6 +161,7 @@ interface ColumnPlacement {        // un clip reproduciéndose en una columna
   endTime: number,                 // startTime + duración del clip
   transitionIn: number,            // xfade con el clip anterior de la columna (0 si es el primero); ≤ D
   transitionOut?: number,          // (T10b) fundido al relleno al final del vídeo; ausente = 0 (ver abajo)
+  extendedMaxRect?: Rect,          // (E7, T38b) máx. ampliado por el planificador; recortes con getExtendedCropForAspect
 }
 
 interface LayoutKeyframe {         // disposición de la fila a partir de un instante
@@ -170,7 +178,8 @@ type PlanWarning =
   | { type: 'fill', time, width }                       // keyframe con relleno estructural > 1 px
   | { type: 'pin-shifted', clipId, pinTime, time }      // (T30) un clip fijado no empieza en su momento sino en `time`
   | { type: 'group-split', groupId, clipIds }           // (T30) los clips de un grupo no empiezan todos a la vez
-  | { type: 'truncated', time, seconds, clipIds, cutClipIds }; // (T38, truncatePlan) corte en la duración máxima
+  | { type: 'truncated', time, seconds, clipIds, cutClipIds } // (T38, truncatePlan) corte en la duración máxima
+  | { type: 'extended', clipId, pixels, time, endTime };      // (E7, T38b) píxeles de fuente mostrados fuera del máx. en [time, endTime]
 
 interface MixPlan {
   width: number, height: number, duration: number,
@@ -191,7 +200,7 @@ interface MixPlan {
 - **Final** (§4.3 de requisitos): cuando ya han empezado todos los clips, una columna cuyo clip termina **sigue en el layout sin clip**; su área se muestra como relleno y no se añade ningún keyframe (no hay re-layout ni re-expansión).
 - **Fundido de salida al final** (T10b, `ColumnPlacement.transitionOut`): un clip que termina sin sucesor en su columna, cuya columna sigue en el layout (no la quita un re-layout) y que no termina con el vídeo hace un fundido **hacia el relleno** durante `[endTime − transitionOut, endTime]`, con el tipo de la transición global. `transitionOut = min(D, duración/2)`, igual que un xfade, así que nunca se solapa con su `transitionIn`. En los demás casos el campo no está (equivale a 0): con sucesor, el xfade es el `transitionIn` del siguiente; en una columna quitada, el clip encoge a 0; y el clip que termina con el vídeo queda cubierto por el fundido a negro global (§4.5 de requisitos). El fundido puede coincidir con una animación de otra columna (p. ej. en un evento fusionado): como con los xfades, T11 fusiona los intervalos en un mismo bloque de render.
 - Durante una animación, el clip saliente de la columna que la dispara (y el de una columna de un evento fusionado) se muestra con anchos distintos a los suyos: el generador lo recorta con `getCropForAspect` (que devuelve pillarbox/letterbox si hace falta).
-- Se elimina `crops` del diseño original: el generador recalcula los recortes con `getCropForAspect(maxRect, minRect, width / H)`.
+- Se elimina `crops` del diseño original: el generador recalcula los recortes con `getCropForAspect(maxRect, minRect, width / H)` o, desde T38b, `getExtendedCropForAspect(maxRect, minRect, placement.extendedMaxRect, width / H)` (igual si no hay ampliación).
 
 ### 3.2 Reglas: invariantes que los tests deben verificar
 
@@ -211,6 +220,8 @@ interface MixPlan {
 14. **Cadenas** (E2, T38): los clips de una cadena están en la misma columna, seguidos (nada entre medias) y en su orden, con `transitionIn` = 0 (`linkTransition: 'cut'`) o exactamente `min(D, a/2, b/2)` (`'global'`). En la ventana de orden una cadena es un clip suelto (el primero); los demás no cuentan. La regla 7 ("columna vacía con clips pendientes") solo mira los inicios de unidades: al final, una cadena o la secuencia puede seguir sola mientras otras columnas pasan a relleno.
 15. **Secuencia siempre visible** (E5, T38): es una cadena cuyo primer clip empieza en `t = 0`; con la regla 14 y las de columnas, está en pantalla (en una columna de ancho > 0) hasta que se acaba.
 16. **Plan truncado** (E4, T38): con aviso `truncated`, `duration` = `time` (≤ `maxDuration` de los ajustes), ningún clip empieza en el límite o después ni termina después, los clips que faltan son exactamente `clipIds` (y una cadena solo pierde su final), los cortados son `cutClipIds` y ningún keyframe empieza en el límite o después. El resto de reglas se comprueban sobre las duraciones sin cortar.
+
+17. **Ampliación** (E7, T38b): `extendedMaxRect` solo en clips con `extendBeyondMax`; pares, dentro del fotograma de la fuente, contiene el máx. y solo crece en el eje principal. Un aviso `extended` corresponde a un clip ampliado y cae dentro de su intervalo. Los tests comprueban además que el relleno de cada keyframe no aumenta, que las decisiones (clips, columnas, tiempos, keyframes) son las mismas que sin ampliación y que ningún recorte sale de la fuente, en los tres formatos.
 
 Además: los keyframes no se solapan (`time ≥ anterior.time + anterior.transitionDuration`) y `transitionDuration ≤ D`.
 
@@ -301,6 +312,19 @@ Detalle, ejemplos antes/después y justificación en las notas de [T38](executio
   - filtra los avisos de clips perdidos o posteriores al límite y añade `truncated` con los segundos perdidos, los clips perdidos y los cortados (cortar dos veces acumula).
   - Overlays y sonidos: `resolveOverlayTimes` ya los recorta a `plan.duration`; hay que resolverlos con los *placements* del plan completo y la duración cortada, para que un overlay anclado a un clip perdido quede fuera del vídeo en vez de perder el ancla.
 - Sin cadenas, secuencia ni límite (o si el contenido cabe en el límite), los planes no cambian (mismos snapshots).
+
+### 3.8 Ampliar más allá del máx. (E7, T38b)
+
+Detalle y ejemplos en las notas de [T38b](execution/T38b-v3-ampliar-max.md).
+
+- **Entrada**: `PlannerClip.extendBeyondMax = { frame }` (tamaño de visualización de la fuente) si el flag del clip no es `false` y se conoce el tamaño (`getPlannerInput({ clips, settings, sources })`). Sin `sources` (p. ej. la estimación de duración, que no depende de esto) no se amplía nada.
+- **Último recurso**: las opciones, la puntuación y la elección del eje en 1:1 no cambian (el `PlanScore` es el del plan sin ampliar). `extendPlan` (`extendPlan.ts`, puro) es una pasada sobre el plan terminado, antes de los avisos:
+  1. **Relleno estructural → columnas más largas**: en cada keyframe con relleno, cada columna puede crecer lo que permitan **todos** los clips que muestra mientras el keyframe está quieto (`[time + transitionDuration, siguiente)`): `min(floorPar((máx + room)·cruce / mín_cruce) − ancho)`, 0 si alguno no es ampliable. El relleno (par) se reparte en proporción a esa capacidad (material disponible), en unidades de 2 px por mayor resto y saturando; lo que no cabe sigue siendo relleno, centrado como en `buildLayout`. Las posiciones se recalculan con la separación; el orden y las columnas no cambian (ADR-001 se mantiene).
+  2. **Cada colocación** cuyas celdas (keyframes quietos que la solapan) son más largas de lo que permite su máx. —su propio pillarbox/letterbox o una columna recién alargada— recibe `extendedMaxRect` con la ampliación máxima que necesitan (limitada a `room`). El recorte de cada fotograma lo da `getExtendedCropForAspect`, así que en celdas más cortas usa menos.
+- **Final del vídeo**: no se añade ningún keyframe; las columnas que terminan sin sucesor pasan a relleno como antes (no se re-expande).
+- **Avisos**: `extended` por clip (píxeles de fuente fuera del máx. y tramo en que se usan); `pillarbox`/`letterbox`, `upscale` y `fill` se calculan con los recortes y keyframes ampliados. `truncatePlan` recorta el tramo al límite.
+- **Render y previsualización en vivo** usan `placement.extendedMaxRect` con la misma función (`buildVideoGraph`, `previewDraw.getClipCellDraw`), así que no pueden divergir.
+- Sin clips ampliables, el plan es el mismo (mismos snapshots).
 
 ## 4. Render de vídeo con ffmpeg
 
