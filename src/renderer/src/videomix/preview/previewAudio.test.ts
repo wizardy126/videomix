@@ -32,6 +32,25 @@ describe('compensation', () => {
   });
 });
 
+describe('direct cuts (chains, T39)', () => {
+  test('the preview switches clips at the cut, without the render\'s de-click fades', () => {
+    const plan = {
+      duration: 8,
+      placements: [
+        { clipId: 'a', column: 0, startTime: 0, endTime: 4, transitionIn: 0 },
+        { clipId: 'b', column: 0, startTime: 4, endTime: 8, transitionIn: 0 },
+      ],
+      layouts: testPlans.static.layouts,
+    };
+    const model = buildPreviewAudioModel({ plan, clips, settings: testSettings({ fadeInOut: false }), loudness: { a: measurement(-16), b: measurement(-16) } });
+    expect(model.clips.map((c) => [c.clipId, c.fadeIn, c.fadeOut])).toEqual([['a', 0.01, 0], ['b', 0, 0.01]]);
+    // one clip at full level on both sides of the cut: no dip, no compensation change
+    const [a, b] = model.clips;
+    for (const t of [3.99, 4]) expect(getPreviewClipGain(model, a!, t) / a!.gain + getPreviewClipGain(model, b!, t) / b!.gain).toBeCloseTo(1);
+    expect(model.compensation.steps).toEqual([]);
+  });
+});
+
 describe('buildPreviewAudioModel', () => {
   const loudness = { a: measurement(-20), b: measurement(-16) };
   const model = buildPreviewAudioModel({ plan: testPlans.substitutions, clips, settings: testSettings(), loudness });

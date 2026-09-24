@@ -72,6 +72,15 @@ export function getRenderWarningText(warning: RenderWarning) {
         ? i18n.t('Clip "{{clip}}" shows {{pixels}} px above and below its max rectangle from {{from}} to {{to}}, to avoid fill', range)
         : i18n.t('Clip "{{clip}}" shows {{pixels}} px beside its max rectangle from {{from}} to {{to}}, to avoid fill', range);
     }
+    case 'truncated': {
+      const cut = i18n.t('The mix is longer than its maximum duration: it is cut at {{time}} with the fade-out, {{seconds}} s are left out', { time: formatDuration({ seconds: warning.time, shorten: true }), seconds: Math.round(warning.seconds) });
+      const clips = (names: string[]) => names.map((name) => `"${name}"`).join(', ');
+      return [
+        cut,
+        ...(warning.lostClipNames.length > 0 ? [i18n.t('Clips left out: {{clips}}', { clips: clips(warning.lostClipNames) })] : []),
+        ...(warning.cutClipNames.length > 0 ? [i18n.t('Clips cut: {{clips}}', { clips: clips(warning.cutClipNames) })] : []),
+      ].join('. ');
+    }
     default: { return ''; }
   }
 }

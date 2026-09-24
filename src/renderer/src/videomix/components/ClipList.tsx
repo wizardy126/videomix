@@ -1,10 +1,10 @@
 import type { ChangeEventHandler, CSSProperties, FocusEventHandler, KeyboardEventHandler, MouseEventHandler } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FaClone, FaExclamationTriangle, FaGripVertical, FaInfoCircle, FaMinus, FaPlus, FaThumbtack, FaVolumeMute, FaVolumeUp } from 'react-icons/fa';
+import { FaClone, FaExclamationTriangle, FaEye, FaGripVertical, FaInfoCircle, FaLink, FaMinus, FaPlus, FaThumbtack, FaTimes, FaUnlink, FaVolumeMute, FaVolumeUp } from 'react-icons/fa';
 import { MdCropLandscape, MdCropPortrait, MdOpenInFull, MdRotate90DegreesCw } from 'react-icons/md';
-import type { DragEndEvent, DragStartEvent, UniqueIdentifier } from '@dnd-kit/core';
-import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
+import type { DragEndEvent, DragOverEvent, DragStartEvent, UniqueIdentifier } from '@dnd-kit/core';
+import { DndContext, closestCenter, PointerSensor, useDroppable, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -26,6 +26,7 @@ import { clipGainValues, getClipWarnings } from '../clips';
 import { getClipSelectModifiers } from '../hooks/useMixClipPins';
 import { canExtendBeyondMax } from '../planner/plannerInput';
 import type { ClipSelectModifiers, UseMixClipPins } from '../hooks/useMixClipPins';
+import type { ClipLinkInfo } from '../clipLinks';
 
 const buttonBaseStyle: CSSProperties = {
   margin: '0 3px', borderRadius: 3, color: 'white', cursor: 'pointer', userSelect: 'none',
@@ -41,7 +42,7 @@ const stopPropagation: MouseEventHandler = (e) => e.stopPropagation();
 const thumbnailStyle: CSSProperties = { width: 30, height: 30, flexShrink: 0, objectFit: 'cover', borderRadius: 3 };
 
 // eslint-disable-next-line react/display-name
-const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, groupColor, getClipMenu, dragging, settings, onSelect, onUpdate, onDuplicate, onRemove, onGoToSource }: {
+const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, groupColor, linkInfo, sequenceIndex, getClipMenu, onSetLink, dragging, settings, onSelect, onUpdate, onDuplicate, onRemove, onGoToSource }: {
   clip: MixClip,
   index: number,
   source: MixSource | undefined,
@@ -51,7 +52,12 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
   /** A4 (T30): its pin time (its own or its group's) and its group's colour. */
   pinTime: number | undefined,
   groupColor: string | undefined,
+  /** E2 (T39): its place in a chain of linked clips (undefined: it can't be in one). */
+  linkInfo: ClipLinkInfo | undefined,
+  /** E5 (T39): its index in the always-visible sequence. */
+  sequenceIndex: number | undefined,
   getClipMenu: UseMixClipPins['getClipMenu'],
+  onSetLink: UseMixClipPins['userSetClipLink'],
   dragging?: boolean | undefined,
   settings: Pick<MixSettings, 'transition'>,
   onSelect: (id: string, modifiers?: ClipSelectModifiers) => void,
@@ -159,6 +165,12 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
 
   const MuteIcon = clip.muted ? FaVolumeMute : FaVolumeUp;
 
+  // E2 (T39): the link with the previous clip of its source can be broken (or made again) from its indicator
+  const handleLinkClick = useCallback<MouseEventHandler>((e) => {
+    e.stopPropagation();
+    if (linkInfo != null) onSetLink(clip.id, !linkInfo.linked);
+  }, [clip.id, linkInfo, onSetLink]);
+
   return (
     <div ref={setRef} role="button" tabIndex={-1} data-testid="clip-row" onClick={handleClick} style={style}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '.3em' }}>
@@ -195,6 +207,29 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
           onClick={stopPropagation}
           style={{ ...plainInputStyle, flexGrow: 1, minWidth: '3em' }}
         />
+        {/* E5 (T39): in the always-visible sequence */}
+        {sequenceIndex != null && (
+          <span data-testid="clip-sequence-indicator" title={t('In the always-visible sequence (number {{number}}): always on screen, in a slot of its own', { number: sequenceIndex + 1 })} style={{ display: 'flex', alignItems: 'center', gap: '.15em', whiteSpace: 'nowrap', fontSize: '.8em', color: 'var(--grass-11)', flexShrink: 0 }}>
+            <FaEye style={iconStyle} />
+            {sequenceIndex + 1}
+          </span>
+        )}
+        {/* E2 (T39): linked with the previous clip of its source (a chain; its icon breaks the link), or a link broken by hand */}
+        {linkInfo != null && linkInfo.length > 1 && (
+          <span
+            data-testid="clip-link-indicator"
+            title={linkInfo.linked
+              ? t('Linked with the previous clip of its source ({{position}} of {{length}} in the chain): they play one after the other in the same slot. Click to break the link', { position: linkInfo.position, length: linkInfo.length })
+              : t('Starts a chain of {{length}} linked clips of its source: they play one after the other in the same slot', { length: linkInfo.length })}
+            style={{ display: 'flex', alignItems: 'center', gap: '.15em', whiteSpace: 'nowrap', fontSize: '.8em', color: 'var(--blue-11)', opacity: linkInfo.linked ? 1 : 0.7, flexShrink: 0 }}
+          >
+            <FaLink role={linkInfo.linked ? 'button' : undefined} data-testid={linkInfo.linked ? 'clip-link-toggle' : undefined} onClick={linkInfo.linked ? handleLinkClick : undefined} style={{ ...iconStyle, cursor: linkInfo.linked ? 'pointer' : undefined }} />
+            {`${linkInfo.position}/${linkInfo.length}`}
+          </span>
+        )}
+        {linkInfo != null && !linkInfo.linked && linkInfo.previousId != null && (clip.link === 'break' || linkInfo.autoLinked) && (
+          <FaUnlink role="button" data-testid="clip-unlinked-indicator" onClick={handleLinkClick} title={t('Link with the previous clip broken. Click to link it again')} style={{ ...iconStyle, cursor: 'pointer', opacity: 0.6, fontSize: '.8em' }} />
+        )}
       </div>
 
       {/* T34: moved down from the first row (with the drag handle, thumbnail, color badge and name) so the name field has the whole row's width */}
@@ -248,6 +283,125 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
   );
 });
 
+// E5 (T39): the always-visible sequence's items share the list's DndContext with prefixed ids (a clip is in both)
+const SEQUENCE_ITEM_PREFIX = 'sequence:';
+const SEQUENCE_DROP_ZONE = 'sequence-drop-zone';
+const toSequenceItemId = (clipId: string) => `${SEQUENCE_ITEM_PREFIX}${clipId}`;
+const fromSequenceItemId = (id: UniqueIdentifier) => (String(id).startsWith(SEQUENCE_ITEM_PREFIX) ? String(id).slice(SEQUENCE_ITEM_PREFIX.length) : undefined);
+
+const sequenceThumbnailStyle: CSSProperties = { width: 20, height: 20, flexShrink: 0, objectFit: 'cover', borderRadius: 2 };
+
+/** A clip of the always-visible sequence: sortable in the sequence, removable, click selects it. */
+// eslint-disable-next-line react/display-name
+const SequenceRow = memo(({ clip, index, thumbnailUrl, isSelected, dragging, onSelect, onRemove }: {
+  clip: MixClip,
+  index: number,
+  thumbnailUrl: string | undefined,
+  isSelected: boolean,
+  dragging?: boolean | undefined,
+  onSelect: (id: string, modifiers?: ClipSelectModifiers) => void,
+  onRemove: (clipIds: string[]) => void,
+}) => {
+  const { t } = useTranslation();
+  const sortable = useSortable({ id: toSequenceItemId(clip.id), transition: { duration: 150, easing: 'ease-in-out' } });
+  const style = useMemo<CSSProperties>(() => ({
+    visibility: sortable.isDragging ? 'hidden' : undefined,
+    transform: CSS.Transform.toString(sortable.transform),
+    transition: sortable.transition,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '.3em',
+    padding: '1px 4px',
+    background: 'var(--gray-1)',
+    border: `1px solid ${isSelected ? 'var(--gray-10)' : 'transparent'}`,
+    borderRadius: 4,
+    fontSize: 12,
+    color: 'var(--gray-12)',
+    cursor: 'pointer',
+  }), [isSelected, sortable.isDragging, sortable.transform, sortable.transition]);
+  const handleClick = useCallback<MouseEventHandler<HTMLDivElement>>((e) => {
+    e.currentTarget.blur();
+    onSelect(clip.id, getClipSelectModifiers(e));
+  }, [clip.id, onSelect]);
+  const handleRemove = useCallback<MouseEventHandler>((e) => {
+    e.stopPropagation();
+    onRemove([clip.id]);
+  }, [clip.id, onRemove]);
+  const setRef = useCallback((node: HTMLDivElement | null) => sortable.setNodeRef(node), [sortable]);
+  return (
+    <div ref={setRef} role="button" tabIndex={-1} data-testid="sequence-row" onClick={handleClick} style={style}>
+      <div
+        // eslint-disable-next-line react/jsx-props-no-spreading
+        {...sortable.attributes}
+        // eslint-disable-next-line react/jsx-props-no-spreading
+        {...sortable.listeners}
+        role="button"
+        tabIndex={-1}
+        data-testid="sequence-drag-handle"
+        style={{ cursor: dragging ? 'grabbing' : 'grab', display: 'flex', alignItems: 'center', opacity: 0.5 }}
+      >
+        <FaGripVertical style={{ fontSize: '.8em' }} />
+      </div>
+      <span style={{ opacity: 0.7, minWidth: '1.2em' }}>{index + 1}</span>
+      {thumbnailUrl != null ? <img src={thumbnailUrl} alt="" draggable={false} style={sequenceThumbnailStyle} /> : <div style={sequenceThumbnailStyle} />}
+      <span style={{ flexGrow: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{clip.name}</span>
+      <span style={{ opacity: 0.7 }}>{formatTime(getClipDuration(clip))}</span>
+      <FaTimes role="button" data-testid="sequence-remove" title={t('Remove from the always-visible sequence')} onClick={handleRemove} style={{ ...iconStyle, cursor: 'pointer', opacity: 0.6 }} />
+    </div>
+  );
+});
+
+/**
+ * E5 (T39): the always-visible sequence, above the clip list. Its clips play one after the other in a slot of their
+ * own, always on screen. Clips are added by dragging them here from the list (or with their context menu), sorted by
+ * dragging, and removed with their ×.
+ */
+// eslint-disable-next-line react/display-name
+const SequenceSection = memo(({ clips, thumbnailUrls, selectedClipIds, dropActive, onSelect, onRemove }: {
+  /** The sequence's clips, in order. */
+  clips: MixClip[],
+  thumbnailUrls: ReadonlyMap<string, string>,
+  selectedClipIds: ReadonlySet<string>,
+  /** A clip of the list is being dragged over the section. */
+  dropActive: boolean,
+  onSelect: (id: string, modifiers?: ClipSelectModifiers) => void,
+  onRemove: (clipIds: string[]) => void,
+}) => {
+  const { t } = useTranslation();
+  const droppable = useDroppable({ id: SEQUENCE_DROP_ZONE });
+  const setRef = useCallback((node: HTMLDivElement | null) => droppable.setNodeRef(node), [droppable]);
+  const duration = useMemo(() => clips.reduce((acc, clip) => acc + getClipDuration(clip), 0), [clips]);
+  return (
+    <div
+      ref={setRef}
+      data-testid="sequence-section"
+      style={{ margin: '0 .2em .3em .5em', padding: '.2em', borderRadius: 5, border: `1px dashed ${dropActive ? 'var(--grass-9)' : 'var(--gray-7)'}`, background: dropActive ? 'var(--grass-a3)' : undefined }}
+    >
+      <div
+        className="no-user-select"
+        title={t('Clips of the always-visible sequence play one after the other in a slot of their own, so one of them is always on screen. The mix lasts at least as long as the sequence.')}
+        style={{ display: 'flex', alignItems: 'center', gap: '.4em', fontSize: '.75em', color: 'var(--gray-12)', padding: '0 .2em' }}
+      >
+        <FaEye style={{ ...iconStyle, color: 'var(--grass-11)' }} />
+        <span style={{ flexGrow: 1 }}>{t('Always visible')}{clips.length > 0 && ` (${clips.length})`}</span>
+        {clips.length > 0 && <span>{formatDuration({ seconds: duration, shorten: true, showFraction: false })}</span>}
+      </div>
+      <SortableContext items={clips.map((clip) => toSequenceItemId(clip.id))} strategy={verticalListSortingStrategy}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 130, overflowY: 'auto', marginTop: clips.length > 0 ? 2 : 0 }} className="consistent-scrollbar">
+          {clips.map((clip, index) => (
+            <SequenceRow key={clip.id} clip={clip} index={index} thumbnailUrl={thumbnailUrls.get(clip.id)} isSelected={selectedClipIds.has(clip.id)} onSelect={onSelect} onRemove={onRemove} />
+          ))}
+        </div>
+      </SortableContext>
+      {clips.length === 0 && (
+        <div className="no-user-select" style={{ fontSize: '.7em', opacity: 0.7, padding: '.1em .2em', textAlign: 'center' }}>
+          {t('Drag clips here to keep one of them always on screen')}
+        </div>
+      )}
+    </div>
+  );
+});
+
 /** Right panel: all the clips of the project, of any source, in list (= mix) order. Replaces SegmentList in VideoMix. */
 function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClipId, clipPins, onSelect, onUpdate, onReorder, onAdd, onDuplicate, onRemove, onGoToSource }: {
   width: number,
@@ -257,8 +411,8 @@ function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClip
   thumbnailUrls: ReadonlyMap<string, string>,
   settings: Pick<MixSettings, 'transition'>,
   selectedClipId: string | undefined,
-  /** Multi-selection, pins and groups (A4, T30). */
-  clipPins: Pick<UseMixClipPins, 'selectedClipIds' | 'pinTimes' | 'groupColors' | 'getClipMenu'>,
+  /** Multi-selection, pins and groups (A4, T30); chains and the always-visible sequence (T39). */
+  clipPins: Pick<UseMixClipPins, 'selectedClipIds' | 'pinTimes' | 'groupColors' | 'getClipMenu' | 'linkInfos' | 'userSetClipLink' | 'sequence' | 'sequenceIndexes' | 'userAddToSequence' | 'userRemoveFromSequence' | 'userReorderSequence'>,
   /** With modifiers: Ctrl/Cmd-click and Shift-click multi-selection. */
   onSelect: (id: string, modifiers?: ClipSelectModifiers) => void,
   onUpdate: (id: string, patch: MixClipPatch) => void,
@@ -295,18 +449,52 @@ function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClip
     if (selectedIndex !== -1) rowVirtualizer.scrollToIndex(selectedIndex, { behavior: 'smooth', align: 'auto' });
   }, [rowVirtualizer, selectedIndex]);
 
+  const { sequence, userAddToSequence, userReorderSequence, userRemoveFromSequence } = clipPins;
+  const clipsById = useMemo(() => new Map(clips.map((c) => [c.id, c])), [clips]);
+  const sequenceClips = useMemo(() => sequence.flatMap((id) => clipsById.get(id) ?? []), [clipsById, sequence]);
+  // a clip of the list over the sequence section (or one of its rows): it's added there on drop
+  const [overSequence, setOverSequence] = useState(false);
+
   const handleDragStart = useCallback((event: DragStartEvent) => setDraggingId(event.active.id), []);
+
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const { active, over } = event;
+    setOverSequence(fromSequenceItemId(active.id) == null && over != null && (over.id === SEQUENCE_DROP_ZONE || fromSequenceItemId(over.id) != null));
+  }, []);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     setDraggingId(undefined);
+    setOverSequence(false);
     const { active, over } = event;
     if (over == null || active.id === over.id) return;
+    const activeSequenceId = fromSequenceItemId(active.id);
+    const overSequenceId = fromSequenceItemId(over.id);
+    // E5 (T39): sorting the sequence, or adding a clip of the list to it
+    if (activeSequenceId != null) {
+      if (overSequenceId != null) userReorderSequence(arrayMove(sequence, sequence.indexOf(activeSequenceId), sequence.indexOf(overSequenceId)));
+      return;
+    }
+    if (over.id === SEQUENCE_DROP_ZONE) {
+      userAddToSequence([String(active.id)]);
+      return;
+    }
+    if (overSequenceId != null) {
+      userAddToSequence([String(active.id)], sequence.indexOf(overSequenceId));
+      return;
+    }
     const ids = clips.map((c) => c.id);
     onReorder(arrayMove(ids, ids.indexOf(String(active.id)), ids.indexOf(String(over.id))));
-  }, [clips, onReorder]);
+  }, [clips, onReorder, sequence, userAddToSequence, userReorderSequence]);
 
+  const handleDragCancel = useCallback(() => {
+    setDraggingId(undefined);
+    setOverSequence(false);
+  }, []);
+
+  const draggingSequenceId = draggingId != null ? fromSequenceItemId(draggingId) : undefined;
   const draggingIndex = clips.findIndex((c) => c.id === draggingId);
   const draggingClip = clips[draggingIndex];
+  const draggingSequenceClip = draggingSequenceId != null ? clipsById.get(draggingSequenceId) : undefined;
 
   const renderRow = (clip: MixClip, index: number, dragging?: boolean) => (
     <ClipRow
@@ -317,7 +505,10 @@ function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClip
       isSelected={clipPins.selectedClipIds.has(clip.id)}
       pinTime={clipPins.pinTimes.get(clip.id)}
       groupColor={clip.groupId != null ? clipPins.groupColors.get(clip.groupId) : undefined}
+      linkInfo={clipPins.linkInfos.get(clip.id)}
+      sequenceIndex={clipPins.sequenceIndexes.get(clip.id)}
       getClipMenu={clipPins.getClipMenu}
+      onSetLink={clipPins.userSetClipLink}
       dragging={dragging}
       settings={settings}
       onSelect={onSelect}
@@ -337,7 +528,9 @@ function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClip
         {clips.length > 0 && <span title={t('Total duration of the clips')}>{formatDuration({ seconds: totalDuration, shorten: true, showFraction: false })}</span>}
       </div>
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd} modifiers={[restrictToVerticalAxis]}>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel} modifiers={[restrictToVerticalAxis]}>
+        <SequenceSection clips={sequenceClips} thumbnailUrls={thumbnailUrls} selectedClipIds={clipPins.selectedClipIds} dropActive={overSequence} onSelect={onSelect} onRemove={userRemoveFromSequence} />
+
         <SortableContext items={clips} strategy={verticalListSortingStrategy}>
           <div ref={scrollerRef} style={{ padding: '0 .2em 0 .5em', overflowX: 'hidden', overflowY: 'scroll', flexGrow: 1 }} className="consistent-scrollbar">
             <div style={{ height: rowVirtualizer.getTotalSize(), position: 'relative', overflow: 'hidden' }}>
@@ -366,6 +559,9 @@ function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClip
 
         <DragOverlay>
           {draggingClip != null ? renderRow(draggingClip, draggingIndex, true) : null}
+          {draggingSequenceClip != null && (
+            <SequenceRow clip={draggingSequenceClip} index={sequence.indexOf(draggingSequenceClip.id)} thumbnailUrl={thumbnailUrls.get(draggingSequenceClip.id)} isSelected={false} dragging onSelect={onSelect} onRemove={userRemoveFromSequence} />
+          )}
         </DragOverlay>
       </DndContext>
 

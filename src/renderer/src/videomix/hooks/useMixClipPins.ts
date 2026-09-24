@@ -5,10 +5,11 @@ import i18n from 'i18next';
 import { formatDuration } from '../../util/duration';
 import type { ContextMenuTemplate } from '../../types';
 import type { MixProjectAction } from '../projectReducer';
-import type { MixClip } from '../types';
+import type { MixClip, MixSettings } from '../types';
 import { getClipPinTime, getGroupColors, getGroupMembers, getPinClipAction, getSelectionRange, getUnpinClipAction } from '../clipGroups';
 import { canExtendBeyondMax } from '../planner/plannerInput';
 import { addRotation, getClipRotation } from '../clipRotation';
+import { getAlwaysVisibleAction, getClipLinkInfos, getSetClipLinkAction } from '../clipLinks';
 
 const { getCurrentWindow, Menu } = window.require('@electron/remote');
 
@@ -33,10 +34,14 @@ export const getRotateClipAction = (clip: Pick<MixClip, 'id' | 'rotation'>, delt
 /**
  * Pinned and grouped clips (A4, T30) in the clip list and the Mix view: a multi-selection on top of the selected clip
  * (which stays the current segment of its source), the clip menu entries ("Pin here" at the Mix view cursor, "Unpin",
- * "Group selected clips", "Ungroup", E7's "Extend beyond the max if needed" and E9's turns), the group colours and pinning by dragging a block. Each edit is one undo step.
+ * "Group selected clips", "Ungroup", E7's "Extend beyond the max if needed", E9's turns, and T39's links (E2) and
+ * always-visible sequence (E5)), the group colours, the chains, the sequence and pinning by dragging a block. Each edit
+ * is one undo step.
  */
-export default function useMixClipPins({ clips, selectedClipId, cursorTime, selectClip, dispatchStep }: {
+export default function useMixClipPins({ clips, settings, selectedClipId, cursorTime, selectClip, dispatchStep }: {
   clips: MixClip[],
+  /** E2/E5 (T39): the chains and the always-visible sequence. */
+  settings: MixSettings,
   selectedClipId: string | undefined,
   /** The Mix view cursor (useMixOverlays), where "Pin here" pins. */
   cursorTime: number,
@@ -95,6 +100,36 @@ export default function useMixClipPins({ clips, selectedClipId, cursorTime, sele
     dispatchStep({ type: 'ungroupClips', clipIds: getGroupMembers(clips, clip).map((c) => c.id) });
   }, [clips, dispatchStep]);
 
+  // E2 (T39): chains of linked clips, as the planner makes them
+  const linkInfos = useMemo(() => getClipLinkInfos({ clips, settings }), [clips, settings]);
+
+  const userSetClipLink = useCallback((clipId: string, linked: boolean) => {
+    const clip = clips.find((c) => c.id === clipId);
+    const action = clip != null ? getSetClipLinkAction(clip, linkInfos.get(clipId), linked) : undefined;
+    if (action != null) dispatchStep(action);
+  }, [clips, dispatchStep, linkInfos]);
+
+  // E5 (T39): the always-visible sequence
+  const sequence = settings.alwaysVisible.clipIds;
+  const sequenceIndexes = useMemo(() => new Map(sequence.map((id, i) => [id, i])), [sequence]);
+
+  /** Adds clips to the sequence at `index` (or the end); those already in it move there. */
+  const userAddToSequence = useCallback((clipIds: string[], index?: number) => {
+    const action = getAlwaysVisibleAction(sequence, clipIds, { add: true, index });
+    if (action != null) dispatchStep(action);
+  }, [dispatchStep, sequence]);
+
+  const userRemoveFromSequence = useCallback((clipIds: string[]) => {
+    const action = getAlwaysVisibleAction(sequence, clipIds, { add: false });
+    if (action != null) dispatchStep(action);
+  }, [dispatchStep, sequence]);
+
+  /** New order of the sequence (same clips). */
+  const userReorderSequence = useCallback((clipIds: string[]) => {
+    if (clipIds.length === sequence.length && clipIds.every((id, i) => id === sequence[i])) return;
+    dispatchStep({ type: 'setAlwaysVisibleClips', clipIds });
+  }, [dispatchStep, sequence]);
+
   /** Entries of a clip's context menu, for the clip list and the Mix view. */
   const getClipMenu = useCallback((clip: MixClip): ContextMenuTemplate => [
     { type: 'separator' },
@@ -110,7 +145,16 @@ export default function useMixClipPins({ clips, selectedClipId, cursorTime, sele
     { label: i18n.t('Rotate +90°'), click: () => dispatchStep(getRotateClipAction(clip, 90)) },
     { label: i18n.t('Rotate −90°'), click: () => dispatchStep(getRotateClipAction(clip, -90)) },
     { label: i18n.t('Rotate 180°'), click: () => dispatchStep(getRotateClipAction(clip, 180)) },
-  ], [cursorTime, dispatchStep, groupColors, pinTimes, selectedClipIds.size, userGroupSelectedClips, userPinClip, userUngroupClip, userUnpinClip]);
+    { type: 'separator' },
+    // E2 (T39): with the previous clip of its source
+    linkInfos.get(clip.id)?.linked === true
+      ? { label: i18n.t('Break link with the previous clip'), click: () => userSetClipLink(clip.id, false) }
+      : { label: i18n.t('Link with the previous clip'), enabled: linkInfos.get(clip.id)?.previousId != null, click: () => userSetClipLink(clip.id, true) },
+    // E5 (T39): the selected clips if this one is selected, else this one
+    sequenceIndexes.has(clip.id)
+      ? { label: i18n.t('Remove from the always-visible sequence'), click: () => userRemoveFromSequence(selectedClipIds.has(clip.id) ? [...selectedClipIds].filter((id) => sequenceIndexes.has(id)) : [clip.id]) }
+      : { label: i18n.t('Add to the always-visible sequence'), click: () => userAddToSequence(selectedClipIds.has(clip.id) ? clips.filter((c) => selectedClipIds.has(c.id) && !sequenceIndexes.has(c.id)).map((c) => c.id) : [clip.id]) },
+  ], [clips, cursorTime, dispatchStep, groupColors, linkInfos, pinTimes, selectedClipIds, sequenceIndexes, userAddToSequence, userGroupSelectedClips, userPinClip, userRemoveFromSequence, userSetClipLink, userUngroupClip, userUnpinClip]);
 
   /**
    * Opens the clip menu right away (Mix view blocks: a block per clip, so the native menu is only built when it's
@@ -132,6 +176,15 @@ export default function useMixClipPins({ clips, selectedClipId, cursorTime, sele
     userUngroupClip,
     getClipMenu,
     openClipMenu,
+    /** E2 (T39): link state of the clips that can be in a chain. */
+    linkInfos,
+    userSetClipLink,
+    /** E5 (T39): the always-visible sequence (ids in order) and each clip's index in it. */
+    sequence,
+    sequenceIndexes,
+    userAddToSequence,
+    userRemoveFromSequence,
+    userReorderSequence,
   };
 }
 

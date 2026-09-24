@@ -2,7 +2,7 @@ import type { CSSProperties, MouseEventHandler, PointerEvent as ReactPointerEven
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { FaExclamationTriangle, FaFont, FaImage, FaPlus, FaStopwatch, FaThumbtack, FaVolumeUp } from 'react-icons/fa';
+import { FaCut, FaExclamationTriangle, FaEye, FaFont, FaImage, FaLink, FaPlus, FaStopwatch, FaThumbtack, FaVolumeUp } from 'react-icons/fa';
 import { MdLinearScale, MdOpenInFull } from 'react-icons/md';
 
 import { useSegColors } from '../../contexts';
@@ -81,12 +81,14 @@ function warningTooltip(t: TFunction, warnings: PlanWarning[], rows: boolean) {
         ? t('Shows {{pixels}} px above and below its max rectangle from {{from}} to {{to}}, to avoid fill', { pixels: w.pixels, ...range })
         : t('Shows {{pixels}} px beside its max rectangle from {{from}} to {{to}}, to avoid fill', { pixels: w.pixels, ...range });
     }
+    // E4 (T39): cut at the maximum duration
+    if (w.type === 'truncated') return t('Cut at {{time}}: the mix reaches its maximum duration', { time: formatDuration({ seconds: w.time, shorten: true }) });
     return t('Its transition is shortened');
   }).join('; ');
 }
 
 // eslint-disable-next-line react/display-name
-const Block = memo(({ placement, clip, laneWidthPercent, color, name, thumbnailUrl, warnings, isSelected, rows, pinned, groupColor, dragging, openClipMenu, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: {
+const Block = memo(({ placement, clip, laneWidthPercent, color, name, thumbnailUrl, warnings, isSelected, rows, pinned, groupColor, linked, sequenceIndex, dragging, openClipMenu, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: {
   placement: ColumnPlacement,
   clip: MixClip | undefined,
   laneWidthPercent: { left: number, width: number },
@@ -100,6 +102,10 @@ const Block = memo(({ placement, clip, laneWidthPercent, color, name, thumbnailU
   /** A4 (T30): pinned (its own pin or its group's), its group's colour, the clip menu and the drag that pins it. */
   pinned: boolean,
   groupColor: string | undefined,
+  /** E2 (T39): linked with the previous clip of its chain (right before it in the same lane). */
+  linked: boolean,
+  /** E5 (T39): its index in the always-visible sequence. */
+  sequenceIndex: number | undefined,
   dragging: boolean,
   openClipMenu: UseMixClipPins['openClipMenu'],
   onPointerDown: (e: ReactPointerEvent<HTMLDivElement>, p: ColumnPlacement) => void,
@@ -125,20 +131,31 @@ const Block = memo(({ placement, clip, laneWidthPercent, color, name, thumbnailU
     left: `${laneWidthPercent.left}%`,
     width: `${laneWidthPercent.width}%`,
     background: color,
-    borderRadius: 3,
+    // a chain's blocks are joined (no rounded corner at the link)
+    borderRadius: linked ? '0 3px 3px 0' : 3,
     overflow: 'hidden',
     border: `1px solid ${isSelected ? 'var(--gray-12)' : 'transparent'}`,
+    ...(linked && !isSelected && { borderLeft: '1px dashed rgba(255,255,255,.6)' }),
     boxSizing: 'border-box',
     cursor: dragging ? 'grabbing' : 'pointer',
     containerType: 'inline-size',
     touchAction: 'none',
     ...(dragging && { opacity: 0.8, zIndex: 1 }),
-  }), [color, dragging, isSelected, laneWidthPercent.left, laneWidthPercent.width]);
+  }), [color, dragging, isSelected, laneWidthPercent.left, laneWidthPercent.width, linked]);
 
   return (
     <div
       style={style}
-      title={`${name}${pinned ? ` — ${t('Pinned')}` : ''}${warnings.length > 0 ? ` — ${warningTooltip(t, warnings, rows)}` : ''}\n${t('Drag to pin it at another time')}`}
+      data-testid="mix-block"
+      data-clip-id={placement.clipId}
+      data-sequence={sequenceIndex != null ? sequenceIndex + 1 : undefined}
+      data-linked={linked || undefined}
+      title={[
+        `${name}${pinned ? ` — ${t('Pinned')}` : ''}${warnings.length > 0 ? ` — ${warningTooltip(t, warnings, rows)}` : ''}`,
+        ...(sequenceIndex != null ? [t('Always-visible sequence, number {{number}}', { number: sequenceIndex + 1 })] : []),
+        ...(linked ? [t('Linked with the previous clip of its source')] : []),
+        t('Drag to pin it at another time'),
+      ].join('\n')}
       onPointerDown={handlePointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -154,6 +171,8 @@ const Block = memo(({ placement, clip, laneWidthPercent, color, name, thumbnailU
       {inFrac > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: `${inFrac * 100}%`, background: 'linear-gradient(90deg, rgba(255,255,255,.4), transparent)', pointerEvents: 'none' }} />}
       {outFrac > 0 && <div style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: `${outFrac * 100}%`, background: 'linear-gradient(90deg, transparent, rgba(0,0,0,.4))', pointerEvents: 'none' }} />}
       <div className="no-user-select" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: '.2em', padding: '0 .3em', fontSize: '.75em', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', pointerEvents: 'none' }}>
+        {linked && <FaLink style={{ flexShrink: 0, opacity: 0.8 }} />}
+        {sequenceIndex != null && <FaEye style={{ flexShrink: 0 }} />}
         {pinned && <FaThumbtack style={{ flexShrink: 0 }} />}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
         {/* E7 (T38b): extended beyond its max (informative), apart from the real warnings */}
@@ -161,6 +180,8 @@ const Block = memo(({ placement, clip, laneWidthPercent, color, name, thumbnailU
         {warnings.some((w) => w.type !== 'extended') && <FaExclamationTriangle style={{ flexShrink: 0, color: warningColor }} />}
       </div>
       {groupColor != null && <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: groupColor, pointerEvents: 'none' }} />}
+      {/* E5 (T39): the sequence's slot */}
+      {sequenceIndex != null && <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 3, background: 'var(--grass-9)', pointerEvents: 'none' }} />}
     </div>
   );
 });
@@ -367,7 +388,7 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
   clips: MixClip[],
   settings: MixSettings,
   /** Selection (with the multi-selection), pins and groups (A4, T30). */
-  clipPins: Pick<UseMixClipPins, 'selectedClipIds' | 'pinTimes' | 'groupColors' | 'openClipMenu' | 'userPinClip'>,
+  clipPins: Pick<UseMixClipPins, 'selectedClipIds' | 'pinTimes' | 'groupColors' | 'openClipMenu' | 'userPinClip' | 'linkInfos' | 'sequenceIndexes'>,
   /** With modifiers: Ctrl/Cmd-click and Shift-click multi-selection. */
   onSelect: (clipId: string, modifiers?: ClipSelectModifiers) => void,
   /** From `useClipThumbnails` (A2, T31), shared with `ClipList`. */
@@ -388,6 +409,9 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
 
   const laneColumns = useMemo(() => (plan != null ? getLaneColumns(plan) : []), [plan]);
   const relayouts = useMemo(() => (plan != null ? plan.layouts.filter((l) => l.transitionDuration > 0) : []), [plan]);
+
+  // E4 (T39): the plan is cut at the maximum duration
+  const truncated = useMemo(() => plan?.warnings.find((w) => w.type === 'truncated'), [plan]);
 
   const tl = useMemo(() => (plan != null ? getRenderTimeline(plan, { fps: settings.fps, gap: settings.gap.width, transitionDuration: settings.transition.duration }) : undefined), [plan, settings.fps, settings.gap.width, settings.transition.duration]);
 
@@ -621,7 +645,13 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
           <button type="button" style={toolbarButtonStyle} onClick={userAddCountdown}><FaStopwatch />{t('Add countdown')}</button>
           <button type="button" style={toolbarButtonStyle} onClick={userAddProgressBar}><MdLinearScale />{t('Add progress bar')}</button>
           <button type="button" style={toolbarButtonStyle} onClick={userAddSound}><FaVolumeUp />{t('Add sound…')}</button>
-          <span style={{ fontSize: '.7em', opacity: 0.7, marginLeft: 'auto' }} title={t('New overlays are added at the cursor. Click on the lanes to move it.')}>
+          {truncated != null && (
+            <span data-testid="mix-truncated" style={{ fontSize: '.7em', marginLeft: 'auto', color: warningColor, display: 'inline-flex', alignItems: 'center', gap: '.3em' }} title={t('The mix is longer than its maximum duration: it is cut at {{time}} with the fade-out, {{seconds}} s are left out', { time: formatDuration({ seconds: truncated.time, shorten: true }), seconds: Math.round(truncated.seconds) })}>
+              <FaCut />
+              {t('Cut at {{time}} (−{{seconds}} s)', { time: formatDuration({ seconds: truncated.time, shorten: true }), seconds: Math.round(truncated.seconds) })}
+            </span>
+          )}
+          <span style={{ fontSize: '.7em', opacity: 0.7, marginLeft: truncated != null ? undefined : 'auto' }} title={t('New overlays are added at the cursor. Click on the lanes to move it.')}>
             {t('Cursor: {{time}}', { time: formatDuration({ seconds: cursorTime, shorten: true }) })}
           </span>
         </div>
@@ -678,6 +708,8 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
                       rows={getPlanAxis(plan) === 'rows'}
                       pinned={clipPins.pinTimes.has(placement.clipId)}
                       groupColor={clip?.groupId != null ? clipPins.groupColors.get(clip.groupId) : undefined}
+                      linked={clipPins.linkInfos.get(placement.clipId)?.linked === true}
+                      sequenceIndex={clipPins.sequenceIndexes.get(placement.clipId)}
                       dragging={dragging}
                       openClipMenu={clipPins.openClipMenu}
                       onPointerDown={handleClipPointerDown}

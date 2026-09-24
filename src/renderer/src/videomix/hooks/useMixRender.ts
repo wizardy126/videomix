@@ -23,7 +23,7 @@ import { getKnownSoundDurations } from './useOverlaySoundDurations';
 import { buildRenderJob, getChunkConcurrency } from '../render/buildRenderJob';
 import type { ResolvedEncoder } from '../render/buildRenderJob';
 import { buildAudioGraph } from '../render/buildAudioGraph';
-import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
+import { getDefaultOutputPath, getOrphanTempEntries, getOverlayTimesPlan, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
 import { RenderAbortedError, runRenderJob } from '../render/runRenderJob';
 import type { RenderRunnerDeps } from '../render/runRenderJob';
 import type { CacheDirEntry, RenderCacheFsDeps } from '../render/renderCache';
@@ -243,7 +243,8 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     // Overlay time warnings (clipped, outside the video, cycles, broken references…), from a resolution with the
     // sound durations already known to the UI (T22's useOverlaySoundDurations): the render itself re-resolves them
     // with the exact durations from the loudness analysis (T21), so this is only for the confirmation's wording.
-    const overlayTimes = resolveOverlayTimes(currentProject, renderPlan.plan, { soundDurations: getKnownSoundDurations(currentProject.overlays) });
+    // E4 (T39): on the placements of the whole plan, cut to the maximum duration (getOverlayTimesPlan)
+    const overlayTimes = resolveOverlayTimes(currentProject, getOverlayTimesPlan(renderPlan), { soundDurations: getKnownSoundDurations(currentProject.overlays) });
     const overlayTimeWarningLines = currentProject.overlays.flatMap((overlay) => {
       const warnings = overlayTimes.get(overlay.id)?.warnings ?? [];
       return warnings.map((warning) => i18n.t('Overlay "{{overlay}}": {{warning}}', { overlay: overlay.name, warning: getOverlayTimeWarningText(warning) }));
@@ -290,7 +291,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       setWorking({ text: preview ? i18n.t('Rendering preview') : i18n.t('Rendering mix'), abortController });
       setProgress(0);
       const { plan, settings, encoding } = renderPlan;
-      const overlayTimes = resolveOverlayTimes(currentProject, plan, { soundDurations: getSoundDurations(loudness, soundOverlays) });
+      const overlayTimes = resolveOverlayTimes(currentProject, getOverlayTimesPlan(renderPlan), { soundDurations: getSoundDurations(loudness, soundOverlays) });
 
       // T25: 'auto'/a specific choice resolved against what actually works on this machine (main's detectEncoders,
       // cached for the session); a manual choice that isn't available (e.g. a project made on another machine)

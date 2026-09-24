@@ -1633,8 +1633,8 @@ function App() {
   // VideoMix: overlays edited in the Mix view (T22): plan + resolved overlay times, selection, cursor and overlay actions
   const mixOverlays = useMixOverlays({ mixProject, enabled: videoMixMode && showMixPlan, withErrorHandling, onFileReplaced: mixWorkspace.clearMissingOverlayFile });
 
-  // VideoMix: "≈ m:ss" estimated duration (E3), visible in both tabs; reuses mixOverlays.plan when the Mix tab has one
-  const mixDuration = useMixDuration({ clips: mixProject.project.clips, settings: mixProject.project.settings, mixPlan: mixOverlays.plan });
+  // VideoMix: "≈ m:ss" estimated duration (E3), visible in both tabs; reuses mixOverlays.fullPlan when the Mix tab has one
+  const mixDuration = useMixDuration({ clips: mixProject.project.clips, settings: mixProject.project.settings, mixPlan: mixOverlays.fullPlan });
 
   // VideoMix: approximate live preview of the mix in the player area while the Mix tab is shown (A1, T32). Its time
   // follows the Mix view cursor, and the play/pause keys drive it instead of the source player (see mainActions)
@@ -1646,7 +1646,7 @@ function App() {
   const mixThumbnails = useClipThumbnails({ clips: mixProject.project.clips, sources: mixProject.project.sources, enabled: videoMixMode });
 
   // VideoMix: pinned and grouped clips (A4, T30) and the clip multi-selection, in ClipList and MixPlanView
-  const mixClipPins = useMixClipPins({ clips: mixProject.project.clips, selectedClipId: mixClips.selectedClipId, cursorTime: mixOverlays.cursorTime, selectClip: mixClips.userSelectClip, dispatchStep: mixClips.dispatchStep });
+  const mixClipPins = useMixClipPins({ clips: mixProject.project.clips, settings: mixProject.project.settings, selectedClipId: mixClips.selectedClipId, cursorTime: mixOverlays.cursorTime, selectClip: mixClips.userSelectClip, dispatchStep: mixClips.dispatchStep });
 
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);

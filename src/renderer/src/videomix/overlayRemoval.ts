@@ -3,7 +3,7 @@ import type { MixProjectAction } from './projectReducer';
 import { getDependentOverlays } from './overlays/anchors';
 import { resolveOverlayTimes } from './overlays/resolveOverlayTimes';
 import type { ResolvedOverlayTimes } from './overlays/resolveOverlayTimes';
-import { planRender } from './render/renderOutput';
+import { getOverlayTimesPlan, planRender } from './render/renderOutput';
 
 // Removing a clip, a source or an overlay that other overlays are anchored to (01-requisitos §9.2): those overlays
 // become absolute at their current start. The reducer does it when the removal action carries the times resolved
@@ -78,7 +78,7 @@ export function prepareOverlayRemoval(project: MixProject, action: MixProjectAct
   const detached = getOverlaysDetachedBy(project, action);
   if (detached.length === 0) return { action, detached };
   // (like MixPlanView, the planner only runs with clips)
-  const plan = project.clips.length > 0 ? planRender(project).plan : { duration: 0, placements: [] };
+  const plan = project.clips.length > 0 ? getOverlayTimesPlan(planRender(project)) : { duration: 0, placements: [] };
   const resolved = resolveOverlayTimes(project, plan, { soundDurations });
   return { action: withRemovalTimes(action, resolved), detached };
 }

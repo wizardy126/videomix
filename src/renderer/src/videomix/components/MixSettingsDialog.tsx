@@ -222,6 +222,21 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ reorderWindow: checked === true ? 'unlimited' : lastReorderWindow });
   }, [lastReorderWindow, onChange]);
 
+  // E2 (T39): automatic links between clips of a source. Local draft while the field is edited (it may be empty for a
+  // moment); each valid number (≥ 0 s) is applied
+  const [maxGapText, setMaxGapText] = useState<string>();
+  const handleMaxGapChange = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
+    setMaxGapText(e.target.value);
+    const maxGap = Number(e.target.value);
+    if (e.target.value.trim() === '' || !Number.isFinite(maxGap) || maxGap < 0) return;
+    onChange({ links: { ...settings.links, maxGap } });
+  }, [onChange, settings.links]);
+  const handleMaxGapBlur = useCallback(() => setMaxGapText(undefined), []);
+
+  const handleLinkTransitionChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
+    onChange({ links: { ...settings.links, transition: e.target.value as MixSettings['links']['transition'] } });
+  }, [onChange, settings.links]);
+
   const handleTransitionTypeChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
     onChange({ transition: { ...settings.transition, type: e.target.value as TransitionType } });
   }, [onChange, settings.transition]);
@@ -319,7 +334,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
               <div style={detailsStyle}>{t('"Auto" uses the first available hardware encoder and falls back to software if none work or if it fails while rendering.')}</div>
             </label>
 
-            {/* E4: off by default (01-requisitos §11); the cut itself and the pre-render warning are T39, this only edits the setting */}
+            {/* E4: off by default (01-requisitos §11); the render, the preview and the Mix view cut the mix at the limit (T39) */}
             <div style={inlineRowStyle}>
               <span>{t('Limit the length of the mix')}</span>
               <Switch checked={maxDurationEnabled} onCheckedChange={handleMaxDurationToggle} />
@@ -414,6 +429,30 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
                   ? t('Clips may come from anywhere in the project to fill the gaps. Among equally good options, the list order still wins.')
                   : t('How far a clip may move from its position in the list to fit the layout.')}
               </div>
+            </div>
+          </Section>
+
+          {/* E2 (T39) */}
+          <Section title={t('Linked clips')}>
+            <div style={inlineRowStyle}>
+              {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
+              <label>
+                {t('Link clips of a source up to this far apart (s)')}<br />
+                <input type="number" data-testid="links-max-gap" min={0} step={0.5} style={{ width: '6em' }} value={maxGapText ?? settings.links.maxGap} onChange={handleMaxGapChange} onBlur={handleMaxGapBlur} />
+              </label>
+              {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
+              <label>
+                {t('Between linked clips')}<br />
+                <Select data-testid="links-transition" value={settings.links.transition} onChange={handleLinkTransitionChange}>
+                  <option value="cut">{t('Direct cut')}</option>
+                  <option value="global">{t('The transition of the mix')}</option>
+                </Select>
+              </label>
+            </div>
+            <div style={detailsStyle}>
+              {settings.links.maxGap > 0
+                ? t('Two clips of the same source are linked when the second one starts at most this long after the first one ends (clips that overlap are not): they play one after the other in the same slot. 0 turns it off. A link can be broken or made by hand from the clip list.')
+                : t('Clips are not linked automatically. A link can still be made by hand from the clip list.')}
             </div>
           </Section>
 

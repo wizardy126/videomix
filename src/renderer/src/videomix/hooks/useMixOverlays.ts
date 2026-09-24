@@ -13,7 +13,7 @@ import type { MixOverlay } from '../types';
 import type { MixOverlayPatch, OverlayLayerMove } from '../projectReducer';
 import type { OverlayFileKind } from '../projectFile';
 import type { MixPlan } from '../planner/types';
-import { planRender } from '../render/renderOutput';
+import { getOverlayTimesPlan, planRender } from '../render/renderOutput';
 import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
 import type { ResolvedOverlayTimes } from '../overlays/resolveOverlayTimes';
 import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay, createTextOverlay } from '../overlays/factories';
@@ -51,18 +51,22 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
 
   const [debouncedClips] = useDebounce(clips, PLAN_DEBOUNCE_MS);
   const [debouncedSettings] = useDebounce(settings, PLAN_DEBOUNCE_MS);
-  const plan = useMemo<MixPlan | undefined>(
+  const renderPlan = useMemo(
     // E7 (T38b): the source sizes bound the extension beyond the max (they change rarely: not debounced)
-    () => (enabled && debouncedClips.length > 0 ? planRender({ clips: debouncedClips, settings: debouncedSettings, sources }).plan : undefined),
+    () => (enabled && debouncedClips.length > 0 ? planRender({ clips: debouncedClips, settings: debouncedSettings, sources }) : undefined),
     [debouncedClips, debouncedSettings, enabled, sources],
   );
+  // E4 (T39): the Mix view and the live preview show the mix cut at the maximum duration, like the render
+  const plan: MixPlan | undefined = renderPlan?.plan;
+  /** Before the cut: E3's estimate shows its whole duration. */
+  const fullPlan: MixPlan | undefined = renderPlan?.fullPlan;
 
   const soundDurations = useOverlaySoundDurations(overlays);
 
   // Not debounced: overlay edits don't change the plan, and resolving is O(n), so blocks follow a drag immediately
   const resolved = useMemo<ResolvedOverlayTimes>(
-    () => (plan != null ? resolveOverlayTimes(project, plan, { soundDurations }) : new Map()),
-    [plan, project, soundDurations],
+    () => (renderPlan != null ? resolveOverlayTimes(project, getOverlayTimesPlan(renderPlan), { soundDurations }) : new Map()),
+    [renderPlan, project, soundDurations],
   );
 
   const [selectedId, setSelectedOverlayId] = useState<string>();
@@ -166,6 +170,7 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
 
   return {
     plan,
+    fullPlan,
     resolved,
     soundDurations,
     outputSize,

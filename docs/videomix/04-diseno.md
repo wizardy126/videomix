@@ -324,7 +324,8 @@ Detalle, ejemplos antes/después y justificación en las notas de [T38](executio
   - quita los keyframes desde el límite (una animación en curso se queda: el vídeo acaba durante ella);
   - `duration` = límite, así que el *fade* global de vídeo y audio queda en el corte;
   - filtra los avisos de clips perdidos o posteriores al límite y añade `truncated` con los segundos perdidos, los clips perdidos y los cortados (cortar dos veces acumula).
-  - Overlays y sonidos: `resolveOverlayTimes` ya los recorta a `plan.duration`; hay que resolverlos con los *placements* del plan completo y la duración cortada, para que un overlay anclado a un clip perdido quede fuera del vídeo en vez de perder el ancla.
+  - Overlays y sonidos: `resolveOverlayTimes` ya los recorta a `plan.duration`; se resuelven con los *placements* del plan completo y la duración cortada (`getOverlayTimesPlan`, T39), para que un overlay anclado a un clip perdido quede fuera del vídeo en vez de perder el ancla.
+- **Integración (T39)**: `planRender` aplica `truncatePlan` si hay `maxDuration` y devuelve `{ plan, fullPlan }`. El render, la previsualización renderizada, la vista Mix y la previsualización en vivo usan `plan` (cortado); la estimación "≈ m:ss" de E3 usa `fullPlan`. Todos resuelven los overlays con `getOverlayTimesPlan`. El aviso `truncated` va el primero en la confirmación previa al render (segundos y clips perdidos y cortados) y en el *tooltip* de los bloques cortados; la vista Mix muestra además "Se corta en m:ss". La caché incremental no cambia: los fragmentos anteriores al corte tienen las mismas claves (comprobado con ffmpeg real).
 - Sin cadenas, secuencia ni límite (o si el contenido cabe en el límite), los planes no cambian (mismos snapshots).
 
 ### 3.8 Ampliar más allá del máx. (E7, T38b)
@@ -477,6 +478,7 @@ El `RenderClip` del *hook* no lleva `muted` ni `gainDb`, así que el llamador (T
      - columna que aparece o desaparece en un re-layout: la duración de esa animación;
      - final del vídeo hacia el relleno: `transitionOut` (T10b);
      - corte seco: 10 ms (`DECLICK_DURATION`) para evitar chasquidos;
+     - **corte directo con el clip siguiente de la columna** (una cadena con `links.transition: 'cut'`, o un `transitionIn` acortado a 0; T39): los dos fundidos por separado bajarían a silencio justo en el corte. En su lugar hay un fundido cruzado de `CUT_CROSSFADE` = 20 ms (como mucho, la mitad del clip entrante): el audio del saliente sigue esos 20 ms tras su fin (`tail`: su `atrim` es `dur + tail`) mientras entra el siguiente. La curva es **lineal** (`tri`) si el entrante continúa al saliente en la misma fuente (mismo audio: la suma es exactamente la fuente) y `qsin` en los demás casos (`getJoinCurve`). La compensación no cambia en el corte (el saliente cuenta hasta `fin + tail/2`, justo cuando empieza a contar el entrante). La previsualización en vivo cambia de clip en el corte sin fundidos (aplica las ganancias una vez por fotograma);
    - `adelay=<muestras>S:all=1` hasta su `startTime`.
 2. **Suma**: `amix=inputs=N:normalize=0:duration=longest` (o `anullsrc` si no hay ningún clip audible: siempre hay pista de audio) y `apad` hasta la duración. Detrás de **cada** `amix` va `asetpts=N/SR/TB` (T27): con ffmpeg 8.0, `amix` a veces saca fotogramas sin *timestamps* (una carrera entre los hilos de sus entradas); entonces la `t` de la compensación es NaN (volumen 0), los *fades* se descolocan y la salida puede acabar al final del primer clip. Pasaba en ~1 de cada 4 renders con música.
 3. **Compensación de simultaneidad**: global, sobre la suma, con `volume='<expr>':eval=frame` (`getCompensationExpr`).
@@ -560,6 +562,10 @@ Recomendación original:
   - avisos (clip corto, upscale).
 - **Seleccionar un clip**: activa su fuente (si no lo está), hace seek a `start` y muestra sus rectángulos en el overlay.
 - **Acciones**: duplicar, eliminar, "ir a la fuente".
+- **Cadenas y secuencia (T39, `clipLinks.ts`)**:
+  - Indicador de cadena en las filas (icono de enlace y "posición/longitud", las mismas cadenas que el planificador: `getClipLinkInfos`). El icono de un clip enlazado rompe el enlace con el anterior; un enlace roto a mano se muestra con otro icono que lo vuelve a crear. En el menú contextual: "Romper enlace con el anterior" / "Enlazar con el anterior". `getSetClipLinkAction` solo guarda `link` si difiere de la regla automática (`'break'` o `'force'`), así que volver a enlazar un par que la regla ya enlaza quita el campo.
+  - Sección **Siempre visible** encima de la lista: la secuencia en orden, ordenable con dnd-kit (mismo `DndContext` que la lista, ids con prefijo), con botón para quitar cada clip; se añaden clips arrastrándolos desde la lista (al final o delante de un clip de la secuencia) o con el menú contextual (los clips seleccionados si el clip lo está). Las filas de la lista muestran un indicador con su número en la secuencia.
+  - Vista Mix: los bloques de una cadena van seguidos en el mismo carril y el enlazado se marca con un borde discontinuo y un icono; los de la secuencia llevan una franja verde e icono de ojo.
 
 ### 6.6 Montaje, previsualización y render
 

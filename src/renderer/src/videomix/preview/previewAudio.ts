@@ -111,7 +111,11 @@ export function buildPreviewAudioModel({ plan, clips, settings, duration, loudne
     const measurement = loudness[clip.id];
     // confirmed silent (or without audio): nothing to play; unknown: played at its manual gain
     if (measurement != null && !measurement.hasAudio) return;
-    const { fadeIn, fadeOut } = getPlacementFades(plan, placement);
+    const fades = getPlacementFades(plan, placement);
+    // A direct cut (a chain, E2) switches from one clip to the next at the cut: the render's few-ms crossfade (past the
+    // end of the outgoing clip) is shorter than a frame, and the gains are applied once per frame here
+    const fadeIn = fades.joinedIn != null ? 0 : fades.fadeIn;
+    const fadeOut = fades.joinedOut != null ? 0 : fades.fadeOut;
     const normalization = measurement?.hasAudio === true ? getNormalizationGain(measurement) : 0;
     audioClips.push({ key: `p${index}`, clipId: clip.id, startTime: placement.startTime, endTime: placement.endTime, gain: dbToGain(normalization + clip.gainDb), fadeIn, fadeOut, normalized: measurement != null });
   });

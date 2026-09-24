@@ -55,7 +55,12 @@ interface MixSettings {
   fill: { mode: string, color: string },
   encoder: { codec: string, hardware: string },
   musicPlaylist: { tracks: MusicTrack[], crossfade: number, loop: boolean, ducking: { enabled: boolean, amountDb: number } },
+  // v3 (T36): chains, always visible sequence and maximum duration
+  links: { maxGap: number, transition: 'cut' | 'global' },
+  alwaysVisible: { clipIds: string[] },
+  maxDuration?: number,
 }
+interface MixSource { id: string, width: number, height: number }
 interface MixPlan { duration: number, placements: { clipId: string, startTime: number, endTime: number }[], [key: string]: unknown }
 interface RenderClip { id: string, sourceId: string, start: number, maxRect: Rect }
 interface AudioClip { id: string, sourceId: string, start: number, muted: boolean, gainDb: number }
@@ -87,9 +92,10 @@ interface ResolveOverlayTimesModule {
 const { resolveOverlayTimes } = await importRenderer<ResolveOverlayTimesModule>('videomix/overlays/resolveOverlayTimes.ts');
 
 interface RenderOutputModule {
-  planRender: (input: { clips: MixClip[], settings: MixSettings }) => { plan: MixPlan, settings: MixSettings },
+  planRender: (input: { clips: MixClip[], settings: MixSettings, sources: MixSource[] }) => { plan: MixPlan, fullPlan: MixPlan, settings: MixSettings },
+  getOverlayTimesPlan: (renderPlan: { plan: MixPlan, fullPlan: MixPlan }) => { duration: number, placements: unknown[] },
 }
-const { planRender } = await importRenderer<RenderOutputModule>('videomix/render/renderOutput.ts');
+const { planRender, getOverlayTimesPlan } = await importRenderer<RenderOutputModule>('videomix/render/renderOutput.ts');
 
 const { buildRenderJob } = await importRenderer<{ buildRenderJob: (options: Record<string, unknown>) => RenderJob }>('videomix/render/buildRenderJob.ts');
 const { buildAudioGraph } = await importRenderer<{ buildAudioGraph: (input: Record<string, unknown>) => AudioGraph }>('videomix/render/buildAudioGraph.ts');
@@ -208,9 +214,19 @@ const settings: MixSettings = {
     loop: true,
     ducking: { enabled: true, amountDb: -10 },
   },
+  links: { maxGap: 10, transition: 'cut' },
+  alwaysVisible: { clipIds: [] },
 };
 
-const { plan } = planRender({ clips, settings });
+// Display sizes of the sources (E7, T38b: they bound the extension beyond the max, as in the app)
+const sources: MixSource[] = [
+  { id: 'src1', width: 1920, height: 1080 },
+  { id: 'src2', width: 1080, height: 1920 },
+  { id: 'src3', width: 720, height: 1280 },
+  { id: 'src4', width: 1280, height: 720 },
+];
+const renderPlan = planRender({ clips, settings, sources });
+const { plan } = renderPlan;
 console.log(`Planned ${plan.placements.length} placement(s), duration ${plan.duration.toFixed(2)} s`);
 for (const p of plan.placements as { clipId: string, startTime: number, endTime: number }[]) {
   console.log(`  ${p.clipId}: [${p.startTime.toFixed(2)}, ${p.endTime.toFixed(2)})`);
@@ -244,7 +260,8 @@ const loudnessEntries = await Promise.all([
 const loudness: Record<string, LoudnessAnalysis> = Object.fromEntries(loudnessEntries);
 for (const [id, l] of loudnessEntries) console.log(`${id}:`, l);
 
-const overlayTimes = resolveOverlayTimes({ overlays, clips }, plan, {});
+// on the placements of the whole plan, cut to the maximum duration (T39), like the app
+const overlayTimes = resolveOverlayTimes({ overlays, clips }, getOverlayTimesPlan(renderPlan), {});
 for (const overlay of overlays) {
   const times = overlayTimes.get(overlay.id);
   console.log(`overlay ${overlay.id} (${overlay.type}): [${times?.start}, ${times?.end}) s, warnings=${JSON.stringify(times?.warnings)}`);

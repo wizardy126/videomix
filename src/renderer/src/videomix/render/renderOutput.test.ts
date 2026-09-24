@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { describe, test, expect } from 'vitest';
 
-import { getDefaultOutputPath, getOrphanTempEntries, getPartialOutputPath, ORPHAN_TEMP_MAX_AGE_MS, getPreviewFps, getPreviewOutputPath, getPreviewSize, getRenderWarnings, getRenderWorkDir, planRender, scaleGap, withOutputExtension } from './renderOutput';
+import { getDefaultOutputPath, getOrphanTempEntries, getOverlayTimesPlan, getPartialOutputPath, ORPHAN_TEMP_MAX_AGE_MS, getPreviewFps, getPreviewOutputPath, getPreviewSize, getRenderWarnings, getRenderWorkDir, planRender, scaleGap, withOutputExtension } from './renderOutput';
 import { createEmptyMixProject } from '../types';
 import type { MixClip, MixProject } from '../types';
 
@@ -196,6 +196,39 @@ describe('planRender', () => {
     expect(planRender({ ...project, sources: [] }).plan.layouts[0]!.fills.length).toBeGreaterThan(0);
     const off = { ...project, sources, clips: [{ ...project.clips[0]!, extendBeyondMax: false }] };
     expect(planRender(off).plan.placements[0]!.extendedMaxRect).toBeUndefined();
+  });
+
+  test('maximum duration (E4, T39): the plan is cut, the whole one is kept for the estimate and the overlays', () => {
+    const project = testProject();
+    const whole = planRender(project);
+    expect(whole.fullPlan).toBe(whole.plan);
+    expect(getOverlayTimesPlan(whole)).toBe(whole.plan);
+
+    const limit = Math.floor(whole.plan.duration / 2);
+    const limited = { ...project, settings: { ...project.settings, maxDuration: limit } };
+    for (const preview of [false, true]) {
+      const { plan, fullPlan } = planRender(limited, { preview });
+      expect(plan.duration).toBe(limit);
+      expect(fullPlan.duration).toBeGreaterThan(limit);
+      expect(plan.warnings.some((w) => w.type === 'truncated')).toBe(true);
+      expect(getOverlayTimesPlan({ plan, fullPlan })).toEqual({ duration: limit, placements: fullPlan.placements });
+    }
+    // a limit longer than the mix changes nothing
+    const long = planRender({ ...project, settings: { ...project.settings, maxDuration: whole.plan.duration + 10 } });
+    expect(long.plan).toBe(long.fullPlan);
+  });
+
+  test('the cut is the first warning to confirm, with the clip names (E4)', () => {
+    const warnings = getRenderWarnings({
+      warnings: [
+        { type: 'upscale', clipId: 'd', factor: 3.2 },
+        { type: 'truncated', time: 60, seconds: 12.4, clipIds: ['x'], cutClipIds: ['d'] },
+      ],
+    }, testProject().clips);
+    expect(warnings).toEqual([
+      { type: 'truncated', time: 60, seconds: 12.4, lostClipNames: ['x'], cutClipNames: ['Clip d'] },
+      { type: 'upscale', clipName: 'Clip d', factor: 3.2 },
+    ]);
   });
 
   test('the small clip of the test project is reported as upscaled', () => {

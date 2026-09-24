@@ -752,6 +752,122 @@ test.describe('VideoMix (turned clip)', () => {
   });
 });
 
+test.describe('VideoMix (chains, always-visible sequence and maximum duration)', () => {
+  test('14. linked clips share a slot, the sequence has its own, and the mix is cut at its maximum duration (E2, E4, E5, T39)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    const workDir = mkdtempSync(join(tmpdir(), 'videomix-e2e-chains-'));
+    try {
+      // two vertical sources, so the chain and the sequence fit side by side in 16:9
+      const sequenceFile = 'v-720x1280-silent-7s.mp4';
+      await mockOpenDialog(ctx.app, [media(sourceFiles[2]!), media(sequenceFile)]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(2);
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      await waitIdle(page);
+
+      // two clips of the first source that touch (0–5 s and 5–10 s): linked automatically, a chain of 2
+      await pressShortcut(page, 'n');
+      await seekBy(page, 5);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(2);
+      await expect(clipRows(page).nth(1)).toContainText('0:05 – 0:10');
+      await expect(clipRows(page).nth(0).getByTestId('clip-link-indicator')).toHaveText('1/2');
+      await expect(clipRows(page).nth(1).getByTestId('clip-link-indicator')).toHaveText('2/2');
+
+      // the link can be broken and made again from its indicator (one undo step each)
+      await clipRows(page).nth(1).getByTestId('clip-link-toggle').click();
+      await expect(clipRows(page).nth(1).getByTestId('clip-unlinked-indicator')).toBeVisible();
+      await expect(page.getByTestId('clip-link-indicator')).toHaveCount(0);
+      await clipRows(page).nth(1).getByTestId('clip-unlinked-indicator').click();
+      await expect(clipRows(page).nth(1).getByTestId('clip-link-indicator')).toHaveText('2/2');
+
+      // a clip of the other source, dragged into the always-visible sequence
+      await activateSource(page, 1, sequenceFile);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(3);
+      const section = page.getByTestId('sequence-section');
+      await expect(section).toContainText('Drag clips here');
+      const handle = (await page.getByTestId('clip-drag-handle').nth(2).boundingBox())!;
+      const sectionBox = (await section.boundingBox())!;
+      await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(handle.x + handle.width / 2, handle.y - 20, { steps: 5 });
+      await page.mouse.move(handle.x + handle.width / 2, sectionBox.y + sectionBox.height / 2, { steps: 10 });
+      await page.mouse.up();
+      await expect(page.getByTestId('sequence-row')).toHaveCount(1);
+      await expect(page.getByTestId('sequence-row')).toContainText('v-720x1280-silent-7s #1');
+      await expect(clipRows(page).nth(2).getByTestId('clip-sequence-indicator')).toHaveText('1');
+      // the list order doesn't change (once the drop animation's copy of the row is gone)
+      await expect.poll(async () => clipNames(page)).toEqual(['v-1080x1920-12s #1', 'v-1080x1920-12s #2', 'v-720x1280-silent-7s #1']);
+      await screenshot(page, '14a-chain-and-sequence-list');
+
+      // the Mix view: the chain's clips one after the other in a lane, the sequence in another one
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      await expect(page.getByTestId('mix-plan-view')).toBeVisible();
+      const blocks = page.getByTestId('mix-block');
+      await expect(blocks).toHaveCount(3);
+      const laneOf = async (clipName: string) => blocks.filter({ hasText: clipName }).evaluate((el) => el.parentElement!.getBoundingClientRect().top);
+      expect(await laneOf('v-1080x1920-12s #1')).toBe(await laneOf('v-1080x1920-12s #2'));
+      expect(await laneOf('v-720x1280-silent-7s #1')).not.toBe(await laneOf('v-1080x1920-12s #1'));
+      await expect(blocks.filter({ hasText: 'v-1080x1920-12s #2' })).toHaveAttribute('data-linked', 'true');
+      await expect(blocks.filter({ hasText: 'v-720x1280-silent-7s #1' })).toHaveAttribute('data-sequence', '1');
+      // direct cut: the second block starts where the first one ends
+      const edges = async (clipName: string) => blocks.filter({ hasText: clipName }).evaluate((el) => { const r = el.getBoundingClientRect(); return [r.left, r.right]; });
+      const [, firstRight] = await edges('v-1080x1920-12s #1');
+      const [secondLeft] = await edges('v-1080x1920-12s #2');
+      expect(Math.abs(secondLeft! - firstRight!)).toBeLessThan(2);
+
+      // maximum duration 0:06 (the mix lasts 10 s) and the global transition between linked clips
+      await textButton(page, 'Settings').click();
+      const dialog = page.getByTestId('mix-settings');
+      await expect(dialog).toBeVisible();
+      await dialog.getByText('Limit the length of the mix').locator('xpath=following-sibling::*[1]').click();
+      const maxDuration = dialog.locator('label', { hasText: 'Maximum duration (m:ss)' }).locator('input');
+      await maxDuration.fill('0:06');
+      await maxDuration.press('Enter');
+      await expect(dialog.getByTestId('links-max-gap')).toHaveValue('10');
+      await dialog.getByTestId('links-transition').selectOption('global');
+      await screenshot(page, '14b-settings');
+      await dialog.getByRole('button', { name: 'Close', exact: true }).first().click();
+      await expect(dialog).toBeHidden();
+
+      // the Mix view ends at the cut; the cut clip tells why
+      await expect(page.getByTestId('mix-truncated')).toContainText(/Cut at 0:06 \(−\d s\)/);
+      await expect(blocks.filter({ hasText: 'v-1080x1920-12s #2' })).toHaveAttribute('title', /Cut at 0:06: the mix reaches its maximum duration/);
+      // E3's estimate (the whole mix) tells where it's cut
+      await expect(page.getByText('→ cut at 0:06')).toBeVisible();
+      await screenshot(page, '14c-mix-view-cut');
+
+      const projectPath = join(workDir, 'chains.vmx');
+      await mockSaveDialog(ctx.app, projectPath);
+      await pressShortcut(page, 'Control+s');
+      await expect(page).toHaveTitle(/^chains - /);
+      const saved = JSON5.parse(readFileSync(projectPath, 'utf8')) as { clips: { id: string, link?: string }[], settings: { maxDuration?: number, links: { maxGap: number, transition: string }, alwaysVisible: { clipIds: string[] } } };
+      expect(saved.settings).toMatchObject({ maxDuration: 6, links: { maxGap: 10, transition: 'global' }, alwaysVisible: { clipIds: [saved.clips[2]!.id] } });
+      // linked again by hand after breaking it: back to the automatic rule, nothing stored
+      expect(saved.clips.map((c) => c.link)).toEqual([undefined, undefined, undefined]);
+
+      // the preview asks first (the cut, with its seconds and the cut clip), then lasts exactly the limit
+      await textButton(page, 'Preview').click();
+      await expect(page.getByText('Check the mix before rendering')).toBeVisible({ timeout: 60_000 });
+      await expect(page.getByRole('dialog')).toContainText(/it is cut at 0:06 with the fade-out, \d s are left out/);
+      await expect(page.getByRole('dialog')).toContainText('Clips cut: "v-1080x1920-12s #2"');
+      await page.getByRole('button', { name: 'Preview anyway' }).click();
+      const dialogTitle = page.getByText('Mix preview', { exact: true });
+      await expect(dialogTitle).toBeVisible({ timeout: 110_000 });
+      const out = fileURLToPath(await page.getByRole('dialog').locator('video').evaluate((v) => (v as HTMLVideoElement).src));
+      const probe = ffprobe(out);
+      expect(Number(probe.format.duration)).toBeCloseTo(6, 1);
+      await screenshot(page, '14d-preview');
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test.describe('VideoMix (Spanish UI)', () => {
   test('10. the UI is in Spanish', async () => {
     const ctx = await launchApp({ language: 'es' });

@@ -21,6 +21,18 @@ export const MAX_NORMALIZED_PEAK = 5;
 export const LIMITER_CEILING = -1;
 /** Shortest fade at any clip boundary (s), so that cutting a waveform mid-cycle doesn't click. */
 export const DECLICK_DURATION = 0.01;
+/**
+ * Audio crossfade of a direct cut between two clips of a column (s): a chain with `links.transition: 'cut'` (E2), or a
+ * transition shortened to 0. The outgoing clip's audio goes on this long past the cut and fades out while the incoming
+ * one fades in: two separate de-click fades (`DECLICK_DURATION`) would drop to silence right at the cut.
+ */
+export const CUT_CROSSFADE = 0.02;
+/**
+ * The two sides of a cut are the same audio (consecutive clips of a source that touch) when the incoming clip starts
+ * within this (s) of where the outgoing one ends in the source: then their crossfade is linear, so the sum is exactly
+ * the source (an equal-power one would bump the level by 3 dB in the middle); otherwise it's equal power.
+ */
+const CONTINUOUS_JOIN_TOLERANCE = 0.001;
 /** The music fades out over max(this, D) at the end of the video (04-diseno §5.2). */
 export const MUSIC_FADE_OUT = 2;
 export const AUDIO_SAMPLE_RATE = 48000;
@@ -74,13 +86,28 @@ export const getGlobalFadeDuration = (settings: Pick<MixSettings, 'fadeInOut' | 
 /**
  * Audio fade in/out of a placement (s), following what the video does (01-requisitos §4.3, §4.5):
  * - crossfade in its column: the incoming clip's `transitionIn`, for both clips;
+ * - a direct cut to the next clip of its column (a chain, E2): `CUT_CROSSFADE` for both clips, with the outgoing one's
+ *   audio going on that long past its end (`tail`), so the join has no dip (`joinedIn`/`joinedOut` are the clips on
+ *   the other side of the cut);
  * - a column that appears (or disappears) in a re-layout: the duration of that layout animation;
  * - the end of the video, when the clip fades into the fill: `transitionOut`;
  * - otherwise a hard cut, softened by `DECLICK_DURATION`.
+ *
+ * The audio of the placement spans `[startTime, endTime + tail]`: `fadeIn` is at its start and `fadeOut` at its end.
  */
-export function getPlacementFades(plan: Pick<MixPlan, 'placements' | 'layouts'>, placement: ColumnPlacement) {
+export function getPlacementFades(plan: Pick<MixPlan, 'placements' | 'layouts'>, placement: ColumnPlacement): {
+  fadeIn: number,
+  fadeOut: number,
+  tail: number,
+  joinedIn: ColumnPlacement | undefined,
+  joinedOut: ColumnPlacement | undefined,
+} {
   const { column, startTime, endTime } = placement;
   const duration = endTime - startTime;
+  const isCut = (from: ColumnPlacement, to: ColumnPlacement) => to.transitionIn < EPS && Math.abs(to.startTime - from.endTime) < EPS;
+  const joinedIn = placement.transitionIn < EPS && startTime > EPS
+    ? plan.placements.find((p) => p !== placement && p.column === column && isCut(p, placement))
+    : undefined;
 
   let fadeIn = placement.transitionIn;
   if (fadeIn <= 0 && startTime > EPS) {
@@ -105,11 +132,37 @@ export function getPlacementFades(plan: Pick<MixPlan, 'placements' | 'layouts'>,
     }
   }
 
-  fadeIn = Math.max(fadeIn, DECLICK_DURATION);
-  fadeOut = Math.max(fadeOut, DECLICK_DURATION);
-  // never more than the clip itself (the planner already keeps transitions ≤ duration / 2)
-  const scale = Math.min(1, duration / (fadeIn + fadeOut));
-  return { fadeIn: fadeIn * scale, fadeOut: fadeOut * scale };
+  const joinedOut = next != null && isCut(placement, next) ? next : undefined;
+  // a cut's crossfade: the same on both sides, at most half of the incoming clip
+  const crossfadeInto = (to: ColumnPlacement) => Math.min(CUT_CROSSFADE, (to.endTime - to.startTime) / 2);
+  fadeIn = joinedIn != null ? crossfadeInto(placement) : Math.max(fadeIn, DECLICK_DURATION);
+  fadeOut = joinedOut != null ? crossfadeInto(joinedOut) : Math.max(fadeOut, DECLICK_DURATION);
+  // never more than the clip itself (the planner already keeps transitions ≤ duration / 2); the fade-out of a cut is
+  // past the end (`tail`) and the fade-in of a cut already fits
+  const scaled = (joinedIn != null ? 0 : fadeIn) + (joinedOut != null ? 0 : fadeOut);
+  const scale = scaled > 0 ? Math.min(1, (duration - (joinedIn != null ? fadeIn : 0)) / scaled) : 1;
+  return {
+    fadeIn: joinedIn != null ? fadeIn : fadeIn * scale,
+    fadeOut: joinedOut != null ? fadeOut : fadeOut * scale,
+    tail: joinedOut != null ? fadeOut : 0,
+    joinedIn,
+    joinedOut,
+  };
+}
+
+/** The clip fields the audio pass uses. */
+export type AudioClip = Pick<MixClip, 'id' | 'sourceId' | 'start' | 'muted' | 'gainDb'>;
+
+/**
+ * `afade` curve of both sides of a direct cut (`getPlacementFades`): linear when they are the same audio (the incoming
+ * clip continues the outgoing one in the same source), equal power otherwise.
+ */
+export function getJoinCurve(clips: ReadonlyMap<string, Pick<AudioClip, 'sourceId' | 'start'>>, from: ColumnPlacement, to: ColumnPlacement) {
+  const fromClip = clips.get(from.clipId);
+  const toClip = clips.get(to.clipId);
+  const continuous = fromClip != null && toClip != null && fromClip.sourceId === toClip.sourceId
+    && Math.abs(toClip.start - (fromClip.start + from.endTime - from.startTime)) < CONTINUOUS_JOIN_TOLERANCE;
+  return continuous ? 'tri' : 'qsin';
 }
 
 /** Compensation for `n` simultaneous (uncorrelated) sources, as amplitude: -10·log10(n) dB. */
@@ -179,9 +232,6 @@ export function getCompensationExpr(audible: { startTime: number, endTime: numbe
   if (terms.length === 0) return initial === 1 ? undefined : fmt(initial);
   return `${fmt(initial)}${terms.join('')}`;
 }
-
-/** The clip fields the audio pass uses. */
-export type AudioClip = Pick<MixClip, 'id' | 'sourceId' | 'start' | 'muted' | 'gainDb'>;
 
 /**
  * Audio pass graph. Same shape as `AudioGraph` of render/buildRenderJob.ts (T11), which encodes it as AAC 192 kbps,
@@ -321,7 +371,8 @@ function buildMusic({ playlist, loudness, totalDuration, fadeDuration, firstInpu
  * Audio of the whole mix, rendered in one separate pass and muxed with the video chunks with `-c copy` (ADR-001).
  * Graph (04-diseno §5.2):
  * - per audible clip (not muted, with audio): `-vn -ss/-t` input → stereo 48 kHz → `volume` (normalization + gainDb)
- *   → equal-power `afade` in/out (see getPlacementFades) → `adelay` to its start;
+ *   → equal-power `afade` in/out (see getPlacementFades; a direct cut is a short crossfade, `CUT_CROSSFADE`) →
+ *   `adelay` to its start;
  * - `amix` (normalize=0) → simultaneity compensation (getCompensationExpr) → pad to the video duration;
  * - optional music (C2, T27): the tracks of `musicPlaylist` in sequence with crossfades, the whole list repeated if it
  *   loops (`getMusicSchedule`), each one normalized like a clip plus its `volumeDb` (T12b: 0 dB means as loud as the
@@ -379,8 +430,11 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
     const path = sourcePaths[clip.sourceId];
     invariant(path != null, `Source ${clip.sourceId} not found`);
 
-    const clipDuration = placement.endTime - placement.startTime;
-    const { fadeIn, fadeOut } = getPlacementFades(plan, placement);
+    const { fadeIn, fadeOut, tail, joinedIn, joinedOut } = getPlacementFades(plan, placement);
+    // with a direct cut to the next clip, the audio goes on `tail` s past the end (see getPlacementFades)
+    const clipDuration = placement.endTime - placement.startTime + tail;
+    const curveIn = joinedIn != null ? getJoinCurve(clipsById, joinedIn, placement) : 'qsin';
+    const curveOut = joinedOut != null ? getJoinCurve(clipsById, placement, joinedOut) : 'qsin';
     const inputIndex = inputs.length;
     inputs.push(['-vn', '-ss', formatFfmpegNumber(clip.start), '-t', formatFfmpegNumber(clipDuration + INPUT_MARGIN), '-i', path]);
 
@@ -392,13 +446,15 @@ export function buildAudioGraph({ plan, clips, sourcePaths, settings, duration, 
       'aformat=sample_fmts=fltp:channel_layouts=stereo',
       `atrim=duration=${fmt(clipDuration)}`,
       `volume=${fmt(getNormalizationGain(measurement) + clip.gainDb)}dB`,
-      `afade=t=in:d=${fmt(fadeIn)}:curve=qsin`,
-      `afade=t=out:st=${fmt(clipDuration - fadeOut)}:d=${fmt(fadeOut)}:curve=qsin`,
+      `afade=t=in:d=${fmt(fadeIn)}:curve=${curveIn}`,
+      `afade=t=out:st=${fmt(clipDuration - fadeOut)}:d=${fmt(fadeOut)}:curve=${curveOut}`,
       `adelay=${Math.round(placement.startTime * AUDIO_SAMPLE_RATE)}S:all=1`,
     ].filter((filter) => filter != null);
     filters.push(`[${inputIndex}:a:0]${chain.join(',')}[${label}]`);
     clipLabels.push(`[${label}]`);
-    audible.push({ startTime: placement.startTime, endTime: placement.endTime, fadeIn, fadeOut });
+    // a cut changes nothing in the compensation: the outgoing clip stops counting in the middle of its fade-out,
+    // just when the incoming one starts
+    audible.push({ startTime: placement.startTime, endTime: placement.endTime + tail, fadeIn, fadeOut });
   });
 
   const pad = `apad=whole_dur=${fmt(totalDuration)}`;

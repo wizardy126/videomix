@@ -1,5 +1,6 @@
 import { getPlannerInput } from '../planner/plannerInput';
 import { planMix } from '../planner/planMix';
+import { truncatePlan } from '../planner/truncatePlan';
 import { getDefaultAxis } from '../planner/types';
 import type { MixPlan } from '../planner/types';
 import { getOutputSize } from '../types';
@@ -90,7 +91,13 @@ export const scaleGap = (gap: number, fromHeight: number, toHeight: number) => 2
 export const getPreviewFps = (fps: MixSettings['fps']): MixSettings['fps'] => (fps === 60 ? 30 : (fps === 50 ? 25 : fps));
 
 export interface RenderPlan {
+  /** What is rendered: cut at `settings.maxDuration` (E4, `truncatePlan`) when the mix is longer. */
   plan: MixPlan,
+  /**
+   * The plan before the cut (the same object as `plan` when nothing is cut): its duration is the "≈ m:ss" estimate
+   * (E3), and its placements anchor the overlays (see {@link getOverlayTimesPlan}).
+   */
+  fullPlan: MixPlan,
   /** The project settings adapted to the plan (preview: scaled gap and fps); pass these to `buildRenderJob`. */
   settings: MixSettings,
   /** Overrides the project's CRF/preset (preview). */
@@ -107,19 +114,29 @@ export interface RenderPlan {
 export function planRender({ clips, settings, sources }: Pick<MixProject, 'clips' | 'settings'> & { sources: Pick<MixSource, 'id' | 'width' | 'height'>[] }, { preview = false }: { preview?: boolean } = {}): RenderPlan {
   // E7 (T38b): the source sizes bound the extension beyond the max; the preview extends by the same source pixels
   const input = getPlannerInput({ clips, settings, sources });
-  if (!preview) return { plan: planMix(input), settings };
+  // E4 (T39): the render, the preview and the live preview all show the mix cut at the maximum duration
+  const cut = (fullPlan: MixPlan) => ({ plan: settings.maxDuration != null ? truncatePlan(fullPlan, settings.maxDuration) : fullPlan, fullPlan });
+  if (!preview) return { ...cut(planMix(input)), settings };
 
   const { width, height } = getPreviewSize(settings.output);
   const output = getOutputSize(settings.output);
   const gap = scaleGap(settings.gap.width, Math.min(output.width, output.height), Math.min(width, height));
   const axis = getDefaultAxis(output) ?? planMix(input).axis;
-  const plan = planMix({ ...input, settings: { ...input.settings, width, height, gap, axis } });
   return {
-    plan,
+    ...cut(planMix({ ...input, settings: { ...input.settings, width, height, gap, axis } })),
     settings: { ...settings, fps: getPreviewFps(settings.fps), gap: { ...settings.gap, width: gap } },
     encoding: PREVIEW_ENCODING,
   };
 }
+
+/**
+ * What overlays and sounds are resolved on (`resolveOverlayTimes`, T38): the placements of the whole plan with the
+ * duration of the cut one. So an overlay anchored to a clip lost at the cut falls after the end of the video (and is
+ * left out) instead of losing its anchor, and one anchored to the end of a clip that is cut keeps its real time.
+ */
+export const getOverlayTimesPlan = ({ plan, fullPlan }: Pick<RenderPlan, 'plan' | 'fullPlan'>): Pick<MixPlan, 'duration' | 'placements'> => (
+  plan === fullPlan ? plan : { duration: plan.duration, placements: fullPlan.placements }
+);
 
 export type RenderWarning =
   | { type: 'upscale', clipName: string, factor: number }
@@ -131,12 +148,15 @@ export type RenderWarning =
   /** A4 (T30): a group whose clips don't all start together. */
   | { type: 'group-split', clipNames: string[] }
   /** E7 (T38b): a clip shown beyond its max rect (`pixels` along the main axis: a height when `rows`). */
-  | { type: 'extended', clipName: string, pixels: number, time: number, endTime: number, rows: boolean };
+  | { type: 'extended', clipName: string, pixels: number, time: number, endTime: number, rows: boolean }
+  /** E4 (T39): the mix is cut at the maximum duration `time`: `seconds` lost, clips left out and clips cut. */
+  | { type: 'truncated', time: number, seconds: number, lostClipNames: string[], cutClipNames: string[] };
 
 /**
  * Plan warnings worth confirming before a render (01-requisitos §4.6): clips upscaled more than ×2, clips shown with
  * fill around them (pillarbox/letterbox), rows that can't be filled with clips, pins or groups the planner couldn't
- * honour (A4) and clips shown beyond their max rect to avoid fill (E7). Shortened transitions are left out:
+ * honour (A4), clips shown beyond their max rect to avoid fill (E7) and the cut at the maximum duration (E4, first).
+ * Shortened transitions are left out:
  * validateMixProject already warns about short clips. One `fill` warning per keyframe would be noise, so only the first.
  */
 export function getRenderWarnings(plan: Pick<MixPlan, 'warnings' | 'axis'>, clips: Pick<MixClip, 'id' | 'name'>[]): RenderWarning[] {
@@ -170,6 +190,11 @@ export function getRenderWarnings(plan: Pick<MixPlan, 'warnings' | 'axis'>, clip
       }
       case 'extended': {
         ret.push({ type: 'extended', clipName: getName(warning.clipId), pixels: warning.pixels, time: warning.time, endTime: warning.endTime, rows: plan.axis === 'rows' });
+        break;
+      }
+      case 'truncated': {
+        // first: it's the one that changes the video most
+        ret.unshift({ type: 'truncated', time: warning.time, seconds: warning.seconds, lostClipNames: warning.clipIds.map((id) => getName(id)), cutClipNames: warning.cutClipIds.map((id) => getName(id)) });
         break;
       }
       default: { break; }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { buildAudioGraph, getCompensationExpr, getDuckingFilter, getMusicSchedule, getNormalizationGain, getPlacementFades, MAX_MUSIC_OCCURRENCES } from './buildAudioGraph';
+import { buildAudioGraph, CUT_CROSSFADE, getCompensationExpr, getDuckingFilter, getJoinCurve, getMusicSchedule, getNormalizationGain, getPlacementFades, MAX_MUSIC_OCCURRENCES } from './buildAudioGraph';
 import { createEmptyMixProject, defaultMusicPlaylist } from '../types';
 import type { LoudnessMeasurement, MixClip, MixMusicPlaylist, MixMusicTrack, MixSettings, SoundOverlay } from '../types';
 import type { LayoutKeyframe, MixPlan } from '../planner/types';
@@ -65,9 +65,9 @@ describe('getNormalizationGain', () => {
 describe('getPlacementFades', () => {
   test('crossfade and fade into the fill', () => {
     const [a, c, b] = twoColumnPlan.placements;
-    expect(getPlacementFades(twoColumnPlan, a!)).toEqual({ fadeIn: 0.01, fadeOut: 0.5 });
-    expect(getPlacementFades(twoColumnPlan, b!)).toEqual({ fadeIn: 0.5, fadeOut: 0.01 });
-    expect(getPlacementFades(twoColumnPlan, c!)).toEqual({ fadeIn: 0.01, fadeOut: 0.5 });
+    expect(getPlacementFades(twoColumnPlan, a!)).toMatchObject({ fadeIn: 0.01, fadeOut: 0.5 });
+    expect(getPlacementFades(twoColumnPlan, b!)).toMatchObject({ fadeIn: 0.5, fadeOut: 0.01 });
+    expect(getPlacementFades(twoColumnPlan, c!)).toMatchObject({ fadeIn: 0.01, fadeOut: 0.5 });
   });
 
   test('column appearing and disappearing in re-layouts', () => {
@@ -84,8 +84,8 @@ describe('getPlacementFades', () => {
       warnings: [],
     };
     const [, b, c] = plan.placements;
-    expect(getPlacementFades(plan, b!)).toEqual({ fadeIn: 0.01, fadeOut: 0.4 });
-    expect(getPlacementFades(plan, c!)).toEqual({ fadeIn: 0.4, fadeOut: 0.01 });
+    expect(getPlacementFades(plan, b!)).toMatchObject({ fadeIn: 0.01, fadeOut: 0.4 });
+    expect(getPlacementFades(plan, c!)).toMatchObject({ fadeIn: 0.4, fadeOut: 0.01 });
   });
 
   test('never longer than the clip', () => {
@@ -99,6 +99,69 @@ describe('getPlacementFades', () => {
     };
     const { fadeIn, fadeOut } = getPlacementFades(plan, plan.placements[0]!);
     expect(fadeIn + fadeOut).toBeCloseTo(0.01);
+  });
+});
+
+describe('direct cuts (chains, T39)', () => {
+  // Column 0: a (0–4) cuts into b (4–9), which cuts into d (9–12). Column 1: c (0–12) alone.
+  const plan: MixPlan = {
+    width: 1920,
+    height: 1080,
+    duration: 12,
+    placements: [
+      { clipId: 'a', column: 0, startTime: 0, endTime: 4, transitionIn: 0 },
+      { clipId: 'c', column: 1, startTime: 0, endTime: 12, transitionIn: 0 },
+      { clipId: 'b', column: 0, startTime: 4, endTime: 9, transitionIn: 0 },
+      { clipId: 'd', column: 0, startTime: 9, endTime: 12, transitionIn: 0 },
+    ],
+    layouts: [layout(0, 0, [0, 1])],
+    warnings: [],
+  };
+  const [a, c, b, d] = plan.placements;
+  // a → b continue the same source; b → d don't
+  const clips = [clip('a', 's1', 1, 5), clip('b', 's1', 5, 10), clip('c', 's2', 0, 12), clip('d', 's1', 20, 23)];
+
+  test('both sides of a cut crossfade past it', () => {
+    expect(getPlacementFades(plan, a!)).toEqual({ fadeIn: 0.01, fadeOut: CUT_CROSSFADE, tail: CUT_CROSSFADE, joinedIn: undefined, joinedOut: b });
+    expect(getPlacementFades(plan, b!)).toEqual({ fadeIn: CUT_CROSSFADE, fadeOut: CUT_CROSSFADE, tail: CUT_CROSSFADE, joinedIn: a, joinedOut: d });
+    expect(getPlacementFades(plan, d!)).toEqual({ fadeIn: CUT_CROSSFADE, fadeOut: 0.01, tail: 0, joinedIn: b, joinedOut: undefined });
+    // not a cut: a clip starting alone in its column
+    expect(getPlacementFades(plan, c!)).toMatchObject({ fadeIn: 0.01, fadeOut: 0.01, tail: 0 });
+  });
+
+  test('a crossfade (transitionIn > 0) or a gap is not a cut', () => {
+    const crossfaded: MixPlan = { ...plan, placements: plan.placements.map((p) => (p.clipId === 'b' ? { ...p, startTime: 3.5, transitionIn: 0.5 } : p)) };
+    expect(getPlacementFades(crossfaded, crossfaded.placements[0]!)).toMatchObject({ fadeOut: 0.5, tail: 0, joinedOut: undefined });
+    const gap: MixPlan = { ...plan, placements: plan.placements.map((p) => (p.clipId === 'b' ? { ...p, startTime: 4.1 } : p)) };
+    expect(getPlacementFades(gap, gap.placements[0]!)).toMatchObject({ fadeOut: 0.01, tail: 0, joinedOut: undefined });
+  });
+
+  test('the crossfade is at most half of the incoming clip', () => {
+    const short: MixPlan = { ...plan, placements: [a!, { ...b!, endTime: 4.02 }] };
+    const out = getPlacementFades(short, short.placements[0]!);
+    expect(out.fadeOut).toBeCloseTo(0.01);
+    expect(out.tail).toBe(out.fadeOut);
+    expect(getPlacementFades(short, short.placements[1]!).fadeIn).toBe(out.fadeOut);
+  });
+
+  test('curve: linear for the same audio, equal power otherwise', () => {
+    const byId = new Map(clips.map((x) => [x.id, x]));
+    expect(getJoinCurve(byId, a!, b!)).toBe('tri');
+    expect(getJoinCurve(byId, b!, d!)).toBe('qsin');
+  });
+
+  test('graph: the outgoing clip goes on past the cut, the compensation doesn\'t change', () => {
+    const pass = buildAudioGraph({ plan, clips, sourcePaths, settings: makeSettings({ fadeInOut: false }), loudness: Object.fromEntries(clips.map((x) => [x.id, measured(-16, -10)])) });
+    const { filterComplex } = pass;
+    const lines = filterComplex.split(';\n');
+    expect(lines[0]).toContain(`atrim=duration=${4 + CUT_CROSSFADE},`);
+    expect(lines[0]).toContain(`afade=t=out:st=4:d=${CUT_CROSSFADE}:curve=tri`);
+    expect(lines[2]).toContain(`afade=t=in:d=${CUT_CROSSFADE}:curve=tri`);
+    expect(lines[2]).toContain(`afade=t=out:st=5:d=${CUT_CROSSFADE}:curve=qsin`);
+    expect(lines[3]).toContain(`afade=t=in:d=${CUT_CROSSFADE}:curve=qsin`);
+    // two clips sound all the time: a constant compensation, no ramps at the cuts
+    expect(filterComplex).toContain('volume=\'0.707107\':eval=frame');
+    expect(verifyFilterGraph(pass)).toEqual([]);
   });
 });
 

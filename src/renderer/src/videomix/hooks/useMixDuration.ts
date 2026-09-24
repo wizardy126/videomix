@@ -26,13 +26,14 @@ const noSources: [] = [];
 export default function useMixDuration({ clips, settings, mixPlan }: {
   clips: MixClip[],
   settings: MixSettings,
+  /** `useMixOverlays.fullPlan`: the whole mix, before the cut at the maximum duration (E4). */
   mixPlan: MixPlan | undefined,
 }): MixDurationEstimate {
   const [debouncedClips] = useDebounce(clips, PLAN_DEBOUNCE_MS);
   const [debouncedSettings] = useDebounce(settings, PLAN_DEBOUNCE_MS);
 
   const ownPlan = useMemo<MixPlan | undefined>(
-    () => (mixPlan == null && debouncedClips.length > 0 ? planRender({ clips: debouncedClips, settings: debouncedSettings, sources: noSources }).plan : undefined),
+    () => (mixPlan == null && debouncedClips.length > 0 ? planRender({ clips: debouncedClips, settings: debouncedSettings, sources: noSources }).fullPlan : undefined),
     [debouncedClips, debouncedSettings, mixPlan],
   );
 
