@@ -2,7 +2,7 @@ import type { ChangeEventHandler, CSSProperties, FocusEventHandler, KeyboardEven
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FaClone, FaExclamationTriangle, FaGripVertical, FaInfoCircle, FaMinus, FaPlus, FaThumbtack, FaVolumeMute, FaVolumeUp } from 'react-icons/fa';
-import { MdCropLandscape, MdCropPortrait } from 'react-icons/md';
+import { MdCropLandscape, MdCropPortrait, MdOpenInFull } from 'react-icons/md';
 import type { DragEndEvent, DragStartEvent, UniqueIdentifier } from '@dnd-kit/core';
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOverlay } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
@@ -24,6 +24,7 @@ import { getClipDuration } from '../project';
 import { getOrientation } from '../geometry';
 import { clipGainValues, getClipWarnings } from '../clips';
 import { getClipSelectModifiers } from '../hooks/useMixClipPins';
+import { canExtendBeyondMax } from '../planner/plannerInput';
 import type { ClipSelectModifiers, UseMixClipPins } from '../hooks/useMixClipPins';
 
 const buttonBaseStyle: CSSProperties = {
@@ -149,6 +150,13 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
   }, [clip.id, onUpdate]);
 
   const OrientationIcon = orientation === 'horizontal' ? MdCropLandscape : MdCropPortrait;
+  // E7 (T38b): on by default, only `false` is stored
+  const extendBeyondMax = canExtendBeyondMax(clip);
+  const handleExtendClick = useCallback<MouseEventHandler>((e) => {
+    e.stopPropagation();
+    onUpdate(clip.id, { extendBeyondMax: extendBeyondMax ? false : undefined });
+  }, [clip.id, extendBeyondMax, onUpdate]);
+
   const MuteIcon = clip.muted ? FaVolumeMute : FaVolumeUp;
 
   return (
@@ -195,6 +203,16 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
         <span style={{ whiteSpace: 'nowrap' }}>{formatTime(clip.start)} – {formatTime(clip.end)}</span>
         <span style={{ whiteSpace: 'nowrap', fontWeight: 'bold' }}>{formatDuration({ seconds: duration, shorten: true })}</span>
         <MuteIcon role="button" title={clip.muted ? t('Unmute clip') : t('Mute clip')} onClick={handleMuteClick} style={{ ...iconStyle, cursor: 'pointer', opacity: clip.muted ? 1 : 0.6, color: clip.muted ? warningColor : undefined }} />
+        <MdOpenInFull
+          role="switch"
+          aria-checked={extendBeyondMax}
+          data-testid="clip-extend-toggle"
+          title={extendBeyondMax
+            ? t('Extend beyond the max if needed: on. To avoid fill, the clip may show more of its source than its max rectangle. Click to turn it off')
+            : t('Extend beyond the max if needed: off. Click to turn it on')}
+          onClick={handleExtendClick}
+          style={{ ...iconStyle, cursor: 'pointer', opacity: extendBeyondMax ? 0.6 : 0.25 }}
+        />
         <select value={clip.gainDb} title={t('Clip gain (dB)')} onChange={handleGainChange} onClick={stopPropagation} style={{ ...plainInputStyle, border: '1px solid var(--gray-7)', fontSize: '.85em', flexShrink: 0 }}>
           {clipGainValues.map((v) => <option key={v} value={v}>{v > 0 ? `+${v}` : v} dB</option>)}
         </select>

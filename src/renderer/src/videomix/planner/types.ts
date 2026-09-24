@@ -1,5 +1,5 @@
 import { getAxisLengths } from '../geometry';
-import type { AspectRange, LayoutAxis } from '../geometry';
+import type { AspectRange, FrameSize, LayoutAxis } from '../geometry';
 import type { Rect } from '../types';
 
 /** A clip as the planner sees it. Built from `MixClip` by `getPlannerInput`. */
@@ -20,6 +20,12 @@ export interface PlannerClip {
    * with a pinned clip is pinned as a whole, at the earliest pin of its clips.
    */
   groupId?: string | undefined,
+  /**
+   * E7 (T38b): the clip may show material beyond its max rect, along the main axis, to cover fill the layout would
+   * otherwise leave (last resort, see `extendPlan`). `frame` is the source frame size (display px, B1), where the
+   * extension ends. Missing when the clip's flag is off, the source size is unknown or there are no `rects`.
+   */
+  extendBeyondMax?: { frame: FrameSize } | undefined,
 }
 
 export interface PlannerSettings {
@@ -92,6 +98,13 @@ export interface ColumnPlacement {
    * ≤ min(D, clip duration / 2), and no layout animation starts inside the fade.
    */
   transitionOut?: number | undefined,
+  /**
+   * E7 (T38b): the clip's max rect extended by the planner along the main axis (source display px, even edges, inside
+   * the source frame, containing the max). Render and preview crop with `getExtendedCropForAspect` and this rect, so
+   * where a column is longer than the max allows the crop grows into it instead of leaving pillarbox/letterbox.
+   * Missing when the clip doesn't need it.
+   */
+  extendedMaxRect?: Rect | undefined,
 }
 
 /**
@@ -144,7 +157,12 @@ export type PlanWarning =
    * E4 (T38, `truncatePlan`): the video is cut at `time` (the maximum duration). `seconds` of the planned video are
    * lost: the clips of `clipIds` entirely (they would start at or after the cut) and the end of those of `cutClipIds`.
    */
-  | { type: 'truncated', time: number, seconds: number, clipIds: string[], cutClipIds: string[] };
+  | { type: 'truncated', time: number, seconds: number, clipIds: string[], cutClipIds: string[] }
+  /**
+   * E7 (T38b): the clip shows `pixels` source px beyond its max rect (along the main axis: a width for columns, a
+   * height for rows) during [time, endTime], to avoid fill.
+   */
+  | { type: 'extended', clipId: string, pixels: number, time: number, endTime: number };
 
 export interface MixPlan {
   /** Output size (px), whatever the axis. */

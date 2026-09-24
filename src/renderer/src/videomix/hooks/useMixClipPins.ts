@@ -7,6 +7,7 @@ import type { ContextMenuTemplate } from '../../types';
 import type { MixProjectAction } from '../projectReducer';
 import type { MixClip } from '../types';
 import { getClipPinTime, getGroupColors, getGroupMembers, getPinClipAction, getSelectionRange, getUnpinClipAction } from '../clipGroups';
+import { canExtendBeyondMax } from '../planner/plannerInput';
 
 const { getCurrentWindow, Menu } = window.require('@electron/remote');
 
@@ -18,10 +19,15 @@ export interface ClipSelectModifiers {
 
 export const getClipSelectModifiers = (e: { ctrlKey: boolean, metaKey: boolean, shiftKey: boolean }): ClipSelectModifiers => ({ toggle: e.ctrlKey || e.metaKey, range: e.shiftKey });
 
+/** E7 (T38b): switch a clip's "extend beyond the max if needed" (on = the flag removed, the default). */
+export const getToggleExtendBeyondMaxAction = (clip: Pick<MixClip, 'id' | 'extendBeyondMax'>): MixProjectAction => (
+  { type: 'updateClip', clipId: clip.id, patch: { extendBeyondMax: canExtendBeyondMax(clip) ? false : undefined } }
+);
+
 /**
  * Pinned and grouped clips (A4, T30) in the clip list and the Mix view: a multi-selection on top of the selected clip
  * (which stays the current segment of its source), the clip menu entries ("Pin here" at the Mix view cursor, "Unpin",
- * "Group selected clips", "Ungroup"), the group colours and pinning by dragging a block. Each edit is one undo step.
+ * "Group selected clips", "Ungroup", and E7's "Extend beyond the max if needed"), the group colours and pinning by dragging a block. Each edit is one undo step.
  */
 export default function useMixClipPins({ clips, selectedClipId, cursorTime, selectClip, dispatchStep }: {
   clips: MixClip[],
@@ -90,7 +96,10 @@ export default function useMixClipPins({ clips, selectedClipId, cursorTime, sele
     { label: i18n.t('Unpin'), enabled: pinTimes.has(clip.id), click: () => userUnpinClip(clip.id) },
     { label: i18n.t('Group selected clips'), enabled: selectedClipIds.size >= 2, click: userGroupSelectedClips },
     { label: i18n.t('Ungroup'), enabled: clip.groupId != null && groupColors.has(clip.groupId), click: () => userUngroupClip(clip.id) },
-  ], [cursorTime, groupColors, pinTimes, selectedClipIds.size, userGroupSelectedClips, userPinClip, userUngroupClip, userUnpinClip]);
+    { type: 'separator' },
+    // E7 (T38b): on by default (only `false` is stored)
+    { label: i18n.t('Extend beyond the max if needed'), type: 'checkbox', checked: canExtendBeyondMax(clip), click: () => dispatchStep(getToggleExtendBeyondMaxAction(clip)) },
+  ], [cursorTime, dispatchStep, groupColors, pinTimes, selectedClipIds.size, userGroupSelectedClips, userPinClip, userUngroupClip, userUnpinClip]);
 
   /**
    * Opens the clip menu right away (Mix view blocks: a block per clip, so the native menu is only built when it's

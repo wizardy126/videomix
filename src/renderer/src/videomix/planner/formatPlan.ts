@@ -13,6 +13,7 @@ function formatWarning(w: PlanWarning) {
     case 'pin-shifted': { return `pin-shifted ${w.clipId} ${s(w.pinTime)} -> ${s(w.time)}`; }
     case 'group-split': { return `group-split ${w.groupId} (${w.clipIds.join(', ')})`; }
     case 'truncated': { return `truncated @${s(w.time)} -${s(w.seconds)}s lost (${w.clipIds.join(', ')}) cut (${w.cutClipIds.join(', ')})`; }
+    case 'extended': { return `extended ${w.clipId} +${w.pixels}px @${s(w.time)}-${s(w.endTime)}`; }
     default: { return JSON.stringify(w); }
   }
 }

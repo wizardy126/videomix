@@ -10,12 +10,15 @@ import type { ConfirmDialog } from '../../components/GenericDialog';
 import type { SetWorking } from '../../hooks/useLoading';
 import type { WithErrorHandling } from '../../hooks/useErrorHandling';
 import type { FileFfprobeMeta } from '../../ffmpeg';
+import { readFileFfprobeMeta } from '../../ffmpeg';
 import type { UseMixProject } from './useMixProject';
 import type { LoadedMixProject, MissingOverlayFile, OverlayFileKind } from '../projectFile';
 import { getOverlayFiles } from '../projectFile';
 import { askForRecoverProject } from '../dialogs';
 import { getSourceFrameChange } from '../sourceResize';
-import { classifyOpenedPaths, appendMusicTracks, countClipsBySource, createMusicTrack, getMixProjectTitle, getSourceMeta, isSourceMetaChanged } from '../workspace';
+import type { MixSource } from '../types';
+import type { SourceMeta } from '../workspace';
+import { classifyOpenedPaths, appendMusicTracks, countClipsBySource, createMusicTrack, getMixProjectTitle, getSourceMeta, isSourceMetaChanged, refreshSourcesMeta } from '../workspace';
 
 const { basename, dirname } = window.require('node:path');
 
@@ -66,18 +69,33 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
 
   const clipCountBySource = useMemo(() => countClipsBySource(project.clips), [project.clips]);
 
+  /**
+   * Applies a freshly probed meta to a source (the active one, or one refreshed in the background, T35b): warns if
+   * the frame changed proportion and the source has clips, because their rects are refitted (B2: `setSourceMeta` →
+   * `relinkSource` → `sourceResize.ts`), then updates the cache (no undo step, no dirty).
+   */
+  const applyRefreshedSourceMeta = useCallback((source: MixSource, meta: SourceMeta) => {
+    if (getSourceFrameChange(source, meta)?.aspectChanged && (clipCountBySource.get(source.id) ?? 0) > 0) {
+      getSwal().toast.fire({ icon: 'warning', timer: 10000, title: i18n.t('The video size of {{name}} changed proportion: check the frames of its clips.', { name: source.name }) });
+    }
+    setSourceMeta(source.id, meta);
+  }, [clipCountBySource, setSourceMeta]);
+
   // Keep the informative cache (size, duration) of the active source up to date with what loadMedia probed
   useEffect(() => {
     if (currentSource == null || ffprobeMeta == null) return;
     const meta = getSourceMeta(ffprobeMeta);
     if (!isSourceMetaChanged(currentSource, meta)) return;
-    // B2: a new frame size scales the rects of the source's clips (projectReducer's relinkSource); warn if it also
-    // changed proportion, because then they are refitted
-    if (getSourceFrameChange(currentSource, meta)?.aspectChanged && (clipCountBySource.get(currentSource.id) ?? 0) > 0) {
-      getSwal().toast.fire({ icon: 'warning', timer: 10000, title: i18n.t('The video size of {{name}} changed proportion: check the frames of its clips.', { name: currentSource.name }) });
-    }
-    setSourceMeta(currentSource.id, meta);
-  }, [clipCountBySource, currentSource, ffprobeMeta, setSourceMeta]);
+    applyRefreshedSourceMeta(currentSource, meta);
+  }, [applyRefreshedSourceMeta, currentSource, ffprobeMeta]);
+
+  // T35b/T39 point 5: refresh every source's meta in the background when a project is opened/recovered, so an old
+  // project with an anamorphic source that isn't reactivated this session doesn't fail render validation with
+  // `max-rect-outside-frame`. Fire-and-forget: a probe failure or a missing file is only logged (refreshSourcesMeta).
+  const refreshProjectSourcesMeta = useCallback((sources: readonly MixSource[]) => {
+    refreshSourcesMeta(sources, { pathExists: mainApi.pathExists, probe: readFileFfprobeMeta }, applyRefreshedSourceMeta)
+      .catch((err) => console.warn('Failed to refresh sources meta in the background', err));
+  }, [applyRefreshedSourceMeta]);
 
   // The file in the player is no longer a source (e.g. undo of "Add videos", or a relink): unload it, so the timeline
   // doesn't show a file whose clips can't be edited
@@ -197,9 +215,14 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
     if (missing.size === 0 && loaded.missingOverlayFiles.length === 0 && loaded.missingMusicTrackIds.length > 0) {
       getSwal().toast.fire({ icon: 'warning', timer: 10000, title: i18n.t('{{numMissing}} music file(s) not found. Use "Locate..." in the Music section of the mix settings.', { numMissing: loaded.missingMusicTrackIds.length }) });
     }
+    // T35b: sources with a missing file have nothing to probe; activating a source below refreshes it too, but
+    // probing it again here is harmless (isSourceMetaChanged skips a no-op update)
+    const sourcesToRefresh = loaded.project.sources.filter((s) => !missing.has(s.id));
+    if (sourcesToRefresh.length > 0) refreshProjectSourcesMeta(sourcesToRefresh);
+
     const firstFound = loaded.project.sources.find((s) => !missing.has(s.id));
     if (firstFound != null) await activateSourceFile(firstFound);
-  }, [activateSourceFile, closeMedia]);
+  }, [activateSourceFile, closeMedia, refreshProjectSourcesMeta]);
 
   const userNewProject = useCallback(async () => {
     await withErrorHandling(async () => {

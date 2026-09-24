@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'vitest';
 
 import {
-  ASPECT_TOLERANCE, clampRect, distributeWidths, getAspectRange, getAxisLengths, getCellRect, getCropForAspect, getMainAspectRange,
+  ASPECT_TOLERANCE, clampRect, distributeWidths, extendMaxRect, getAspectRange, getAxisLengths, getCellRect, getCropForAspect,
+  getExtendedCropForAspect, getExtensionRoom, getMainAspectRange,
   getOrientation, getScaleFactor, getWidthRange, normalizeClipRects, normalizeRectEven, rectAspect, rectContains,
   transposeAspectRange, transposeRect,
 } from './geometry';
@@ -377,5 +378,99 @@ describe('main axis (T29)', () => {
     const small = { x: 0, y: 0, width: 1280, height: 720 };
     const { crop } = getCropForAspect(small, undefined, 1080 / 608);
     expect(getScaleFactor(crop, 1080, 608)).toBeCloseTo(1080 / 1280, 2);
+  });
+});
+
+function frameRect({ width, height }: { width: number, height: number }): Rect {
+  return { x: 0, y: 0, width, height };
+}
+
+describe('extension beyond the max (E7, T38b)', () => {
+  const source = { width: 1920, height: 1080 };
+  // a 9:16 max in the middle of a 16:9 source
+  const middle: Rect = { x: 656, y: 0, width: 608, height: 1080 };
+  // the same, near the left edge
+  const nearLeft: Rect = { x: 100, y: 0, width: 608, height: 1080 };
+
+  test('room: what the source source has beyond the max along the direction', () => {
+    expect(getExtensionRoom(middle, source, 'horizontal')).toBe(1312);
+    expect(getExtensionRoom(middle, source, 'vertical')).toBe(0);
+    expect(getExtensionRoom({ x: 0, y: 140, width: 1920, height: 800 }, source, 'vertical')).toBe(280);
+    // odd source sizes count to even px; a max outside its source can't extend
+    expect(getExtensionRoom(middle, { width: 1921, height: 1080 }, 'horizontal')).toBe(1312);
+    expect(getExtensionRoom({ x: 1500, y: 0, width: 608, height: 1080 }, source, 'horizontal')).toBe(0);
+  });
+
+  test('extended max: centred on the max, asymmetric at the source edge, never beyond the room', () => {
+    expect(extendMaxRect(middle, source, 'horizontal', 400)).toEqual({ x: 456, y: 0, width: 1008, height: 1080 });
+    // only 100 px on the left: the other 300 px go to the right
+    expect(extendMaxRect(nearLeft, source, 'horizontal', 400)).toEqual({ x: 0, y: 0, width: 1008, height: 1080 });
+    // at the right edge
+    expect(extendMaxRect({ x: 1212, y: 0, width: 608, height: 1080 }, source, 'horizontal', 400)).toEqual({ x: 912, y: 0, width: 1008, height: 1080 });
+    expect(extendMaxRect(middle, source, 'horizontal', 5000)).toEqual({ x: 0, y: 0, width: 1920, height: 1080 });
+    // odd extra rounds up to even; vertical keeps x/width
+    expect(extendMaxRect(middle, source, 'horizontal', 3)).toEqual({ x: 654, y: 0, width: 612, height: 1080 });
+    expect(extendMaxRect({ x: 0, y: 100, width: 1920, height: 800 }, source, 'vertical', 200)).toEqual({ x: 0, y: 0, width: 1920, height: 1000 });
+    expect(extendMaxRect(middle, source, 'horizontal', 0)).toEqual(middle);
+  });
+
+  test('extended crop: the same as getCropForAspect where the max is enough', () => {
+    const ext = extendMaxRect(middle, source, 'horizontal', 1312);
+    for (const aspect of [0.3, 9 / 16, (9 / 16) * 1.005]) {
+      expect(getExtendedCropForAspect(middle, undefined, ext, aspect)).toEqual(getCropForAspect(middle, undefined, aspect));
+    }
+    expect(getExtendedCropForAspect(middle, undefined, undefined, 16 / 9)).toEqual(getCropForAspect(middle, undefined, 16 / 9));
+    // a vertical extension doesn't help a pillarbox
+    expect(getExtendedCropForAspect({ x: 0, y: 140, width: 1920, height: 800 }, undefined, frameRect(source), 3)).toEqual(getCropForAspect({ x: 0, y: 140, width: 1920, height: 800 }, undefined, 3));
+  });
+
+  test('extended crop: centred on the max, shifted at the edge, pillarbox for what the extension lacks', () => {
+    const all = frameRect(source);
+    expect(getExtendedCropForAspect(middle, undefined, all, 16 / 9)).toEqual({ crop: all, fit: 'fill' });
+    expect(getExtendedCropForAspect(middle, undefined, all, 1)).toEqual({ crop: { x: 420, y: 0, width: 1080, height: 1080 }, fit: 'fill' });
+    expect(getExtendedCropForAspect(nearLeft, undefined, all, 1)).toEqual({ crop: { x: 0, y: 0, width: 1080, height: 1080 }, fit: 'fill' });
+    // limited extension: all of it, and the rest is pillarbox
+    const partial = extendMaxRect(middle, source, 'horizontal', 400);
+    expect(getExtendedCropForAspect(middle, undefined, partial, 16 / 9)).toEqual({ crop: partial, fit: 'pillarbox' });
+    // with a min: the crop keeps the height (and position) of the min, as the crop at the range limit
+    const min: Rect = { x: 656, y: 140, width: 608, height: 800 };
+    expect(getCropForAspect(middle, min, 16 / 9)).toEqual({ crop: min, fit: 'pillarbox' });
+    expect(getExtendedCropForAspect(middle, min, all, 16 / 9)).toEqual({ crop: { x: 250, y: 140, width: 1422, height: 800 }, fit: 'fill' });
+  });
+
+  test('extended crop: vertical (rows) is the transpose', () => {
+    const wide: Rect = { x: 0, y: 140, width: 1920, height: 800 };
+    const ext = extendMaxRect(wide, source, 'vertical', 280);
+    expect(ext).toEqual(frameRect(source));
+    // a 1080x1000 row: 1920x1778 would be needed, the source has 1080
+    expect(getExtendedCropForAspect(wide, undefined, ext, 1080 / 1000)).toEqual({ crop: ext, fit: 'letterbox' });
+    expect(getExtendedCropForAspect(wide, undefined, ext, 1920 / 1000)).toEqual({ crop: { x: 0, y: 40, width: 1920, height: 1000 }, fit: 'fill' });
+    const t = getExtendedCropForAspect(transposeRect(wide), undefined, transposeRect(ext), 1000 / 1920);
+    expect(t).toEqual({ crop: transposeRect({ x: 0, y: 40, width: 1920, height: 1000 }), fit: 'fill' });
+  });
+
+  test('extended crop properties: even, inside the extended rect, contains the min, fills when the extension allows it', () => {
+    const rnd = seededRandom(7);
+    const int = (min: number, max: number) => min + Math.floor(rnd() * (max - min + 1));
+    for (let i = 0; i < 2000; i += 1) {
+      const src = { width: 2 * int(20, 1000), height: 2 * int(20, 1000) };
+      const max: Rect = { x: 2 * int(0, src.width / 4), y: 2 * int(0, src.height / 4), width: 0, height: 0 };
+      max.width = 2 * int(8, (src.width - max.x) / 2);
+      max.height = 2 * int(8, (src.height - max.y) / 2);
+      const min = rnd() < 0.5 ? undefined : { x: max.x, y: max.y + 2 * int(0, (max.height - 16) / 4), width: 2 * int(8, max.width / 2), height: 16 };
+      const direction = rnd() < 0.5 ? 'horizontal' : 'vertical';
+      const ext = extendMaxRect(max, src, direction, 2 * int(0, 1000));
+      expect(rectContains(ext, max)).toBe(true);
+      expect(rectContains(frameRect(src), ext)).toBe(true);
+      const aspect = 0.1 + rnd() * 5;
+      const { crop, fit } = getExtendedCropForAspect(max, min, ext, aspect);
+      expect([crop.x, crop.y, crop.width, crop.height].every((v) => v % 2 === 0)).toBe(true);
+      expect(rectContains(ext, crop)).toBe(true);
+      if (min != null) expect(rectContains(crop, normalizeClipRects(max, min).min)).toBe(true);
+      const normal = getCropForAspect(max, min, aspect);
+      if (fit === 'fill') expect(crop.width / crop.height).toBeCloseTo(aspect, 0);
+      // never worse than without the extension
+      if (normal.fit === 'fill') expect(fit).toBe('fill');
+    }
   });
 });

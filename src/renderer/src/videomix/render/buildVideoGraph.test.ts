@@ -3,7 +3,7 @@ import { describe, test, expect } from 'vitest';
 import { getAspectRange } from '../geometry';
 import { planMix } from '../planner/planMix';
 import { createRandom } from '../planner/random';
-import type { PlannerClip } from '../planner/types';
+import type { MixPlan, PlannerClip } from '../planner/types';
 import { blurCover, buildVideoGraph, formatNumber, stepExpr, toFfmpegColor } from './buildVideoGraph';
 import type { RenderClip } from './buildVideoGraph';
 import { getBusyIntervals, getRenderChunks } from './renderChunks';
@@ -276,5 +276,49 @@ describe('anamorphic sources (B1)', () => {
     expect(blurCover(1920, 1080, 1232 / 694)).toContain('scale=242:136:flags=fast_bilinear,crop=240:136');
     // taller input → width 240
     expect(blurCover(1920, 1080, 0.5)).toContain('scale=240:480:flags=fast_bilinear,crop=240:136');
+  });
+});
+
+describe('extension beyond the max (E7, T38b)', () => {
+  // a 9:16 max in the middle of the 1920x1080 source, shown in a full-width column
+  const v: RenderClip = { id: 'v', sourceId: 'h1080', start: 0, maxRect: { x: 656, y: 0, width: 608, height: 1080 } };
+  const full = { x: 0, y: 0, width: 1920, height: 1080 };
+  const settings = testSettings({ gap: { width: 0, color: '#000000' } });
+  const graphOf = (p: MixPlan) => {
+    const tl = getRenderTimeline(p, { fps: 30, gap: 0, transitionDuration: 0.5 });
+    return getRenderChunks(tl, { maxChunkSeconds: 5 }).map((chunk) => buildVideoGraph({ timeline: tl, clips: [v], sourcePaths: testSourcePaths('/m'), settings, chunk }));
+  };
+  const base: MixPlan = {
+    width: 640,
+    height: 360,
+    duration: 3,
+    placements: [{ clipId: 'v', column: 0, startTime: 0, endTime: 3, transitionIn: 0 }],
+    layouts: [{ time: 0, transitionDuration: 0, columns: [{ column: 0, x: 0, width: 640 }], fills: [] }],
+    warnings: [],
+  };
+
+  test('a static column crops the extended rect instead of pillarboxing', () => {
+    const [before] = graphOf(base);
+    expect(before!.filterComplex).toContain('crop=608:1080:656:0,split');
+    const [graph] = graphOf({ ...base, placements: [{ ...base.placements[0]!, extendedMaxRect: full }] });
+    expect(graph!.filterComplex).toContain('crop=1920:1080:0:0,scale=640:360:flags=bicubic');
+    expect(graph!.filterComplex).not.toContain('split');
+    expect(verifyFilterGraph(graph!, { sourceSizes: [full] })).toEqual([]);
+  });
+
+  test('a column growing in a re-layout crops the union of its extended crops, inside the source', () => {
+    const p: MixPlan = {
+      ...base,
+      placements: [{ ...base.placements[0]!, extendedMaxRect: full }],
+      layouts: [
+        { time: 0, transitionDuration: 0, columns: [{ column: 0, x: 218, width: 202 }], fills: [{ x: 0, width: 218 }, { x: 420, width: 220 }] },
+        { time: 1, transitionDuration: 0.5, columns: [{ column: 0, x: 0, width: 640 }], fills: [] },
+      ],
+    };
+    const graphs = graphOf(p);
+    const animated = graphs.find((g) => g.filterComplex.includes('eval=frame'))!;
+    // the last animated frame is 634 px wide: 1904 source px, centred on the max
+    expect(animated.filterComplex).toContain('crop=1904:1080:8:0');
+    graphs.forEach((g) => expect(verifyFilterGraph(g, { sourceSizes: g.inputs.map(() => full) })).toEqual([]));
   });
 });

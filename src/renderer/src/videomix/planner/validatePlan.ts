@@ -1,3 +1,4 @@
+import { normalizeClipRects, rectContains } from '../geometry';
 import { getDefaultAxis, getPlanAxis, getPlanAxisLengths } from './types';
 import type { ColumnPlacement, MixPlan, PlanMixInput } from './types';
 import { getEffectiveGroups, getEffectivePins, getPlanLinks, getPlanUnits } from './units';
@@ -215,6 +216,35 @@ export function validatePlan(plan: MixPlan, input: PlanMixInput): string[] {
       const expected = linkCut ? 0 : Math.min(D, chain[i - 1]!.duration / 2, chain[i]!.duration / 2);
       if (Math.abs(p.transitionIn - expected) > TOL) fail(`${name}: transition ${p.transitionIn} into ${p.clipId}, expected ${expected}`);
     });
+  });
+
+  // E7 (T38b): an extended max rect only for a clip that allows it, only along the main axis, containing the max and
+  // inside the source frame (even edges)
+  const clipById = new Map(clips.map((clip) => [clip.id, clip]));
+  const horizontal = getPlanAxis(plan) === 'columns';
+  placements.forEach((p) => {
+    const ext = p.extendedMaxRect;
+    if (ext == null) return;
+    const clip = clipById.get(p.clipId);
+    if (clip?.extendBeyondMax == null || clip.rects == null) {
+      fail(`Clip ${p.clipId} is extended without extendBeyondMax`);
+      return;
+    }
+    const { max } = normalizeClipRects(clip.rects.maxRect, clip.rects.minRect);
+    const { frame } = clip.extendBeyondMax;
+    const at = `Clip ${p.clipId} extended to ${ext.x},${ext.y} ${ext.width}x${ext.height}`;
+    if ([ext.x, ext.y, ext.width, ext.height].some((v) => !Number.isInteger(v) || v % 2 !== 0)) fail(`${at}: odd or non-integer edges`);
+    if (!rectContains(ext, max)) fail(`${at}: doesn't contain its max`);
+    if (!rectContains({ x: 0, y: 0, width: frame.width, height: frame.height }, ext)) fail(`${at}: outside its source frame ${frame.width}x${frame.height}`);
+    const crossSame = horizontal ? ext.y === max.y && ext.height === max.height : ext.x === max.x && ext.width === max.width;
+    const longer = horizontal ? ext.width > max.width : ext.height > max.height;
+    if (!crossSame || !longer) fail(`${at}: not extended along the main axis only`);
+  });
+  const extendedWarnings = plan.warnings.filter((w) => w.type === 'extended');
+  extendedWarnings.forEach((w) => {
+    const p = placementOf.get(w.clipId);
+    if (p?.extendedMaxRect == null) fail(`Clip ${w.clipId} has an extended warning but no extension`);
+    else if (w.time < p.startTime - TOL || w.endTime > p.endTime + TOL || w.endTime <= w.time) fail(`Clip ${w.clipId}: extended warning out of its time range`);
   });
 
   // 5. order within the reorder window (ties in start time are sorted by base index, the most favourable). A4 (T30):

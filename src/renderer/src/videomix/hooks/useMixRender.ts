@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 
 import mainApi from '../../mainApi';
 import { UserFacingError } from '../../../errors';
-import { abortFfmpegs, getDefaultOverlayFontPath, getDuration, runFfmpegWithProgress } from '../../ffmpeg';
+import { abortFfmpegs, getDefaultOverlayFontPath, getDuration, readFileFfprobeMeta, runFfmpegWithProgress } from '../../ffmpeg';
 import getSwal from '../../swal';
 import type { SetWorking } from '../../hooks/useLoading';
 import type { WithErrorHandling } from '../../hooks/useErrorHandling';
@@ -14,6 +14,7 @@ import type { UseMixProject } from './useMixProject';
 import { validateMixProject } from '../project';
 import type { MixProjectIssue } from '../project';
 import { getOverlayFiles } from '../projectFile';
+import { getUsedSources, refreshSourcesMeta } from '../workspace';
 import { ensureLoudness, getSoundDurations } from '../loudness';
 import type { LoudnessMeasurement } from '../types';
 import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
@@ -166,7 +167,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
   openExportFinishedDialog: (params: { filePath: string, children: string }) => Promise<void>,
   appendFfmpegCommandLog: (args: string[]) => void,
 }) {
-  const { project, projectPath, setLoudnessCache } = mixProject;
+  const { project, getProject, projectPath, setLoudnessCache, setSourceMeta } = mixProject;
 
   // Session memory for the save dialog, and the current preview file (removed when its dialog closes or a new
   // preview starts)
@@ -198,25 +199,32 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
   const prepare = useCallback(async ({ preview }: { preview: boolean }) => {
     if (project.clips.length === 0) throw new UserFacingError(i18n.t('The project has no clips yet. Add clips before rendering.'));
 
-    const clipNameById = new Map(project.clips.map((clip) => [clip.id, clip.name]));
-    const overlayNameById = new Map(project.overlays.map((overlay) => [overlay.id, overlay.name]));
+    // T35b/T39 point 5: refresh with ffprobe the meta (display size + SAR) of the sources actually used, so an old
+    // project whose anamorphic source wasn't reactivated this session doesn't fail validation with
+    // `max-rect-outside-frame`. `setSourceMeta` is a cache update only (no undo step, no dirty) and applies T35's
+    // no-rescale rule; `getProject` reads it back right away, without waiting for the next render.
+    await refreshSourcesMeta(getUsedSources(project.sources, project.clips), { pathExists: mainApi.pathExists, probe: readFileFfprobeMeta }, (source, meta) => setSourceMeta(source.id, meta));
+    const currentProject = getProject();
+
+    const clipNameById = new Map(currentProject.clips.map((clip) => [clip.id, clip.name]));
+    const overlayNameById = new Map(currentProject.overlays.map((overlay) => [overlay.id, overlay.name]));
     const issueText = (issue: MixProjectIssue) => getIssueText(
       issue,
       issue.clipId != null ? clipNameById.get(issue.clipId) : undefined,
       issue.overlayId != null ? overlayNameById.get(issue.overlayId) : undefined,
     );
-    const issues = validateMixProject(project);
+    const issues = validateMixProject(currentProject);
     const errors = issues.filter((issue) => issue.level === 'error');
 
     // Only the sources that are used (a source without clips doesn't matter), the music and the overlay files
-    const usedSourceIds = new Set(project.clips.map((clip) => clip.sourceId));
+    const usedSourceIds = new Set(currentProject.clips.map((clip) => clip.sourceId));
     const filesToCheck = [
-      ...project.sources.filter((source) => usedSourceIds.has(source.id)).map((source) => ({ name: source.name, filePath: source.absolutePath })),
-      ...project.settings.musicPlaylist.tracks.map((track) => ({ name: path.basename(track.absolutePath), filePath: track.absolutePath })),
+      ...currentProject.sources.filter((source) => usedSourceIds.has(source.id)).map((source) => ({ name: source.name, filePath: source.absolutePath })),
+      ...currentProject.settings.musicPlaylist.tracks.map((track) => ({ name: path.basename(track.absolutePath), filePath: track.absolutePath })),
       // overlay images, sounds and countdown fonts (T20)
-      ...project.overlays.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => ({ name: overlay.name, filePath: file.absolutePath }))),
+      ...currentProject.overlays.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => ({ name: overlay.name, filePath: file.absolutePath }))),
       // the bundled font, if used (a broken install would otherwise fail inside ffmpeg)
-      ...(project.overlays.some((overlay) => (overlay.type === 'countdown' || overlay.type === 'text') && overlay.font == null) ? [{ name: 'OpenSans-Bold.ttf', filePath: getDefaultOverlayFontPath() }] : []),
+      ...(currentProject.overlays.some((overlay) => (overlay.type === 'countdown' || overlay.type === 'text') && overlay.font == null) ? [{ name: 'OpenSans-Bold.ttf', filePath: getDefaultOverlayFontPath() }] : []),
     ];
     const missing = (await Promise.all(filesToCheck.map(async (file) => ((await mainApi.pathExists(file.filePath)) ? undefined : file)))).filter((file) => file != null);
 
@@ -231,23 +239,23 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       return undefined;
     }
 
-    const renderPlan = planRender(project, { preview });
+    const renderPlan = planRender(currentProject, { preview });
     // Overlay time warnings (clipped, outside the video, cycles, broken references…), from a resolution with the
     // sound durations already known to the UI (T22's useOverlaySoundDurations): the render itself re-resolves them
     // with the exact durations from the loudness analysis (T21), so this is only for the confirmation's wording.
-    const overlayTimes = resolveOverlayTimes(project, renderPlan.plan, { soundDurations: getKnownSoundDurations(project.overlays) });
-    const overlayTimeWarningLines = project.overlays.flatMap((overlay) => {
+    const overlayTimes = resolveOverlayTimes(currentProject, renderPlan.plan, { soundDurations: getKnownSoundDurations(currentProject.overlays) });
+    const overlayTimeWarningLines = currentProject.overlays.flatMap((overlay) => {
       const warnings = overlayTimes.get(overlay.id)?.warnings ?? [];
       return warnings.map((warning) => i18n.t('Overlay "{{overlay}}": {{warning}}', { overlay: overlay.name, warning: getOverlayTimeWarningText(warning) }));
     });
     const warningLines = [
       ...issues.filter((issue) => issue.level === 'warning').map((issue) => issueText(issue)),
-      ...getRenderWarnings(renderPlan.plan, project.clips).map((warning) => getRenderWarningText(warning)),
+      ...getRenderWarnings(renderPlan.plan, currentProject.clips).map((warning) => getRenderWarningText(warning)),
       ...overlayTimeWarningLines,
     ];
     if (warningLines.length > 0 && !(await askForRenderWarnings({ lines: warningLines, preview }))) return undefined;
     return renderPlan;
-  }, [project]);
+  }, [getProject, project, setSourceMeta]);
 
   /** Loudness analysis + render into `outPath`. Throws RenderAbortedError (no error dialog) when cancelled. */
   const render = useCallback(async ({ renderPlan, outPath, partialPath, workDir, preview }: {
@@ -257,14 +265,18 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     workDir: string,
     preview: boolean,
   }) => {
+    // T35b: read the project again instead of using the `project` closure, which may still be missing the meta
+    // `prepare` just refreshed — `getProject` is up to date right after `setSourceMeta`, without waiting for a
+    // re-render.
+    const currentProject = getProject();
     const abortController = new AbortController();
     // Sound overlays (T21): measured and mixed in alongside the clips
-    const soundOverlays = project.overlays.filter((overlay) => overlay.type === 'sound');
+    const soundOverlays = currentProject.overlays.filter((overlay) => overlay.type === 'sound');
     try {
       setWorking({ text: i18n.t('Analyzing audio loudness'), abortController });
       setProgress(0);
       // Measures only what isn't cached yet; the new measurements are stored in the project (also when cancelled)
-      const loudness = await ensureLoudness({ project, musicTracks: project.settings.musicPlaylist.tracks, sounds: soundOverlays, onProgress: setProgress, abortSignal: abortController.signal, onCacheEntries: setLoudnessCache });
+      const loudness = await ensureLoudness({ project: currentProject, musicTracks: currentProject.settings.musicPlaylist.tracks, sounds: soundOverlays, onProgress: setProgress, abortSignal: abortController.signal, onCacheEntries: setLoudnessCache });
 
       // T21b: a sound overlay whose level couldn't be measured (very short or otherwise unusual file) still plays
       // (buildAudioGraph, at its manual gain only), but warn about it here instead of doing that silently.
@@ -278,7 +290,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       setWorking({ text: preview ? i18n.t('Rendering preview') : i18n.t('Rendering mix'), abortController });
       setProgress(0);
       const { plan, settings, encoding } = renderPlan;
-      const overlayTimes = resolveOverlayTimes(project, plan, { soundDurations: getSoundDurations(loudness, soundOverlays) });
+      const overlayTimes = resolveOverlayTimes(currentProject, plan, { soundDurations: getSoundDurations(loudness, soundOverlays) });
 
       // T25: 'auto'/a specific choice resolved against what actually works on this machine (main's detectEncoders,
       // cached for the session); a manual choice that isn't available (e.g. a project made on another machine)
@@ -289,31 +301,31 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       const cacheMaxBytes = getRenderCacheMaxBytes();
       const cacheRoot = getCacheRoot();
       const cacheDir = getRenderCacheDir(path, cacheRoot, { preview, width: plan.width, height: plan.height });
-      const sourcePaths = Object.fromEntries(project.sources.map((source) => [source.id, source.absolutePath]));
+      const sourcePaths = Object.fromEntries(currentProject.sources.map((source) => [source.id, source.absolutePath]));
       const fileIdentities = cacheMaxBytes > 0 ? await getFileIdentities([
         ...Object.values(sourcePaths),
-        ...project.settings.musicPlaylist.tracks.map((track) => track.absolutePath),
-        ...project.overlays.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => file.absolutePath)),
+        ...currentProject.settings.musicPlaylist.tracks.map((track) => track.absolutePath),
+        ...currentProject.overlays.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => file.absolutePath)),
         getDefaultOverlayFontPath(),
       ]) : {};
 
       const runWithEncoder = async (resolvedEncoder: ResolvedEncoder) => {
         const uncachedJob = buildRenderJob({
           plan,
-          clips: project.clips,
+          clips: currentProject.clips,
           sourcePaths,
           // B1: anamorphic sources are cropped in coded pixels
-          sourceFrames: Object.fromEntries(project.sources.map((source) => [source.id, source])),
+          sourceFrames: Object.fromEntries(currentProject.sources.map((source) => [source.id, source])),
           settings,
           encoding,
           resolvedEncoder,
           workDir,
           outPath: partialPath,
           // RenderClip has no muted/gainDb: close over the full clips (T12)
-          buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: project.clips, loudness, overlays: soundOverlays, overlayTimes }),
+          buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: currentProject.clips, loudness, overlays: soundOverlays, overlayTimes }),
           join: path.join,
           // images, countdowns and progress bars (T20)
-          overlays: { overlays: project.overlays, times: overlayTimes, defaultFontPath: getDefaultOverlayFontPath() },
+          overlays: { overlays: currentProject.overlays, times: overlayTimes, defaultFontPath: getDefaultOverlayFontPath() },
         });
         const job = cacheMaxBytes > 0
           ? applyRenderCache(uncachedJob, { dir: cacheDir, keys: await getRenderCacheKeys(uncachedJob, { fileIdentities }), runId: nanoid(8), join: path.join, fps: settings.fps })
@@ -357,7 +369,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       setWorking(undefined);
       setProgress(undefined);
     }
-  }, [appendFfmpegCommandLog, getCacheRoot, project, setLoudnessCache, setProgress, setWorking]);
+  }, [appendFfmpegCommandLog, getCacheRoot, getProject, setLoudnessCache, setProgress, setWorking]);
 
   const userRenderMix = useCallback(async () => {
     if (workingRef.current) return;

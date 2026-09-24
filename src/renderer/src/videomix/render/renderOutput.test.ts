@@ -134,7 +134,7 @@ describe('planRender', () => {
   test('1:1 preview: same axis as the final render', () => {
     const project = testProject();
     for (const clips of [project.clips, project.clips.map((c) => ({ ...c, maxRect: { x: 0, y: 0, width: 1920, height: 1080 }, minRect: { x: 0, y: 140, width: 1920, height: 800 } }))]) {
-      const square = { clips, settings: { ...project.settings, output: { aspect: '1:1', resolution: '1080' } as const } };
+      const square = { clips, sources: project.sources, settings: { ...project.settings, output: { aspect: '1:1', resolution: '1080' } as const } };
       const final = planRender(square).plan;
       expect(planRender(square, { preview: true }).plan).toMatchObject({ width: 360, height: 360, axis: final.axis });
     }
@@ -172,6 +172,30 @@ describe('planRender', () => {
       { type: 'pin-shifted', clipName: 'Clip d', pinTime: 3, time: 4.5 },
       { type: 'group-split', clipNames: ['Clip d', 'x'] },
     ]);
+  });
+
+  test('clips extended beyond their max, with the clip name and the axis (E7)', () => {
+    const warnings = getRenderWarnings({
+      axis: 'rows',
+      warnings: [{ type: 'extended', clipId: 'd', pixels: 280, time: 1, endTime: 4 }],
+    }, testProject().clips);
+    expect(warnings).toEqual([{ type: 'extended', clipName: 'Clip d', pixels: 280, time: 1, endTime: 4, rows: true }]);
+  });
+
+  test('planRender extends clips with the source sizes (E7), and not without them', () => {
+    const project = testProject();
+    // one 9:16 clip cut from the middle of a 16:9 source
+    project.clips = [{ ...project.clips[0]!, sourceId: 'h', maxRect: { x: 656, y: 0, width: 608, height: 1080 } }];
+    const sources = [{ id: 'h', path: 'h.mp4', absolutePath: '/h.mp4', name: 'h.mp4', width: 1920, height: 1080 }];
+    const extended = planRender({ ...project, sources }).plan;
+    expect(extended.layouts[0]!.fills).toEqual([]);
+    expect(extended.placements[0]!.extendedMaxRect).toEqual({ x: 0, y: 0, width: 1920, height: 1080 });
+    expect(getRenderWarnings(extended, project.clips).map((w) => w.type)).toEqual(['extended']);
+    // the preview extends as well (source px don't depend on the preview size)
+    expect(planRender({ ...project, sources }, { preview: true }).plan.layouts[0]!.fills).toEqual([]);
+    expect(planRender({ ...project, sources: [] }).plan.layouts[0]!.fills.length).toBeGreaterThan(0);
+    const off = { ...project, sources, clips: [{ ...project.clips[0]!, extendBeyondMax: false }] };
+    expect(planRender(off).plan.placements[0]!.extendedMaxRect).toBeUndefined();
   });
 
   test('the small clip of the test project is reported as upscaled', () => {

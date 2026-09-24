@@ -1,5 +1,5 @@
-import { ASPECT_TOLERANCE, getCellRect, getCropForAspect, getScaleFactor } from '../geometry';
-import type { AspectRange } from '../geometry';
+import { ASPECT_TOLERANCE, getCellRect, getExtendedCropForAspect, getScaleFactor, normalizeRectEven } from '../geometry';
+import type { AspectRange, CropFit } from '../geometry';
 import { getPlanAxis } from './types';
 import { getEffectiveGroups, getEffectivePins } from './units';
 import type { LayoutKeyframe, MixPlan, PlanWarning, PlannerClip } from './types';
@@ -65,22 +65,36 @@ export function getPlanWarnings(
 
     const misfits = new Set<string>();
     let maxFactor = 0;
+    // E7 (T38b): where the clip shows material beyond its max
+    const { extendedMaxRect } = placement;
+    const extension = extendedMaxRect != null && clip.rects != null ? { rects: clip.rects, rect: extendedMaxRect, from: Infinity, to: -Infinity } : undefined;
     stable.forEach(({ from, to, layout }) => {
       if (Math.min(to, placement.endTime) - Math.max(from, placement.startTime) <= EPS) return;
       const col = layout.columns.find((c) => c.column === placement.column);
       if (col == null) return;
       const { width, height } = cellSize(col.width);
-      const fit = getColumnFit(clip.aspectRange, width, height);
+      let fit: CropFit = getColumnFit(clip.aspectRange, width, height);
+      // only a cell longer than the max allows along the main axis is extended (pillarbox in columns, letterbox in rows)
+      if (extension != null && fit === (axis === 'columns' ? 'pillarbox' : 'letterbox')) {
+        extension.from = Math.min(extension.from, Math.max(from, placement.startTime));
+        extension.to = Math.max(extension.to, Math.min(to, placement.endTime));
+        ({ fit } = getExtendedCropForAspect(extension.rects.maxRect, extension.rects.minRect, extension.rect, width / height));
+      }
       if (fit !== 'fill' && !misfits.has(fit)) {
         misfits.add(fit);
         warnings.push({ type: fit, clipId: clip.id, time: Math.max(from, placement.startTime) });
       }
       if (clip.rects != null) {
-        const { crop } = getCropForAspect(clip.rects.maxRect, clip.rects.minRect, width / height);
+        const { crop } = getExtendedCropForAspect(clip.rects.maxRect, clip.rects.minRect, extendedMaxRect, width / height);
         maxFactor = Math.max(maxFactor, getScaleFactor(crop, width, height));
       }
     });
     if (maxFactor > 2) warnings.push({ type: 'upscale', clipId: clip.id, factor: maxFactor });
+    if (extension != null && extension.from < extension.to) {
+      const max = normalizeRectEven(extension.rects.maxRect, 'shrink');
+      const pixels = (extension.rect.width - max.width) + (extension.rect.height - max.height);
+      if (pixels > 0) warnings.push({ type: 'extended', clipId: clip.id, pixels, time: extension.from, endTime: extension.to });
+    }
   });
 
   // A4 (T30): pins and groups the planner couldn't honour

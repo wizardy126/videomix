@@ -79,6 +79,12 @@ describe('getPlacementWarnings', () => {
     expect(getPlacementWarnings(plan, plan.placements[1]!)).toEqual([]);
   });
 
+  test('an extended warning goes to its clip\'s block (E7)', () => {
+    const extended: PlanWarning = { type: 'extended', clipId: 'c', pixels: 200, time: 8, endTime: 12 };
+    expect(getPlacementWarnings({ warnings: [extended] }, plan.placements[2]!)).toEqual([extended]);
+    expect(getPlacementWarnings({ warnings: [extended] }, plan.placements[0]!)).toEqual([]);
+  });
+
   test('a group-split warning applies to every clip of the group (A4)', () => {
     const split: PlanWarning = { type: 'group-split', groupId: 'g', clipIds: ['a', 'c'] };
     const withSplit = { ...plan, warnings: [split] };

@@ -1,6 +1,6 @@
 import invariant from 'tiny-invariant';
 
-import { getCropForAspect } from '../geometry';
+import { getExtendedCropForAspect } from '../geometry';
 import { getPlanAxis, getPlanAxisLengths } from '../planner/types';
 import { isSquareSar, toCodedRect } from '../sampleAspect';
 import type { MixClip, MixSettings, MixSource, Rect } from '../types';
@@ -279,11 +279,13 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, sourceFrames
     const frameSize = frame?.width != null && frame.height != null ? { width: frame.width, height: frame.height } : undefined;
     const cropFilterOf = (r: Rect) => cropFilter(toCodedRect(r, sar, frameSize));
     const blurCoverOf = (w: number, h: number, r: Rect) => blurCover(w, h, isSquareSar(sar) ? undefined : r.width / r.height);
+    // E7 (T38b): the crop may grow beyond the max into the rect the planner extended it to (same function as the preview)
+    const cropFor = (aspect: number) => getExtendedCropForAspect(clip.maxRect, clip.minRect, p.placement.extendedMaxRect, aspect);
 
     if (!element.varying) {
       // the cell in output px (a column: layerWidth × H; a row: W × layerWidth)
       const { w, h } = layerSize(element.layerWidth);
-      const { crop, fit } = getCropForAspect(clip.maxRect, clip.minRect, w / h);
+      const { crop, fit } = cropFor(w / h);
       if (fit === 'fill') {
         filters.push(`${head},${cropFilterOf(crop)},scale=${w}:${h}:flags=bicubic,setsar=1[${out}]`);
         return { label: out, start: pf0 - f0, end: pf1 - f0 };
@@ -311,7 +313,7 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, sourceFrames
     const collapsing = collapsingColumns.has(p.placement.column);
     const per = ws.map((w0) => {
       const { w, h } = layerSize(Math.max(2, w0));
-      const { crop, fit } = getCropForAspect(clip.maxRect, clip.minRect, w / h);
+      const { crop, fit } = cropFor(w / h);
       if (fit === 'fill') return { crop, sx: w / crop.width, sy: h / crop.height, ox: 0, oy: 0, covers: true };
       // the window is longer along the main axis than the clip allows (columns: pillarbox; rows: letterbox)
       const mainTooLong = fit === (rows ? 'letterbox' : 'pillarbox');

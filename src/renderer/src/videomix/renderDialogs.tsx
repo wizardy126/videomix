@@ -66,6 +66,12 @@ export function getRenderWarningText(warning: RenderWarning) {
         : i18n.t('Clip "{{clip}}" is pinned at {{pinTime}} but starts at {{time}}: the other clips end before', { clip: warning.clipName, ...times });
     }
     case 'group-split': { return i18n.t('The clips {{clips}} are grouped but don\'t all start together', { clips: warning.clipNames.map((name) => `"${name}"`).join(', ') }); }
+    case 'extended': {
+      const range = { clip: warning.clipName, pixels: warning.pixels, from: formatDuration({ seconds: warning.time, shorten: true }), to: formatDuration({ seconds: warning.endTime, shorten: true }) };
+      return warning.rows
+        ? i18n.t('Clip "{{clip}}" shows {{pixels}} px above and below its max rectangle from {{from}} to {{to}}, to avoid fill', range)
+        : i18n.t('Clip "{{clip}}" shows {{pixels}} px beside its max rectangle from {{from}} to {{to}}, to avoid fill', range);
+    }
     default: { return ''; }
   }
 }

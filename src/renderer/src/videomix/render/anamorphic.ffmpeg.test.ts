@@ -13,7 +13,7 @@ import { describe, test, expect, afterAll } from 'vitest';
 
 import { THUMBNAIL_HEIGHT, getThumbnailArgs } from '../../../../main/videomix/thumbnailArgs';
 import type { FFprobeFormat, FFprobeStream } from '../../../../common/ffprobe';
-import { getCropForAspect } from '../geometry';
+import { extendMaxRect, getCropForAspect, getExtendedCropForAspect } from '../geometry';
 import type { MixPlan } from '../planner/types';
 import { getThumbnailCrop } from '../thumbnails';
 import type { MixSettings, MixSource, Rect } from '../types';
@@ -66,12 +66,12 @@ const reference = async (id: SourceId, frame: Frame, t: number, rect: Rect, w: n
 const settings: MixSettings = testSettings({ fps: 30, fadeInOut: false, gap: { width: 0, color: '#000000' } });
 
 /** One clip in one full-size column, static. */
-async function renderSingle(id: SourceId, frame: Frame, clip: Omit<RenderClip, 'id' | 'sourceId'>, width: number, height: number) {
+async function renderSingle(id: SourceId, frame: Frame, clip: Omit<RenderClip, 'id' | 'sourceId'>, width: number, height: number, extendedMaxRect?: Rect) {
   const plan: MixPlan = {
     width,
     height,
     duration: 2,
-    placements: [{ clipId: 'c', column: 0, startTime: 0, endTime: 2, transitionIn: 0 }],
+    placements: [{ clipId: 'c', column: 0, startTime: 0, endTime: 2, transitionIn: 0, ...(extendedMaxRect != null && { extendedMaxRect }) }],
     layouts: [{ time: 0, transitionDuration: 0, columns: [{ column: 0, x: 0, width }], fills: [] }],
     warnings: [],
   };
@@ -135,6 +135,23 @@ describe.skipIf(!available)('anamorphic sources with ffmpeg (B1)', () => {
     const out = await frameAt(1);
     const diff = meanAbsDiff(out, await reference('rot', frame, 2, crop, W, H), W, 0, H);
     const off = meanAbsDiff(out, await reference('rot', frame, 2, shifted(crop, 0, -60), W, H), W, 0, H);
+    expect(diff).toBeLessThan(8);
+    expect(off).toBeGreaterThan(4 * diff);
+  }, 60_000);
+
+  test('E7 (T38b): a clip extended beyond its max crops the extended rect in display pixels', async () => {
+    const frame = await probeSource('ana');
+    // a 1:1 max near the right edge of the 1358x720 display frame, shown at 16:9: 1280 px of the display width
+    const maxRect = { x: 1000, y: 0, width: 358, height: 720 };
+    const [W, H] = [640, 360];
+    const extended = extendMaxRect(maxRect, frame as { width: number, height: number }, 'horizontal', 1280 - 358);
+    expect(extended).toEqual({ x: 78, y: 0, width: 1280, height: 720 });
+    const { crop, fit } = getExtendedCropForAspect(maxRect, undefined, extended, W / H);
+    expect({ crop, fit }).toEqual({ crop: extended, fit: 'fill' });
+    const { frameAt } = await renderSingle('ana', frame, { start: 1, maxRect }, W, H, extended);
+    const out = await frameAt(1);
+    const diff = meanAbsDiff(out, await reference('ana', frame, 2, crop, W, H), W, 0, H);
+    const off = meanAbsDiff(out, await reference('ana', frame, 2, shifted(crop, -60, 0), W, H), W, 0, H);
     expect(diff).toBeLessThan(8);
     expect(off).toBeGreaterThan(4 * diff);
   }, 60_000);

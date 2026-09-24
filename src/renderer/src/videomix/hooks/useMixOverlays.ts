@@ -47,13 +47,14 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
   onFileReplaced?: ((overlayId: string, kind: OverlayFileKind) => void) | undefined,
 }) {
   const { project, addOverlay, updateOverlay, removeOverlay, duplicateOverlay, moveOverlayLayer, relinkOverlayFile, commitTransient, cancelTransient } = mixProject;
-  const { clips, settings, overlays } = project;
+  const { clips, settings, overlays, sources } = project;
 
   const [debouncedClips] = useDebounce(clips, PLAN_DEBOUNCE_MS);
   const [debouncedSettings] = useDebounce(settings, PLAN_DEBOUNCE_MS);
   const plan = useMemo<MixPlan | undefined>(
-    () => (enabled && debouncedClips.length > 0 ? planRender({ clips: debouncedClips, settings: debouncedSettings }).plan : undefined),
-    [debouncedClips, debouncedSettings, enabled],
+    // E7 (T38b): the source sizes bound the extension beyond the max (they change rarely: not debounced)
+    () => (enabled && debouncedClips.length > 0 ? planRender({ clips: debouncedClips, settings: debouncedSettings, sources }).plan : undefined),
+    [debouncedClips, debouncedSettings, enabled, sources],
   );
 
   const soundDurations = useOverlaySoundDurations(overlays);

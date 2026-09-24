@@ -3,7 +3,7 @@ import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { FaExclamationTriangle, FaFont, FaImage, FaPlus, FaStopwatch, FaThumbtack, FaVolumeUp } from 'react-icons/fa';
-import { MdLinearScale } from 'react-icons/md';
+import { MdLinearScale, MdOpenInFull } from 'react-icons/md';
 
 import { useSegColors } from '../../contexts';
 import useUserSettings from '../../hooks/useUserSettings';
@@ -74,6 +74,13 @@ function warningTooltip(t: TFunction, warnings: PlanWarning[], rows: boolean) {
     // A4 (T30)
     if (w.type === 'pin-shifted') return t('Pinned at {{pinTime}} but starts at {{time}}: there is no room for it then', { pinTime: formatDuration({ seconds: w.pinTime, shorten: true }), time: formatDuration({ seconds: w.time, shorten: true }) });
     if (w.type === 'group-split') return t('Its group doesn\'t start together: it has more clips than columns, or there is no room for all of them');
+    // E7 (T38b)
+    if (w.type === 'extended') {
+      const range = { from: formatDuration({ seconds: w.time, shorten: true }), to: formatDuration({ seconds: w.endTime, shorten: true }) };
+      return rows
+        ? t('Shows {{pixels}} px above and below its max rectangle from {{from}} to {{to}}, to avoid fill', { pixels: w.pixels, ...range })
+        : t('Shows {{pixels}} px beside its max rectangle from {{from}} to {{to}}, to avoid fill', { pixels: w.pixels, ...range });
+    }
     return t('Its transition is shortened');
   }).join('; ');
 }
@@ -149,7 +156,9 @@ const Block = memo(({ placement, clip, laneWidthPercent, color, name, thumbnailU
       <div className="no-user-select" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: '.2em', padding: '0 .3em', fontSize: '.75em', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', pointerEvents: 'none' }}>
         {pinned && <FaThumbtack style={{ flexShrink: 0 }} />}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
-        {warnings.length > 0 && <FaExclamationTriangle style={{ flexShrink: 0, color: warningColor }} />}
+        {/* E7 (T38b): extended beyond its max (informative), apart from the real warnings */}
+        {warnings.some((w) => w.type === 'extended') && <MdOpenInFull data-testid="clip-extended" style={{ flexShrink: 0 }} />}
+        {warnings.some((w) => w.type !== 'extended') && <FaExclamationTriangle style={{ flexShrink: 0, color: warningColor }} />}
       </div>
       {groupColor != null && <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: groupColor, pointerEvents: 'none' }} />}
     </div>

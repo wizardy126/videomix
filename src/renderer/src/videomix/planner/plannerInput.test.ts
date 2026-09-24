@@ -52,3 +52,18 @@ test('getPlannerInput passes chains, the sequence, the link transition and the m
   expect(input.sequence).toEqual(['s']);
   expect(input.settings).toMatchObject({ linkTransition: 'global', maxDuration: 60 });
 });
+
+test('getPlannerInput passes the source size of the clips that may extend beyond their max (E7, T38b)', () => {
+  const project = {
+    ...createEmptyMixProject(),
+    sources: [{ id: 's', path: 's.mp4', absolutePath: '/s.mp4', name: 's.mp4', width: 1080, height: 1920 }],
+    clips: [clip('a', 0, 5), { ...clip('off', 0, 5), extendBeyondMax: false }, { ...clip('on', 0, 5), extendBeyondMax: true }, { ...clip('nosize', 0, 5), sourceId: 'x' }],
+  };
+  const [a, off, on, nosize] = getPlannerInput(project).clips;
+  expect(a).toMatchObject({ extendBeyondMax: { frame: { width: 1080, height: 1920 } } });
+  expect(on).toMatchObject({ extendBeyondMax: { frame: { width: 1080, height: 1920 } } });
+  expect(off).not.toHaveProperty('extendBeyondMax');
+  expect(nosize).not.toHaveProperty('extendBeyondMax');
+  // without sources (e.g. the duration estimate) no clip extends
+  expect(getPlannerInput({ clips: project.clips, settings: project.settings }).clips.some((c) => c.extendBeyondMax != null)).toBe(false);
+});

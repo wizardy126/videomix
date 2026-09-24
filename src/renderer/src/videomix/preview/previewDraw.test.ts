@@ -112,3 +112,23 @@ describe('getPreviewDrawList', () => {
     expect(getGlobalFadeAlpha({ ...settings, fadeInOut: false }, 0, 3)).toBe(0);
   });
 });
+
+describe('extension beyond the max (E7, T38b)', () => {
+  test('the preview crops the extended rect like the render', () => {
+    const v = { id: 'v', sourceId: 'h1080', start: 0, maxRect: { x: 100, y: 0, width: 608, height: 1080 } };
+    const plan: MixPlan = {
+      width: 640,
+      height: 360,
+      duration: 3,
+      placements: [{ clipId: 'v', column: 0, startTime: 0, endTime: 3, transitionIn: 0, extendedMaxRect: { x: 0, y: 0, width: 960, height: 1080 } }],
+      layouts: [{ time: 0, transitionDuration: 0, columns: [{ column: 0, x: 160, width: 320 }], fills: [{ x: 0, width: 160 }, { x: 480, width: 160 }] }],
+      warnings: [],
+    };
+    const settings = testSettings();
+    const tl = getRenderTimeline(plan, { fps: 30, gap: 8, transitionDuration: 0.5 });
+    const { ops } = getPreviewDrawList(createPreviewDrawModel(tl, [v], settings), 1);
+    // 960x1080 from the source's left edge (100 px on the left of the max, 252 on the right): no pillarbox background
+    expect(videos(ops)).toEqual([{ kind: 'video', key: 'p0', clipId: 'v', src: { x: 0, y: 0, width: 960, height: 1080 }, dest: { x: 160, y: 0, width: 320, height: 360 }, alpha: 1 }]);
+    expect(ops.filter((op) => op.kind === 'blur' && op.clipId === 'v' && op.dest.x === 160)).toEqual([]);
+  });
+});

@@ -77,7 +77,8 @@ export function getPlacementWarnings(plan: Pick<MixPlan, 'warnings'>, placement:
     // E4 (T38): a clip cut at the maximum duration
     if (w.type === 'truncated') return w.cutClipIds.includes(placement.clipId);
     if (w.clipId !== placement.clipId) return false;
-    if (w.type === 'pillarbox' || w.type === 'letterbox') return w.time >= placement.startTime - EPS && w.time < placement.endTime + EPS;
+    // E7 (T38b): extended warnings have a time range within their placement
+    if (w.type === 'pillarbox' || w.type === 'letterbox' || w.type === 'extended') return w.time >= placement.startTime - EPS && w.time < placement.endTime + EPS;
     return true;
   });
 }

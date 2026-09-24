@@ -1,6 +1,6 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
-import { classifyOpenedPaths, countClipsBySource, getFileExtension, getMixProjectTitle, getSourceMeta, isSourceMetaChanged, appendMusicTracks } from './workspace';
+import { classifyOpenedPaths, countClipsBySource, getFileExtension, getMixProjectTitle, getSourceMeta, getUsedSources, isSourceMetaChanged, refreshSourcesMeta, appendMusicTracks } from './workspace';
 import { defaultMusicPlaylist } from './types';
 import type { MixSource } from './types';
 import type { FFprobeStream } from '../../../common/ffprobe';
@@ -132,5 +132,83 @@ describe('countClipsBySource', () => {
     expect(counts.get('a')).toBe(2);
     expect(counts.get('b')).toBe(1);
     expect(counts.get('c')).toBeUndefined();
+  });
+});
+
+describe('getUsedSources', () => {
+  const src = (id: string): MixSource => ({ id, path: `/${id}.mp4`, absolutePath: `/${id}.mp4`, name: `${id}.mp4` });
+
+  test('only the sources referenced by at least one clip, in the given order', () => {
+    const sources = [src('a'), src('b'), src('c')];
+    expect(getUsedSources(sources, [{ sourceId: 'b' }, { sourceId: 'a' }, { sourceId: 'b' }])).toEqual([src('a'), src('b')]);
+  });
+
+  test('no clips, or no matching source: empty', () => {
+    expect(getUsedSources([src('a')], [])).toEqual([]);
+    expect(getUsedSources([src('a')], [{ sourceId: 'z' }])).toEqual([]);
+  });
+});
+
+// T35b: refreshes the cached meta (display size + SAR) of every source whose file exists, in the background at
+// startup (all sources) or before rendering (only the used ones, T39 point 5)
+describe('refreshSourcesMeta', () => {
+  const src = (id: string, extra: Partial<MixSource> = {}): MixSource => ({ id, path: `/${id}.mp4`, absolutePath: `/${id}.mp4`, name: `${id}.mp4`, width: 1280, height: 720, duration: 10, ...extra });
+
+  const ffprobeMeta = (width: number, height: number) => ({
+    streams: [stream({ codec_type: 'video', width, height, disposition: {} as FFprobeStream['disposition'] })],
+    format: { duration: '10' } as Parameters<typeof getSourceMeta>[0]['format'],
+  });
+
+  test('only sources whose file exists are probed; onMeta only fires when the meta actually changed', async () => {
+    // 'a' is the real bug: cached 1280x720 (no SAR) from before it was ever activated, but the file is actually
+    // anamorphic 1358x720. 'b' probes back to exactly what's already cached, so nothing to do.
+    const sources = [src('a'), src('b'), src('missing')];
+    const pathExists = vi.fn(async (path: string) => path !== '/missing.mp4');
+    const probe = vi.fn(async (path: string) => (path === '/a.mp4' ? ffprobeMeta(1358, 720) : ffprobeMeta(1280, 720)));
+    const onMeta = vi.fn();
+
+    await refreshSourcesMeta(sources, { pathExists, probe }, onMeta);
+
+    expect(probe).toHaveBeenCalledTimes(2); // not the missing one
+    expect(probe).toHaveBeenCalledWith('/a.mp4');
+    expect(probe).toHaveBeenCalledWith('/b.mp4');
+    expect(onMeta).toHaveBeenCalledTimes(1);
+    expect(onMeta).toHaveBeenCalledWith(sources[0], { width: 1358, height: 720, duration: 10, sar: { num: 1, den: 1 } });
+  });
+
+  test('a probe failure is skipped (only logged), so the other sources are still refreshed', async () => {
+    const sources = [src('a'), src('b')];
+    const pathExists = vi.fn(async () => true);
+    const probe = vi.fn(async (path: string) => {
+      if (path === '/a.mp4') throw new Error('boom');
+      return ffprobeMeta(1358, 720);
+    });
+    const onMeta = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await expect(refreshSourcesMeta(sources, { pathExists, probe }, onMeta)).resolves.toBeUndefined();
+
+    expect(onMeta).toHaveBeenCalledTimes(1);
+    expect(onMeta).toHaveBeenCalledWith(sources[1], expect.objectContaining({ width: 1358, height: 720 }));
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  test('respects the concurrency limit', async () => {
+    const sources = [src('a'), src('b'), src('c'), src('d')];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const pathExists = vi.fn(async () => true);
+    const probe = vi.fn(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => { setTimeout(resolve, 5); });
+      inFlight -= 1;
+      return ffprobeMeta(1358, 720);
+    });
+
+    await refreshSourcesMeta(sources, { pathExists, probe }, () => undefined, { concurrency: 2 });
+
+    expect(maxInFlight).toBeLessThanOrEqual(2);
   });
 });

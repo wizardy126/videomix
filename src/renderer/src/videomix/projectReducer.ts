@@ -122,7 +122,7 @@ export function dissolveSingleClipGroups(clips: MixClip[]): MixClip[] {
   return clips.map((clip) => (clip.groupId != null && counts.get(clip.groupId) === 1 ? withoutUndefined({ ...clip, groupId: undefined }, ['groupId']) : clip));
 }
 
-const clipOptionalKeys: (keyof MixClip)[] = ['minRect', 'pinTime', 'groupId', 'link'];
+const clipOptionalKeys: (keyof MixClip)[] = ['minRect', 'pinTime', 'groupId', 'link', 'extendBeyondMax'];
 
 function updateMusicPlaylist(project: MixProject, musicPlaylist: MixMusicPlaylist): MixProject {
   return { ...project, settings: { ...project.settings, musicPlaylist } };

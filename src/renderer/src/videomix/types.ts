@@ -74,6 +74,11 @@ export const mixClipSchema = z.object({
    * Ignored for a pinned or grouped clip (never auto-linked) or for the first eligible clip of its source.
    */
   link: z.enum(mixClipLinkTypes).optional(),
+  /**
+   * E7 (v4, T38b): when a layout would leave fill, the clip may show material beyond its max rect along the main axis
+   * (up to the source frame), as a last resort. Missing = true (on by default); only `false` is stored.
+   */
+  extendBeyondMax: z.boolean().optional(),
 });
 
 export type MixClip = z.infer<typeof mixClipSchema>;

@@ -1,3 +1,5 @@
+import pMap from 'p-map';
+
 import type { FFprobeFormat, FFprobeStream } from '../../../common/ffprobe';
 import { parseFfprobeDuration } from '../../../common/util';
 import { getRealVideoStreams } from '../util/streams';
@@ -85,6 +87,47 @@ export function getSourceMeta({ streams, format }: {
 /** True if `meta` has something the source doesn't have yet (or different). Undefined values never erase the cache. */
 export const isSourceMetaChanged = (source: MixSource, meta: SourceMeta) => (['width', 'height', 'duration'] as const)
   .some((key) => meta[key] != null && meta[key] !== source[key]) || (meta.sar != null && !isSameSar(meta.sar, source.sar));
+
+export interface RefreshSourcesMetaDeps {
+  /** Whether the source's file still exists (skip it otherwise: nothing to probe). */
+  pathExists: (path: string) => Promise<boolean>,
+  /** ffprobe of the file, e.g. `readFileFfprobeMeta` (injected so this stays Electron-free and testable in Node). */
+  probe: (path: string) => Promise<Parameters<typeof getSourceMeta>[0]>,
+}
+
+/**
+ * Refreshes the cached meta (display size + SAR, T35) of every source whose file still exists, up to `concurrency`
+ * probes in parallel, calling `onMeta` only for the ones whose meta actually changed (`isSourceMetaChanged`); a
+ * missing file or a failed probe is skipped (only logged), so one bad source doesn't stop the others.
+ *
+ * Used at startup, in the background, for every source of the project (T39 point 5), and before rendering, awaited,
+ * for only the used ones (T35b) — so a project whose anamorphic source wasn't reactivated this session doesn't fail
+ * validation with `max-rect-outside-frame`. `onMeta` is expected to apply the change like `setSourceMeta`
+ * (useMixProject): a cache update, not an undo step, which also rescales the clip rects of a resized source
+ * (`sourceResize.ts`, B2) following T35's no-rescale rule.
+ */
+export async function refreshSourcesMeta(
+  sources: readonly MixSource[],
+  { pathExists, probe }: RefreshSourcesMetaDeps,
+  onMeta: (source: MixSource, meta: SourceMeta) => void,
+  { concurrency = 3 }: { concurrency?: number } = {},
+): Promise<void> {
+  await pMap(sources, async (source) => {
+    try {
+      if (!(await pathExists(source.absolutePath))) return;
+      const meta = getSourceMeta(await probe(source.absolutePath));
+      if (isSourceMetaChanged(source, meta)) onMeta(source, meta);
+    } catch (err) {
+      console.warn('Failed to refresh the meta of source', source.absolutePath, err);
+    }
+  }, { concurrency });
+}
+
+/** The sources actually used by at least one clip (T35b/T39 point 5: only these need refreshing before rendering). */
+export function getUsedSources<S extends Pick<MixSource, 'id'>>(sources: readonly S[], clips: readonly { sourceId: string }[]): S[] {
+  const usedIds = new Set(clips.map((clip) => clip.sourceId));
+  return sources.filter((source) => usedIds.has(source.id));
+}
 
 /** A music track for a file, at the default background volume (T12b). `filePath` must be absolute. */
 export function createMusicTrack({ id, filePath, volumeDb = DEFAULT_MUSIC_VOLUME_DB }: { id: string, filePath: string, volumeDb?: number | undefined }): MixMusicTrack {

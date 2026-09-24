@@ -3,7 +3,7 @@ import { planMix } from '../planner/planMix';
 import { getDefaultAxis } from '../planner/types';
 import type { MixPlan } from '../planner/types';
 import { getOutputSize } from '../types';
-import type { MixClip, MixOutput, MixProject, MixSettings } from '../types';
+import type { MixClip, MixOutput, MixProject, MixSettings, MixSource } from '../types';
 import type { EncodingOptions } from './buildRenderJob';
 
 // Pure helpers of the render/preview orchestration (T13, hooks/useMixRender.ts): output and temp paths, what to plan
@@ -104,8 +104,9 @@ export interface RenderPlan {
  * allows. In 1:1 the axis (rows or columns) is the one the final render picks at the output resolution, so the preview
  * never shows the other one on a near-tie (T29).
  */
-export function planRender({ clips, settings }: Pick<MixProject, 'clips' | 'settings'>, { preview = false }: { preview?: boolean } = {}): RenderPlan {
-  const input = getPlannerInput({ clips, settings });
+export function planRender({ clips, settings, sources }: Pick<MixProject, 'clips' | 'settings'> & { sources: Pick<MixSource, 'id' | 'width' | 'height'>[] }, { preview = false }: { preview?: boolean } = {}): RenderPlan {
+  // E7 (T38b): the source sizes bound the extension beyond the max; the preview extends by the same source pixels
+  const input = getPlannerInput({ clips, settings, sources });
   if (!preview) return { plan: planMix(input), settings };
 
   const { width, height } = getPreviewSize(settings.output);
@@ -128,12 +129,14 @@ export type RenderWarning =
   /** A4 (T30): a pinned clip that can't start at its pin time. */
   | { type: 'pin-shifted', clipName: string, pinTime: number, time: number }
   /** A4 (T30): a group whose clips don't all start together. */
-  | { type: 'group-split', clipNames: string[] };
+  | { type: 'group-split', clipNames: string[] }
+  /** E7 (T38b): a clip shown beyond its max rect (`pixels` along the main axis: a height when `rows`). */
+  | { type: 'extended', clipName: string, pixels: number, time: number, endTime: number, rows: boolean };
 
 /**
  * Plan warnings worth confirming before a render (01-requisitos §4.6): clips upscaled more than ×2, clips shown with
- * fill around them (pillarbox/letterbox), rows that can't be filled with clips, and pins or groups the planner couldn't
- * honour (A4). Shortened transitions are left out:
+ * fill around them (pillarbox/letterbox), rows that can't be filled with clips, pins or groups the planner couldn't
+ * honour (A4) and clips shown beyond their max rect to avoid fill (E7). Shortened transitions are left out:
  * validateMixProject already warns about short clips. One `fill` warning per keyframe would be noise, so only the first.
  */
 export function getRenderWarnings(plan: Pick<MixPlan, 'warnings' | 'axis'>, clips: Pick<MixClip, 'id' | 'name'>[]): RenderWarning[] {
@@ -142,15 +145,34 @@ export function getRenderWarnings(plan: Pick<MixPlan, 'warnings' | 'axis'>, clip
   const ret: RenderWarning[] = [];
   let hasFill = false;
   plan.warnings.forEach((warning) => {
-    if (warning.type === 'upscale') ret.push({ type: 'upscale', clipName: getName(warning.clipId), factor: warning.factor });
-    else if (warning.type === 'pillarbox' || warning.type === 'letterbox') ret.push({ type: warning.type, clipName: getName(warning.clipId), time: warning.time });
-    else if (warning.type === 'fill' && !hasFill) {
-      hasFill = true;
-      ret.push({ type: 'fill', time: warning.time, width: warning.width, rows: plan.axis === 'rows' });
-    } else if (warning.type === 'pin-shifted') {
-      ret.push({ type: 'pin-shifted', clipName: getName(warning.clipId), pinTime: warning.pinTime, time: warning.time });
-    } else if (warning.type === 'group-split') {
-      ret.push({ type: 'group-split', clipNames: warning.clipIds.map((id) => getName(id)) });
+    switch (warning.type) {
+      case 'upscale': {
+        ret.push({ type: 'upscale', clipName: getName(warning.clipId), factor: warning.factor });
+        break;
+      }
+      case 'pillarbox':
+      case 'letterbox': {
+        ret.push({ type: warning.type, clipName: getName(warning.clipId), time: warning.time });
+        break;
+      }
+      case 'fill': {
+        if (!hasFill) ret.push({ type: 'fill', time: warning.time, width: warning.width, rows: plan.axis === 'rows' });
+        hasFill = true;
+        break;
+      }
+      case 'pin-shifted': {
+        ret.push({ type: 'pin-shifted', clipName: getName(warning.clipId), pinTime: warning.pinTime, time: warning.time });
+        break;
+      }
+      case 'group-split': {
+        ret.push({ type: 'group-split', clipNames: warning.clipIds.map((id) => getName(id)) });
+        break;
+      }
+      case 'extended': {
+        ret.push({ type: 'extended', clipName: getName(warning.clipId), pixels: warning.pixels, time: warning.time, endTime: warning.endTime, rows: plan.axis === 'rows' });
+        break;
+      }
+      default: { break; }
     }
   });
   return ret;

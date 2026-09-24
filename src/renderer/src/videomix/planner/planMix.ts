@@ -2,6 +2,7 @@ import invariant from 'tiny-invariant';
 
 import { distributeWidths, getAxisLengths, getMainAspectRange, getWidthRange, normalizeClipRects, transposeRect } from '../geometry';
 import type { AspectRange, LayoutAxis } from '../geometry';
+import { extendPlan } from './extendPlan';
 import { getColumnFit, getPlanWarnings } from './planWarnings';
 import { getPlanLinks, getPlanUnits } from './units';
 import { validatePlan } from './validatePlan';
@@ -1185,7 +1186,9 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     const transitionOut = Math.min(D, (endTime - startTime) / 2);
     if (transitionOut > 0) placements[i] = { ...placement, transitionOut };
   });
-  const planWithoutWarnings: MixPlan = { ...output, duration, placements, layouts, warnings: [] };
+  // E7 (T38b): last resort, on the finished plan: fill becomes material beyond the max of the clips that allow it. The
+  // score below is the plan's before it, so the options (and the axis of a square output) are chosen as before.
+  const planWithoutWarnings = extendPlan({ ...output, duration, placements, layouts, warnings: [] }, inputClips, gap);
   const plan: MixPlan = { ...planWithoutWarnings, warnings: getPlanWarnings(planWithoutWarnings, inputClips, D, cutClipIds) };
 
   // --- whole-plan score (see PlanScore) ---

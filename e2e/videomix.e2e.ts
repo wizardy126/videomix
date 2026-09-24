@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -569,6 +569,75 @@ test.describe('VideoMix (anamorphic source)', () => {
       const video = ffprobe(fileURLToPath(src)).streams.find((s) => s.codec_type === 'video');
       expect([video?.width, video?.height]).toEqual([640, 360]);
       await screenshot(page, '11-anamorphic-preview');
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+
+  test('12. an old project whose anamorphic source has a stale (pre-SAR) cache renders without reactivating it (T35b)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    const workDir = mkdtempSync(join(tmpdir(), 'videomix-e2e-sar-stale-'));
+    try {
+      const regularFile = sourceFiles[0]!;
+      const anaFile = 'ana-1280x720-sar-6s.mp4';
+
+      // A normal project with a regular source (loaded first) and the anamorphic one, each with a clip; the
+      // anamorphic source is activated once here, so its clip's max rect can be set to the real bug case below.
+      await mockOpenDialog(ctx.app, [media(regularFile), media(anaFile)]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(2);
+      await waitIdle(page);
+      await pressShortcut(page, 'n');
+
+      await page.getByTestId('source-row').nth(1).click();
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).videoWidth)).toBe(1358);
+      await waitIdle(page);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(2);
+
+      const projectPath = join(workDir, 'sar-stale.vmx');
+      await mockSaveDialog(ctx.app, projectPath);
+      await pressShortcut(page, 'Control+s');
+      // Not just existsSync: the title loses its "*" only once the save (the write included) has actually finished
+      await expect(page).toHaveTitle(/^sar-stale - /);
+
+      // Simulate a project saved before T35 (B1): the anamorphic source's cache is its coded size, with no SAR, and
+      // its clip's max rect is the real bug case (78,14 1232×694 — invalid at 1280×720, valid at 1358×720)
+      const saved = JSON5.parse(readFileSync(projectPath, 'utf8')) as {
+        sources: { id: string, name: string, width: number, height: number, sar?: { num: number, den: number } }[],
+        clips: SavedProject['clips'],
+      };
+      const anaSource = saved.sources.find((s) => s.name === anaFile)!;
+      expect(anaSource).toMatchObject({ width: 1358, height: 720, sar: { num: 87, den: 82 } }); // sanity: really refreshed above
+      delete anaSource.sar;
+      anaSource.width = 1280;
+      anaSource.height = 720;
+      const anaClip = saved.clips.find((c) => c.sourceId === anaSource.id)!;
+      anaClip.maxRect = { x: 78, y: 14, width: 1232, height: 694 };
+      writeFileSync(projectPath, JSON5.stringify(saved, null, 2));
+
+      await sendMenuAction(ctx.app, 'newProject');
+      await expect(page.getByTestId('source-row')).toHaveCount(0);
+
+      // Reopen: the regular source (first) is activated automatically, the anamorphic one never is
+      await mockOpenDialog(ctx.app, [projectPath]);
+      await sendMenuAction(ctx.app, 'openProject');
+      await expect(page.getByTestId('source-row')).toHaveCount(2);
+      await expect.poll(async () => clipNames(page)).toHaveLength(2);
+      await waitIdle(page);
+
+      // Before T35b this fails validation (max-rect-outside-frame): the cache still says 1280×720
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      await textButton(page, 'Preview').click();
+      const previewAnyway = page.getByRole('button', { name: 'Preview anyway' });
+      const dialogTitle = page.getByText('Mix preview', { exact: true });
+      await expect(previewAnyway.or(dialogTitle)).toBeVisible({ timeout: 60_000 });
+      if (await previewAnyway.isVisible()) await previewAnyway.click();
+      await expect(dialogTitle).toBeVisible({ timeout: 110_000 });
+      await screenshot(page, '12-stale-sar-reopened-preview');
       expect(ctx.consoleErrors).toEqual([]);
     } finally {
       await ctx.close();

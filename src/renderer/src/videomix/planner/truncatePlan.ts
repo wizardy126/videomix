@@ -37,7 +37,7 @@ export function truncatePlan(plan: MixPlan, maxDuration: number): MixPlan {
   const layouts = plan.layouts.filter((layout, i) => i === 0 || layout.time < maxDuration - EPS);
 
   const keptClip = (clipId: string) => !lost.has(clipId);
-  const warnings = plan.warnings.filter((warning): boolean => {
+  const keep = (warning: PlanWarning): boolean => {
     switch (warning.type) {
       case 'fill': { return warning.time < maxDuration - EPS; }
       case 'pillarbox':
@@ -48,6 +48,11 @@ export function truncatePlan(plan: MixPlan, maxDuration: number): MixPlan {
       case 'group-split': { return warning.clipIds.some((id) => keptClip(id)); }
       default: { return false; }
     }
+  };
+  const warnings = plan.warnings.flatMap((warning): PlanWarning[] => {
+    // E7 (T38b): an extension goes as far as the cut
+    if (warning.type === 'extended') return keptClip(warning.clipId) && warning.time < maxDuration - EPS ? [{ ...warning, endTime: Math.min(warning.endTime, maxDuration) }] : [];
+    return keep(warning) ? [warning] : [];
   });
   // cutting a cut plan again adds up what is lost
   const previous = plan.warnings.find((w) => w.type === 'truncated');

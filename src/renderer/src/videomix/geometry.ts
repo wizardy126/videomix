@@ -275,3 +275,73 @@ export function distributeWidths({ clips, width, height, gap }: {
 
   return { widths: units.map((u) => u * 2), fill: usable - target };
 }
+
+/**
+ * E7 (T38b): direction in which a clip's max rect may be extended beyond itself, the main axis of the layout: widths
+ * for columns (`horizontal`), heights for rows (`vertical`).
+ */
+export type ExtendDirection = 'horizontal' | 'vertical';
+
+/** Source frame size (display px, B1). */
+export interface FrameSize { width: number, height: number }
+
+/**
+ * E7: source px a clip's (even-normalized) max rect can grow along `direction` until it fills the source frame (both
+ * sides together); 0 if it already spans it. The frame is taken to even px, like every crop edge.
+ */
+export function getExtensionRoom(maxRect: Rect, frame: FrameSize, direction: ExtendDirection) {
+  const max = normalizeRectEven(maxRect, 'shrink');
+  const bounds = { x: 0, y: 0, width: floorEven(frame.width), height: floorEven(frame.height) };
+  // a max rect outside its frame (an invalid project, validateMixProject reports it) can't be extended
+  if (!rectContains(bounds, max)) return 0;
+  return direction === 'horizontal' ? bounds.width - max.width : bounds.height - max.height;
+}
+
+/**
+ * E7: the max rect extended by `extra` source px along `direction` (even, at most {@link getExtensionRoom}): centred
+ * on the max, and shifted (asymmetric) when a side reaches the frame edge, so the other side takes the rest. Keeps the
+ * max's size and position across the direction. Even edges, contains the normalized max, inside the (even) frame.
+ */
+export function extendMaxRect(maxRect: Rect, frame: FrameSize, direction: ExtendDirection, extra: number): Rect {
+  if (direction === 'vertical') return transposeRect(extendMaxRect(transposeRect(maxRect), { width: frame.height, height: frame.width }, 'horizontal', extra));
+  const max = normalizeRectEven(maxRect, 'shrink');
+  const frameWidth = floorEven(frame.width);
+  const add = clamp(ceilEven(extra), 0, getExtensionRoom(maxRect, frame, 'horizontal'));
+  if (add <= 0) return max;
+  const width = max.width + add;
+  const x = clamp(roundEven(max.x - add / 2), Math.max(0, max.x + max.width - width), Math.min(max.x, frameWidth - width));
+  return { x, y: max.y, width, height: max.height };
+}
+
+/**
+ * {@link getCropForAspect} for a clip whose max rect the planner extended to `extendedMaxRect` (E7, T38b,
+ * `ColumnPlacement.extendedMaxRect`). Only when the cell is longer along the extension than the clip allows (pillarbox
+ * for a horizontal extension, letterbox for a vertical one) the crop grows beyond the max: it keeps the cross size and
+ * position of the crop at the range limit (the min's height, or width) and widens it to the cell's aspect, centred on
+ * the max and shifted inside the extended rect when a side reaches its edge. If the extension isn't enough, the crop
+ * takes all of it and the rest stays pillarbox/letterbox. In any other case (or without extension) it is exactly
+ * getCropForAspect, so the extension changes nothing where the max is enough.
+ */
+export function getExtendedCropForAspect(maxRect: Rect, minRect: Rect | undefined, extendedMaxRect: Rect | undefined, aspect: number): { crop: Rect, fit: CropFit } {
+  const normal = getCropForAspect(maxRect, minRect, aspect);
+  if (extendedMaxRect == null || normal.fit === 'fill') return normal;
+  const max = normalizeRectEven(maxRect, 'shrink');
+  const extended = normalizeRectEven(extendedMaxRect, 'shrink');
+  if (!rectContains(extended, max)) return normal;
+
+  if (normal.fit === 'letterbox') {
+    if (extended.height <= max.height) return normal;
+    const res = getExtendedCropForAspect(transposeRect(maxRect), minRect && transposeRect(minRect), transposeRect(extendedMaxRect), 1 / aspect);
+    return { crop: transposeRect(res.crop), fit: res.fit === 'pillarbox' ? 'letterbox' : res.fit };
+  }
+  if (extended.width <= max.width) return normal;
+  // pillarbox: the crop at the range limit spans the max's width at the min's height; widen it
+  const { crop } = normal;
+  const target = aspect * crop.height;
+  const width = clamp(roundEven(target), crop.width, extended.width);
+  const x = clamp(roundEven(crop.x + (crop.width - width) / 2), extended.x, extended.x + extended.width - width);
+  return {
+    crop: { x, y: crop.y, width, height: crop.height },
+    fit: target > width * (1 + ASPECT_TOLERANCE) ? 'pillarbox' : 'fill',
+  };
+}

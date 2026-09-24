@@ -20,6 +20,9 @@ export interface MixDurationEstimate {
  * isn't planned twice for the same clips/settings. Otherwise (Source tab, or before the Mix view has a plan yet)
  * this debounces `clips`/`settings` itself with `planRender` (the same helper T13/T15 use for the real plan).
  */
+// E7 (T38b): extending clips beyond their max never changes the timing, so the estimate plans without source sizes
+const noSources: [] = [];
+
 export default function useMixDuration({ clips, settings, mixPlan }: {
   clips: MixClip[],
   settings: MixSettings,
@@ -29,7 +32,7 @@ export default function useMixDuration({ clips, settings, mixPlan }: {
   const [debouncedSettings] = useDebounce(settings, PLAN_DEBOUNCE_MS);
 
   const ownPlan = useMemo<MixPlan | undefined>(
-    () => (mixPlan == null && debouncedClips.length > 0 ? planRender({ clips: debouncedClips, settings: debouncedSettings }).plan : undefined),
+    () => (mixPlan == null && debouncedClips.length > 0 ? planRender({ clips: debouncedClips, settings: debouncedSettings, sources: noSources }).plan : undefined),
     [debouncedClips, debouncedSettings, mixPlan],
   );
 

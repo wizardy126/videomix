@@ -65,10 +65,11 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T33 | v2: tests end-to-end de la UI (E3) | M8 | Opus | T32 | hecha |
 | T34 | v2: i18n, manual y cierre | M8 | Sonnet | T24–T33 | hecha |
 | T35 | v3: bug SAR y re-vincular con otra resolución (B1, B2) | M9 | Opus | — | hecha |
+| T35b | v3: refrescar metadatos (tamaño + SAR) al abrir y antes de renderizar | M9 | Sonnet | T35 | hecha |
 | T36 | v3: modelo v4 (enlaces, secuencia, duración máxima) | M9 | Sonnet | — | hecha |
 | T37 | v3: contador, "Nuevo clip desde aquí", duración estimada y máxima en UI (E1, E3, E4, E6) | M9 | Sonnet | T36 | hecha |
 | T38 | v3: planificador — cadenas, secuencia y duración máxima (E2, E4, E5) | M9 | Opus | T36 | hecha |
-| T38b | v3: ampliar más allá del máx. (E7) | M9 | Opus | T37, T38 | pendiente |
+| T38b | v3: ampliar más allá del máx. (E7) | M9 | Opus | T37, T38 | hecha |
 | T38c | v3: ventana de reorden ilimitada y ampliable (E8) | M9 | Opus | T38b | pendiente |
 | T38d | v3: girar un clip (E9) | M9 | Opus | T38c, T35b | pendiente |
 | T39 | v3: UI de cadenas y secuencia, y render cortado al límite (E2, E4, E5) | M9 | Opus | T37, T38 | pendiente |
@@ -113,6 +114,7 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 ## Oleadas de M9
 
 1. T35 ∥ T36.
+1b. T35b.
 2. T37 ∥ T38.
 3. T38b.
 4. T38c.
