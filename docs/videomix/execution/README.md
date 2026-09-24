@@ -90,3 +90,5 @@
 | T38d | [T38d-v3-girar-clip.md](T38d-v3-girar-clip.md) |
 | T39 | [T39-v3-ui-cadenas-render.md](T39-v3-ui-cadenas-render.md) |
 | T40 | [T40-v3-cierre.md](T40-v3-cierre.md) |
+| T41 | [T41-modal-render.md](T41-modal-render.md) |
+| T42 | [T42-html5ify-cache.md](T42-html5ify-cache.md) |
