@@ -22,7 +22,8 @@
    - la caché incremental sigue funcionando.
    - Test con ffmpeg real: la duración es exactamente el límite y hay *fade* al final.
 4. **Previsualización en vivo**: respeta cadenas (corte directo), secuencia y límite.
-5. **i18n**: español.
+5. **Pendiente de T35**: refrescar con ffprobe los metadatos (tamaño de visualización y SAR) de todas las fuentes al abrir un proyecto (en segundo plano) y antes de renderizar. Así, un proyecto antiguo con una fuente anamórfica que no se ha activado en la sesión no falla con `max-rect-outside-frame`. Hay que respetar la regla de no reescalar de T35 (`sourceResize.ts`).
+6. **i18n**: español.
 
 ## Criterios de aceptación
 

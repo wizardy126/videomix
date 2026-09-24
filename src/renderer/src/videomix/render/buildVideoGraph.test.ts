@@ -218,3 +218,63 @@ describe('random plans from the planner', () => {
     }
   });
 });
+
+describe('anamorphic sources (B1)', () => {
+  // test source h720 shown at 1358x720 (1280x720 coded at 679:640), with the user's rect
+  const frame = { width: 1358, height: 720, sar: { num: 679, den: 640 } };
+  const coded = { width: 1280, height: 720 };
+  const maxRect = { x: 78, y: 14, width: 1232, height: 694 };
+  const clips: RenderClip[] = [
+    { id: 'u', sourceId: 'h720', start: 0, maxRect, minRect: { x: 478, y: 160, width: 400, height: 400 } },
+    // rigid, so that a narrow column letterboxes it over its blurred cover
+    { id: 'r', sourceId: 'h720', start: 1, maxRect },
+  ];
+  const plan = (placements: [string, number, number][], columns: [number, number][]) => ({
+    width: 640,
+    height: 360,
+    duration: 3,
+    placements: placements.map(([clipId, column, endTime]) => ({ clipId, column, startTime: 0, endTime, transitionIn: 0 })),
+    layouts: [{ time: 0, transitionDuration: 0, columns: columns.map(([x, width], column) => ({ column, x, width })), fills: [] }],
+    warnings: [],
+  });
+
+  test('crops in coded pixels inside the coded frame; the scale restores the proportion', () => {
+    const settings = testSettings({ fill: { mode: 'blur', color: '#000000' } });
+    const tl = getRenderTimeline(plan([['u', 0, 3], ['r', 1, 3]], [[0, 424], [432, 208]]), { fps: 30, gap: 8, transitionDuration: 0.5 });
+    const graph = buildVideoGraph({ timeline: tl, clips, sourcePaths: testSourcePaths('/m'), sourceFrames: { h720: frame }, settings, chunk: { f0: 0, f1: tl.totalFrames } });
+    expect(verifyFilterGraph(graph, { sourceSizes: graph.inputs.map(() => coded) })).toEqual([]);
+    // the rigid clip: its whole rect, 78..1310 of 1358 → 74..1234 of 1280
+    expect(graph.filterComplex).toContain('crop=1160:694:74:14,split');
+    // its blurred cover is computed for the display aspect (1232/694), not left to force_original_aspect_ratio
+    const cover = parseFilterGraph(graph.filterComplex).flatMap((c) => c.filters).filter((f) => f.startsWith('scale=') && f.includes('fast_bilinear'));
+    expect(cover.length).toBeGreaterThan(0);
+    expect(cover.every((f) => !f.includes('force_original_aspect_ratio'))).toBe(true);
+  });
+
+  test('re-layout (column layer): the union crop is in coded pixels too', () => {
+    const settings = testSettings({ fill: { mode: 'blur', color: '#000000' } });
+    const p = { ...plan([['u', 0, 3], ['r', 1, 3]], [[0, 424], [432, 208]]) };
+    p.layouts = [...p.layouts, { time: 1, transitionDuration: 0.5, columns: [{ column: 0, x: 0, width: 300 }, { column: 1, x: 308, width: 332 }], fills: [] }];
+    const tl = getRenderTimeline(p, { fps: 30, gap: 8, transitionDuration: 0.5 });
+    for (const chunk of getRenderChunks(tl, { maxChunkSeconds: 3 })) {
+      const graph = buildVideoGraph({ timeline: tl, clips, sourcePaths: testSourcePaths('/m'), sourceFrames: { h720: frame }, settings, chunk });
+      expect(verifyFilterGraph(graph, { sourceSizes: graph.inputs.map(() => coded) }), `chunk ${chunk.index}`).toEqual([]);
+    }
+  });
+
+  test('square sources (or no sourceFrames) give the same graph as before', () => {
+    const settings = testSettings();
+    const tl = getRenderTimeline(testPlans.relayout, { fps: 30, gap: settings.gap.width, transitionDuration: settings.transition.duration });
+    const chunk = { f0: 0, f1: tl.totalFrames };
+    const square = Object.fromEntries(Object.entries(testSources).map(([id, s]) => [id, { width: s.width, height: s.height }]));
+    expect(buildVideoGraph({ timeline: tl, clips: testClips, sourcePaths: testSourcePaths('/m'), sourceFrames: square, settings, chunk }))
+      .toEqual(buildVideoGraph({ timeline: tl, clips: testClips, sourcePaths: testSourcePaths('/m'), settings, chunk }));
+  });
+
+  test('blurCover with the input aspect covers the fill explicitly', () => {
+    // 1.775 input into a 240x136 (1/8 of 1920x1080) cover: wider → height 136, width ceil-even(136 × 1.775) = 242
+    expect(blurCover(1920, 1080, 1232 / 694)).toContain('scale=242:136:flags=fast_bilinear,crop=240:136');
+    // taller input → width 240
+    expect(blurCover(1920, 1080, 0.5)).toContain('scale=240:480:flags=fast_bilinear,crop=240:136');
+  });
+});

@@ -11,7 +11,9 @@ Ubicación: `src/renderer/src/videomix/types.ts`, o `src/common/videomix/types.t
 
 ### 1.1 Coordenadas
 
-- Los rectángulos se expresan en **píxeles de la fuente, ya orientada para su visualización**: tras aplicar la rotación de metadatos, como la muestra el `<video>` y como la decodifica ffmpeg con autorotate, que es su comportamiento por defecto.
+- Los rectángulos se expresan en **píxeles de visualización de la fuente**: tras aplicar la rotación de metadatos y la proporción de píxel (SAR), como la muestra el `<video>` (`videoWidth`/`videoHeight`, y `drawImage` en la previsualización en vivo).
+  - Con píxeles cuadrados coinciden con los que da ffmpeg con autorotate, que es su comportamiento por defecto.
+  - **Fuentes anamórficas (B1, T35)**: `MixSource.sar` guarda el SAR del fotograma ya orientado (el autorotate de ffmpeg lo invierte en un cuarto de vuelta). El tamaño de visualización sigue la regla de Chromium: se agranda una dimensión (SAR > 1, el ancho; SAR < 1, el alto). En el render y las miniaturas el rectángulo se convierte a píxeles codificados **solo en el `crop`** (`sampleAspect.toCodedRect`); el escalado posterior a tamaño explícito con `setsar=1` corrige la proporción.
 - Se guardan como números enteros y se normalizan a valores pares al generar el grafo, porque yuv420p lo exige.
 
 ```ts

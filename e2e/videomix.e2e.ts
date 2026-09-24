@@ -496,6 +496,53 @@ test.describe.serial('VideoMix (English UI)', () => {
   });
 });
 
+test.describe('VideoMix (anamorphic source)', () => {
+  test('11. a source with non-square pixels works in display pixels (B1, T35)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    const workDir = mkdtempSync(join(tmpdir(), 'videomix-e2e-sar-'));
+    try {
+      // 1280x720 coded at 87:82 (≈ 679:640): Chromium shows it at 1358x720
+      const file = 'ana-1280x720-sar-6s.mp4';
+      await mockOpenDialog(ctx.app, [media(file)]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      expect(await page.locator('video').first().evaluate((v) => [(v as HTMLVideoElement).videoWidth, (v as HTMLVideoElement).videoHeight])).toEqual([1358, 720]);
+      await waitIdle(page);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(1);
+      // the whole frame, in the same pixels as the editor
+      await expect(page.getByTestId('rect-label')).toContainText('Max 1358×720');
+
+      const projectPath = join(workDir, 'sar.vmx');
+      await mockSaveDialog(ctx.app, projectPath);
+      await pressShortcut(page, 'Control+s');
+      await expect.poll(() => existsSync(projectPath)).toBe(true);
+      const saved = JSON5.parse(readFileSync(projectPath, 'utf8')) as { sources: { width: number, height: number, sar?: { num: number, den: number } }[], clips: SavedProject['clips'] };
+      expect(saved.sources[0]).toMatchObject({ width: 1358, height: 720, sar: { num: 87, den: 82 } });
+      expect(saved.clips[0]!.maxRect).toEqual({ x: 0, y: 0, width: 1358, height: 720 });
+
+      // the render accepts the rect (before T35: max-rect-outside-frame) and crops it in coded pixels
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      await textButton(page, 'Preview').click();
+      const previewAnyway = page.getByRole('button', { name: 'Preview anyway' });
+      const dialogTitle = page.getByText('Mix preview', { exact: true });
+      await expect(previewAnyway.or(dialogTitle)).toBeVisible({ timeout: 60_000 });
+      if (await previewAnyway.isVisible()) await previewAnyway.click();
+      await expect(dialogTitle).toBeVisible({ timeout: 110_000 });
+      const src = await page.getByRole('dialog').locator('video').evaluate((v) => (v as HTMLVideoElement).src);
+      const video = ffprobe(fileURLToPath(src)).streams.find((s) => s.codec_type === 'video');
+      expect([video?.width, video?.height]).toEqual([640, 360]);
+      await screenshot(page, '11-anamorphic-preview');
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test.describe('VideoMix (Spanish UI)', () => {
   test('10. the UI is in Spanish', async () => {
     const ctx = await launchApp({ language: 'es' });

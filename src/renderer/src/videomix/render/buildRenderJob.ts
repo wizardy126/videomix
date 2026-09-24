@@ -1,7 +1,7 @@
 import type { MixPlan } from '../planner/types';
 import type { MixSettings, mixPresets } from '../types';
 import { buildVideoGraph, formatNumber } from './buildVideoGraph';
-import type { RenderClip, VideoGraphSettings } from './buildVideoGraph';
+import type { RenderClip, RenderSourceFrames, VideoGraphSettings } from './buildVideoGraph';
 import { getVideoEncodeArgs } from './encoderArgs';
 import type { ResolvedEncoder } from './encoderArgs';
 import type { VideoGraphOverlays } from './overlayFilters';
@@ -117,6 +117,7 @@ export function buildRenderJob({
   plan,
   clips,
   sourcePaths,
+  sourceFrames,
   settings,
   encoding,
   // Software by default (as before T25): callers that don't resolve hardware availability themselves (dev
@@ -132,6 +133,8 @@ export function buildRenderJob({
   plan: MixPlan,
   clips: RenderClip[],
   sourcePaths: Record<string, string>,
+  /** Size and SAR of each source (B1): the crops of anamorphic sources are converted to coded pixels. */
+  sourceFrames?: RenderSourceFrames | undefined,
   settings: MixSettings,
   encoding?: Partial<EncodingOptions> | undefined,
   /** Which encoder to actually use (T25): resolved from `settings.encoder` against `detectEncoders` (useMixRender). */
@@ -157,7 +160,7 @@ export function buildRenderJob({
 
   const files: RenderJob['files'] = [];
   const chunks = getRenderChunks(timeline, { maxChunkSeconds }).map((chunk): RenderChunkStep => {
-    const graph = buildVideoGraph({ timeline, clips, sourcePaths, settings: graphSettings, chunk, overlays });
+    const graph = buildVideoGraph({ timeline, clips, sourcePaths, sourceFrames, settings: graphSettings, chunk, overlays });
     const name = `chunk-${String(chunk.index).padStart(4, '0')}`;
     const graphPath = join(workDir, `${name}.graph.txt`);
     const fileName = `${name}.mp4`;

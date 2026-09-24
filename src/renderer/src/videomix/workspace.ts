@@ -2,7 +2,10 @@ import type { FFprobeFormat, FFprobeStream } from '../../../common/ffprobe';
 import { parseFfprobeDuration } from '../../../common/util';
 import { getRealVideoStreams } from '../util/streams';
 import { getOrientedSize, getStreamRotation } from './overlayMath';
+import type { Size } from './overlayMath';
 import { mixProjectExtension } from './projectFile';
+import { getDisplaySize, getOrientedSar, isSameSar, parseSampleAspectRatio } from './sampleAspect';
+import type { SampleAspectRatio } from './sampleAspect';
 import { DEFAULT_MUSIC_VOLUME_DB } from './types';
 import type { MixMusicPlaylist, MixMusicTrack, MixSource } from './types';
 
@@ -51,28 +54,37 @@ export function classifyOpenedPaths(filePaths: string[]): OpenedPaths {
   return ret;
 }
 
-export type SourceMeta = Pick<MixSource, 'width' | 'height' | 'duration'>;
+export type SourceMeta = Pick<MixSource, 'width' | 'height' | 'duration' | 'sar'>;
 
-/** The informative cache of a source (oriented size of the first real video stream, duration) from the ffprobe meta read by `loadMedia`. */
+/**
+ * The informative cache of a source from the ffprobe meta read by `loadMedia`: display size of the first real video
+ * stream (B1: its SAR applied before the rotation, like Chromium's videoWidth/videoHeight), the SAR of the oriented
+ * frame (`sar`, square = `{ num: 1, den: 1 }` here so that it can replace a stored one) and the duration.
+ */
 export function getSourceMeta({ streams, format }: {
-  streams: Pick<FFprobeStream, 'codec_type' | 'disposition' | 'width' | 'height' | 'tags'>[],
+  streams: Pick<FFprobeStream, 'codec_type' | 'disposition' | 'width' | 'height' | 'tags' | 'sample_aspect_ratio'>[],
   format: Pick<FFprobeFormat, 'duration'>,
 }): SourceMeta {
   const [videoStream] = getRealVideoStreams(streams);
   const duration = parseFfprobeDuration(format.duration);
-  const size = videoStream?.width != null && videoStream.height != null && videoStream.width > 0 && videoStream.height > 0
-    ? getOrientedSize({ width: videoStream.width, height: videoStream.height }, getStreamRotation(videoStream))
-    : undefined;
+  let size: Size | undefined;
+  let sar: SampleAspectRatio | undefined;
+  if (videoStream?.width != null && videoStream.height != null && videoStream.width > 0 && videoStream.height > 0) {
+    const rotation = getStreamRotation(videoStream);
+    sar = getOrientedSar(parseSampleAspectRatio(videoStream.sample_aspect_ratio), rotation) ?? { num: 1, den: 1 };
+    size = getDisplaySize(getOrientedSize({ width: videoStream.width, height: videoStream.height }, rotation), sar);
+  }
   return {
     width: size?.width,
     height: size?.height,
     duration: duration != null && Number.isFinite(duration) && duration >= 0 ? duration : undefined,
+    sar,
   };
 }
 
 /** True if `meta` has something the source doesn't have yet (or different). Undefined values never erase the cache. */
 export const isSourceMetaChanged = (source: MixSource, meta: SourceMeta) => (['width', 'height', 'duration'] as const)
-  .some((key) => meta[key] != null && meta[key] !== source[key]);
+  .some((key) => meta[key] != null && meta[key] !== source[key]) || (meta.sar != null && !isSameSar(meta.sar, source.sar));
 
 /** A music track for a file, at the default background volume (T12b). `filePath` must be absolute. */
 export function createMusicTrack({ id, filePath, volumeDb = DEFAULT_MUSIC_VOLUME_DB }: { id: string, filePath: string, volumeDb?: number | undefined }): MixMusicTrack {

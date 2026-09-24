@@ -2,8 +2,8 @@ import { describe, test, expect } from 'vitest';
 import JSON5 from 'json5';
 import { ZodError } from 'zod';
 
-import { MIGRATED_MUSIC_TRACK_ID, clipsBySource, getClipDuration, parseMixProject, validateMixProject } from './project';
-import { createEmptyMixProject, defaultMixSettings, defaultMusicPlaylist, getOutputSize, mixOutputAspects, mixOutputResolutions, transitionTypes } from './types';
+import { LINK_GAP_TOLERANCE, MIGRATED_MUSIC_TRACK_ID, clipsBySource, getClipChains, getClipDuration, parseMixProject, validateMixProject } from './project';
+import { createEmptyMixProject, defaultAlwaysVisible, defaultLinksSettings, defaultMixSettings, defaultMusicPlaylist, getOutputSize, mixOutputAspects, mixOutputResolutions, transitionTypes } from './types';
 import type { MixClip, MixOverlay, MixProject, MixSettings, TextOverlay } from './types';
 import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, createSoundOverlay, createTextOverlay } from './overlays/factories';
 
@@ -41,7 +41,7 @@ const migratedSettings = (overrides: Partial<MixSettings> = {}): MixSettings => 
 describe('types', () => {
   test('createEmptyMixProject', () => {
     const project = createEmptyMixProject();
-    expect(project).toEqual({ version: 3, sources: [], clips: [], settings: defaultMixSettings, overlays: [] });
+    expect(project).toEqual({ version: 4, sources: [], clips: [], settings: defaultMixSettings, overlays: [] });
     // must not share nested objects with the defaults
     project.settings.gap.width = 10;
     project.settings.musicPlaylist.ducking.amountDb = 0;
@@ -129,7 +129,7 @@ describe('parseMixProject', () => {
     expect(overlays).toEqual([]);
     const v1 = { ...structuredClone(rest), version: 1, settings: { ...legacySettings, resolution: '2160p' }, loudnessCache: { k: { hasAudio: false } } };
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v1)));
-    expect(parsed).toEqual({ ...v1, version: 3, settings: migratedSettings({ output: { aspect: '16:9', resolution: '2160' } }), overlays: [] });
+    expect(parsed).toEqual({ ...v1, version: 4, settings: migratedSettings({ output: { aspect: '16:9', resolution: '2160' } }), overlays: [] });
   });
 
   test('migrates v2 to v3 without losing anything: 16:9, H.264, the music as a single track', () => {
@@ -144,7 +144,7 @@ describe('parseMixProject', () => {
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v2)));
     expect(parsed).toEqual({
       ...v2,
-      version: 3,
+      version: 4,
       settings: migratedSettings({
         output: { aspect: '16:9', resolution: '720' },
         musicPlaylist: { ...defaultMusicPlaylist, tracks: [{ id: MIGRATED_MUSIC_TRACK_ID, path: 'm.mp3', absolutePath: '/m.mp3', volumeDb: -6 }], loop: false },
@@ -161,6 +161,16 @@ describe('parseMixProject', () => {
     expect(parseMixProject({ ...v2, settings: noMusic }).settings.output).toEqual(defaultMixSettings.output);
   });
 
+  test('migrates v3 to v4 additively: links, maxDuration and the always-visible sequence are filled from the defaults', () => {
+    const v3 = { ...structuredClone(makeProject([makeClip(), makeClip({ id: 'c2' })])), version: 3 };
+    Reflect.deleteProperty(v3.settings, 'links');
+    Reflect.deleteProperty(v3.settings, 'alwaysVisible');
+    Reflect.deleteProperty(v3.settings, 'maxDuration');
+    const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v3)));
+    expect(parsed).toEqual({ ...v3, version: 4, settings: { ...v3.settings, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible } });
+    expect(parsed.settings.maxDuration).toBeUndefined();
+  });
+
   test('opens a v1 file saved by an older build', () => {
     const text = `{
       version: 1,
@@ -172,14 +182,14 @@ describe('parseMixProject', () => {
     const json = JSON5.parse(text);
     const { resolution, ...settings } = json.settings;
     expect(resolution).toBe('720p');
-    expect(parseMixProject(json)).toEqual({ ...json, version: 3, settings: { ...settings, output: { aspect: '16:9', resolution: '720' }, encoder: defaultMixSettings.encoder, musicPlaylist: defaultMusicPlaylist }, overlays: [] });
+    expect(parseMixProject(json)).toEqual({ ...json, version: 4, settings: { ...settings, output: { aspect: '16:9', resolution: '720' }, encoder: defaultMixSettings.encoder, musicPlaylist: defaultMusicPlaylist, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible }, overlays: [] });
   });
 
   test('fills missing settings from defaults', () => {
     const settings: Record<string, unknown> = { ...defaultMixSettings, fps: 60 };
     delete settings['fadeInOut'];
     delete settings['encoder'];
-    const parsed = parseMixProject({ version: 3, sources: [], clips: [], settings, overlays: [] });
+    const parsed = parseMixProject({ version: 4, sources: [], clips: [], settings, overlays: [] });
     expect(parsed.settings.encoder).toEqual({ codec: 'h264', hardware: 'auto' });
     expect(parsed.settings.fadeInOut).toBe(true);
     expect(parsed.settings.fps).toBe(60);
@@ -191,7 +201,7 @@ describe('parseMixProject', () => {
     expect(() => parseMixProject({ sources: [] })).toThrow('missing version');
     expect(() => parseMixProject({ version: '1' })).toThrow('missing version');
     expect(() => parseMixProject({ version: 0 })).toThrow('missing version');
-    expect(() => parseMixProject({ ...createEmptyMixProject(), version: 4 })).toThrow('newer than supported');
+    expect(() => parseMixProject({ ...createEmptyMixProject(), version: 5 })).toThrow('newer than supported');
   });
 
   // Each case returns a copy of a valid project with one thing broken.
@@ -243,6 +253,104 @@ describe('helpers', () => {
     expect([...map.keys()]).toEqual(['s1', 's2']);
     expect(map.get('s1')?.map((c) => c.id)).toEqual(['a', 'c']);
     expect(map.get('s2')?.map((c) => c.id)).toEqual(['b']);
+  });
+});
+
+describe('getClipChains', () => {
+  const chainIds = (project: MixProject) => getClipChains(project).map((chain) => chain.map((c) => c.id));
+
+  const clip = (id: string, start: number, end: number, overrides: Partial<MixClip> = {}) => makeClip({ id, start, end, ...overrides });
+
+  test('links clips of the same source within maxGap, ordered by start regardless of list order', () => {
+    // c2 (out of list order) is 1s after c1 ends (maxGap 10): linked. c3 starts 11s after c2 ends: not linked.
+    const project = makeProject([clip('c2', 5, 9), clip('c1', 0, 4), clip('c3', 20, 24)]);
+    expect(chainIds(project)).toEqual([['c1', 'c2'], ['c3']]);
+  });
+
+  test('maxGap threshold: exactly at the limit links, just past it does not', () => {
+    const project = makeProject([clip('c1', 0, 4), clip('c2', 14, 18)]);
+    project.settings.links.maxGap = 10;
+    expect(chainIds(project)).toEqual([['c1', 'c2']]);
+    project.settings.links.maxGap = 9.99;
+    expect(chainIds(project)).toEqual([['c1'], ['c2']]);
+  });
+
+  test('overlapping clips are never auto-linked, however small the overlap (E6: duplicate / "new clip from here")', () => {
+    // a large overlap
+    const project = makeProject([clip('c1', 0, 5), clip('c2', 3, 8)]);
+    expect(chainIds(project)).toEqual([['c1'], ['c2']]);
+    // even a tiny one, well past the touching tolerance
+    const barely = makeProject([clip('c1', 0, 5), clip('c2', 4.8, 8)]);
+    expect(chainIds(barely)).toEqual([['c1'], ['c2']]);
+    // a large maxGap doesn't help: overlaps are excluded regardless of it
+    barely.settings.links.maxGap = 1000;
+    expect(chainIds(barely)).toEqual([['c1'], ['c2']]);
+  });
+
+  test('touching clips (within LINK_GAP_TOLERANCE) link like a zero gap, but only with maxGap > 0', () => {
+    // exactly touching (gap 0) and a hair short of it (rounding) both count as touching
+    const touching = makeProject([clip('c1', 0, 5), clip('c2', 5, 8)]);
+    expect(chainIds(touching)).toEqual([['c1', 'c2']]);
+    const almostTouching = makeProject([clip('c1', 0, 5), clip('c2', 5 - LINK_GAP_TOLERANCE / 2, 8)]);
+    expect(chainIds(almostTouching)).toEqual([['c1', 'c2']]);
+    // but past the tolerance, it's an overlap: not linked
+    const overlap = makeProject([clip('c1', 0, 5), clip('c2', 5 - LINK_GAP_TOLERANCE * 2, 8)]);
+    expect(chainIds(overlap)).toEqual([['c1'], ['c2']]);
+  });
+
+  test('maxGap: 0 disables automatic linking entirely (01-requisitos §11 E2), even for touching clips', () => {
+    const touching = makeProject([clip('c1', 0, 4), clip('c2', 4, 8)]);
+    touching.settings.links.maxGap = 0;
+    expect(chainIds(touching)).toEqual([['c1'], ['c2']]);
+    const gapped = makeProject([clip('c1', 0, 4), clip('c2', 4.5, 8)]);
+    gapped.settings.links.maxGap = 0;
+    expect(chainIds(gapped)).toEqual([['c1'], ['c2']]);
+  });
+
+  test('link: break/force override the automatic rule with the previous clip of the chain', () => {
+    // within maxGap, but explicitly broken
+    const broken = makeProject([clip('c1', 0, 4), clip('c2', 5, 9, { link: 'break' })]);
+    expect(chainIds(broken)).toEqual([['c1'], ['c2']]);
+    // past maxGap, but forced
+    const forced = makeProject([clip('c1', 0, 4), clip('c2', 30, 34, { link: 'force' })]);
+    expect(chainIds(forced)).toEqual([['c1', 'c2']]);
+    // maxGap: 0, but forced
+    const forcedZero = makeProject([clip('c1', 0, 4), clip('c2', 30, 34, { link: 'force' })]);
+    forcedZero.settings.links.maxGap = 0;
+    expect(chainIds(forcedZero)).toEqual([['c1', 'c2']]);
+    // overlapping, but forced: the only way an overlapping pair links (E6)
+    const forcedOverlap = makeProject([clip('c1', 0, 5), clip('c2', 3, 8, { link: 'force' })]);
+    expect(chainIds(forcedOverlap)).toEqual([['c1', 'c2']]);
+    // force/break on the first clip of a source is a no-op (no previous clip to apply it to)
+    const first = makeProject([clip('c1', 0, 4, { link: 'force' })]);
+    expect(chainIds(first)).toEqual([['c1']]);
+  });
+
+  test('several sources: chains never cross sources', () => {
+    const project = makeProject([
+      clip('a1', 0, 4, { sourceId: 's1' }),
+      clip('a2', 5, 9, { sourceId: 's1' }),
+      clip('b1', 0, 4, { sourceId: 's2' }),
+      clip('b2', 5, 9, { sourceId: 's2' }),
+    ]);
+    expect(chainIds(project)).toEqual([['a1', 'a2'], ['b1', 'b2']]);
+  });
+
+  test('pinned, grouped and always-visible clips are excluded entirely, not even as a lone chain', () => {
+    const project = makeProject([
+      clip('c1', 0, 4),
+      clip('c2', 5, 9, { pinTime: 12 }),
+      clip('c3', 10, 14, { groupId: 'g' }),
+      clip('c4', 15, 19, { groupId: 'g' }),
+      clip('c5', 20, 24),
+    ]);
+    project.settings.alwaysVisible = { clipIds: ['c5'] };
+    // c2, c3, c4 and c5 are all excluded (pinned, grouped, always-visible); only c1 is left, as a chain of its own
+    expect(chainIds(project)).toEqual([['c1']]);
+  });
+
+  test('empty project', () => {
+    expect(getClipChains(makeProject([]))).toEqual([]);
   });
 });
 
@@ -320,6 +428,34 @@ describe('validateMixProject', () => {
     const track = { id: 't', path: '/m.mp3', absolutePath: '/m.mp3', volumeDb: 0 };
     project.settings.musicPlaylist = { ...project.settings.musicPlaylist, tracks: [track, { ...track, path: '/n.mp3', absolutePath: '/n.mp3' }] };
     expect(validateMixProject(project)).toMatchObject([{ level: 'error', code: 'duplicate-music-track-id', trackId: 't' }]);
+  });
+
+  test('max duration (v4)', () => {
+    const withMaxDuration = (maxDuration: number | undefined) => {
+      const project = makeProject();
+      project.settings.maxDuration = maxDuration;
+      return project;
+    };
+    expect(codes(withMaxDuration(undefined))).toEqual([]);
+    expect(codes(withMaxDuration(30))).toEqual([]);
+    expect(codes(withMaxDuration(0))).toEqual(['max-duration-out-of-range']);
+    expect(codes(withMaxDuration(-1))).toEqual(['max-duration-out-of-range']);
+    expect(codes(withMaxDuration(Number.NaN))).toEqual(['max-duration-out-of-range']);
+  });
+
+  test('always-visible sequence (v4)', () => {
+    const clips = [makeClip(), makeClip({ id: 'c2', groupId: 'g' }), makeClip({ id: 'c3', groupId: 'g' })];
+    const withSequence = (clipIds: string[]) => {
+      const project = makeProject(clips);
+      project.settings.alwaysVisible = { clipIds };
+      return project;
+    };
+    expect(codes(withSequence(['c1']))).toEqual([]);
+    expect(codes(withSequence([]))).toEqual([]);
+    expect(validateMixProject(withSequence(['nope']))).toMatchObject([{ level: 'error', code: 'always-visible-unknown-clip', clipId: 'nope' }]);
+    expect(validateMixProject(withSequence(['c1', 'c1']))).toMatchObject([{ level: 'error', code: 'duplicate-always-visible-id', clipId: 'c1' }]);
+    // in the sequence and in a group at the same time
+    expect(validateMixProject(withSequence(['c2']))).toMatchObject([{ level: 'warning', code: 'clip-in-sequence-and-group', clipId: 'c2', groupId: 'g' }]);
   });
 
   describe('overlays', () => {

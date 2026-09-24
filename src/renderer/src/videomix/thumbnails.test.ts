@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { ThumbnailQueue, getThumbnailCacheKey, getThumbnailFileName } from './thumbnails';
+import { ThumbnailQueue, getThumbnailCacheKey, getThumbnailCrop, getThumbnailFileName } from './thumbnails';
 import type { Rect } from './types';
 
 const rect: Rect = { x: 0, y: 0, width: 1920, height: 1080 };
@@ -23,6 +23,25 @@ describe('getThumbnailCacheKey', () => {
     expect(await getThumbnailCacheKey({ ...base, start: 2 })).not.toBe(baseKey);
     expect(await getThumbnailCacheKey({ ...base, maxRect: { ...rect, x: 10 } })).not.toBe(baseKey);
     expect(await getThumbnailCacheKey({ ...base, maxRect: { ...rect, width: 100 } })).not.toBe(baseKey);
+  });
+
+  test('B1: an anamorphic SAR changes the key, square pixels keep the pre-v3 key', async () => {
+    const base = { absolutePath: '/media/a.mp4', mtimeMs: 1000, size: 12, start: 1.5, maxRect: rect };
+    const baseKey = await getThumbnailCacheKey(base);
+    expect(await getThumbnailCacheKey({ ...base, sar: undefined })).toBe(baseKey);
+    expect(await getThumbnailCacheKey({ ...base, sar: { num: 1, den: 1 } })).toBe(baseKey);
+    expect(await getThumbnailCacheKey({ ...base, sar: { num: 679, den: 640 } })).not.toBe(baseKey);
+  });
+});
+
+describe('getThumbnailCrop', () => {
+  test('square pixels: the max rect as is', () => {
+    expect(getThumbnailCrop(rect, { width: 1920, height: 1080 })).toEqual({ crop: rect });
+  });
+
+  test('B1: coded crop plus the display aspect', () => {
+    const maxRect = { x: 78, y: 14, width: 1232, height: 694 };
+    expect(getThumbnailCrop(maxRect, { width: 1358, height: 720, sar: { num: 679, den: 640 } })).toEqual({ crop: { x: 74, y: 14, width: 1160, height: 694 }, aspect: 1232 / 694 });
   });
 });
 

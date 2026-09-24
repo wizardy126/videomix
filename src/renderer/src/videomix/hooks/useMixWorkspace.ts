@@ -14,6 +14,7 @@ import type { UseMixProject } from './useMixProject';
 import type { LoadedMixProject, MissingOverlayFile, OverlayFileKind } from '../projectFile';
 import { getOverlayFiles } from '../projectFile';
 import { askForRecoverProject } from '../dialogs';
+import { getSourceFrameChange } from '../sourceResize';
 import { classifyOpenedPaths, appendMusicTracks, countClipsBySource, createMusicTrack, getMixProjectTitle, getSourceMeta, isSourceMetaChanged } from '../workspace';
 
 const { basename, dirname } = window.require('node:path');
@@ -69,8 +70,14 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   useEffect(() => {
     if (currentSource == null || ffprobeMeta == null) return;
     const meta = getSourceMeta(ffprobeMeta);
-    if (isSourceMetaChanged(currentSource, meta)) setSourceMeta(currentSource.id, meta);
-  }, [currentSource, ffprobeMeta, setSourceMeta]);
+    if (!isSourceMetaChanged(currentSource, meta)) return;
+    // B2: a new frame size scales the rects of the source's clips (projectReducer's relinkSource); warn if it also
+    // changed proportion, because then they are refitted
+    if (getSourceFrameChange(currentSource, meta)?.aspectChanged && (clipCountBySource.get(currentSource.id) ?? 0) > 0) {
+      getSwal().toast.fire({ icon: 'warning', timer: 10000, title: i18n.t('The video size of {{name}} changed proportion: check the frames of its clips.', { name: currentSource.name }) });
+    }
+    setSourceMeta(currentSource.id, meta);
+  }, [clipCountBySource, currentSource, ffprobeMeta, setSourceMeta]);
 
   // The file in the player is no longer a source (e.g. undo of "Add videos", or a relink): unload it, so the timeline
   // doesn't show a file whose clips can't be edited

@@ -200,21 +200,61 @@ describe('mixProjectReducer', () => {
       expect(groups(mixProjectReducer(three, { type: 'removeClip', clipId: 'c2' }))).toEqual(['g', 'g']);
     });
 
-    test('a duplicate is neither pinned nor grouped', () => {
+    test('a duplicate is neither pinned nor grouped, and has no link exception of its own (T36)', () => {
       const project = mixProjectReducer(makeProject(), {
         type: 'batch',
-        actions: [{ type: 'groupClips', clipIds: ['c1', 'c2'], groupId: 'g' }, { type: 'setClipPinTime', clipId: 'c1', pinTime: 3 }],
+        actions: [
+          { type: 'groupClips', clipIds: ['c1', 'c2'], groupId: 'g' },
+          { type: 'setClipPinTime', clipId: 'c1', pinTime: 3 },
+          { type: 'setClipLink', clipId: 'c1', link: 'force' },
+        ],
       });
       const next = mixProjectReducer(project, { type: 'duplicateClip', clipId: 'c1', newId: 'c9' });
-      const { pinTime, groupId, ...rest } = project.clips[0]!;
+      const { pinTime, groupId, link, ...rest } = project.clips[0]!;
       expect(pinTime).toBe(3);
       expect(groupId).toBe('g');
+      expect(link).toBe('force');
       expect(next.clips[1]).toEqual({ ...rest, id: 'c9' });
+      expect('link' in next.clips[1]!).toBe(false);
     });
 
     test('dissolveSingleClipGroups keeps the array when nothing changes', () => {
       const clips = [makeClip('a', { groupId: 'g' }), makeClip('b', { groupId: 'g' }), makeClip('c')];
       expect(dissolveSingleClipGroups(clips)).toBe(clips);
+    });
+  });
+
+  describe('clip links and always-visible sequence (v4)', () => {
+    test('setClipLink', () => {
+      const project = makeProject();
+      const forced = mixProjectReducer(project, { type: 'setClipLink', clipId: 'c2', link: 'force' });
+      expect(forced.clips[1]).toEqual({ ...project.clips[1], link: 'force' });
+      expect(forced.clips[0]).toBe(project.clips[0]);
+      expect(mixProjectReducer(forced, { type: 'setClipLink', clipId: 'c2', link: 'force' })).toBe(forced);
+      const cleared = mixProjectReducer(forced, { type: 'setClipLink', clipId: 'c2', link: undefined });
+      expect('link' in cleared.clips[1]!).toBe(false);
+      expect(mixProjectReducer(project, { type: 'setClipLink', clipId: 'c2', link: undefined })).toBe(project);
+    });
+
+    test('setAlwaysVisibleClips: dedupes, drops unknown ids, and is a no-op if unchanged', () => {
+      const project = makeProject();
+      const set = mixProjectReducer(project, { type: 'setAlwaysVisibleClips', clipIds: ['c3', 'c1', 'c3', 'nope'] });
+      expect(set.settings.alwaysVisible.clipIds).toEqual(['c3', 'c1']);
+      expect(mixProjectReducer(set, { type: 'setAlwaysVisibleClips', clipIds: ['c3', 'c1'] })).toBe(set);
+      expect(mixProjectReducer(project, { type: 'setAlwaysVisibleClips', clipIds: [] })).toBe(project);
+    });
+
+    test('removing a clip or its source drops it from the always-visible sequence', () => {
+      const withSequence = mixProjectReducer(makeProject(), { type: 'setAlwaysVisibleClips', clipIds: ['c1', 'c2', 'c3'] });
+      const afterRemove = mixProjectReducer(withSequence, { type: 'removeClip', clipId: 'c2' });
+      expect(afterRemove.settings.alwaysVisible.clipIds).toEqual(['c1', 'c3']);
+      // c2 is the only clip of s2
+      const afterRemoveSource = mixProjectReducer(withSequence, { type: 'removeSource', sourceId: 's2' });
+      expect(afterRemoveSource.settings.alwaysVisible.clipIds).toEqual(['c1', 'c3']);
+      // no-op: the settings object is kept when nothing is removed from the sequence
+      expect(mixProjectReducer(withSequence, { type: 'removeClip', clipId: 'nope' })).toBe(withSequence);
+      const noSequence = makeProject();
+      expect(mixProjectReducer(noSequence, { type: 'removeClip', clipId: 'c1' }).settings).toBe(noSequence.settings);
     });
   });
 

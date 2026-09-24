@@ -198,6 +198,20 @@ await generate('v-720x1280-silent-7s.mp4', [
   '-c:a', 'aac',
 ]);
 
+// T35 (B1): anamorphic sources (non-square pixels), 1280x720 coded shown at 1358x720 like the user's file (SAR 679:640;
+// x264 writes the closest ratio it can signal, 87:82, which gives the same display size). A 64 px grid makes the
+// geometry easy to check. The second one also has a 90° display matrix (displayed 720x1358).
+const anamorphicArgs = (seconds: number, freq: number) => [
+  '-f', 'lavfi', '-i', `testsrc2=size=1280x720:rate=30:duration=${seconds}`,
+  '-f', 'lavfi', '-i', `sine=frequency=${freq}:duration=${seconds}`,
+  '-vf', `${withTimeOverlay('drawgrid=w=64:h=64:t=2:c=white', hasDrawtext)},setsar=679/640`,
+  '-af', 'volume=-18dB',
+  '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+  '-c:a', 'aac',
+];
+await generate('ana-1280x720-sar-6s.mp4', anamorphicArgs(6, 330));
+await generateRotated('ana-rotated-6s.mp4', anamorphicArgs(6, 370));
+
 await generateMusic('music-20s.m4a', 20, ['-c:a', 'aac', '-b:a', '128k']);
 await generateMusic('music-60s.mp3', 60, ['-c:a', 'libmp3lame', '-b:a', '128k']);
 

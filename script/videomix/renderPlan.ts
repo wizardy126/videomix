@@ -36,7 +36,7 @@ registerRendererImports();
 
 // --- minimal local types of the renderer modules we use ---
 interface Rect { x: number, y: number, width: number, height: number }
-interface MixSource { id: string, path: string, absolutePath: string, name: string, width?: number, height?: number, duration?: number }
+interface MixSource { id: string, path: string, absolutePath: string, name: string, width?: number, height?: number, duration?: number, sar?: { num: number, den: number } }
 interface MixClip { id: string, sourceId: string, name: string, color: number, start: number, end: number, maxRect: Rect, minRect?: Rect, muted: boolean, gainDb: number }
 interface MixSettings { fps: number, gap: { width: number, color: string }, transition: { type: string, duration: number }, [key: string]: unknown }
 interface MixProject { version: 1, sources: MixSource[], clips: MixClip[], settings: MixSettings }
@@ -179,6 +179,7 @@ async function fromProject() {
     plan,
     clips: project.clips,
     sourcePaths: Object.fromEntries(project.sources.map((s) => [s.id, s.absolutePath])),
+    sourceFrames: Object.fromEntries(project.sources.map((s) => [s.id, s])),
     settings: { ...project.settings, gap: { ...project.settings.gap, width: gap } },
   };
 }
@@ -195,11 +196,12 @@ async function fromFixture(name: string) {
     plan: fixtures.scalePlan(fixture, width, height),
     clips: fixtures.testClips,
     sourcePaths: fixtures.testSourcePaths(mediaDir),
+    sourceFrames: undefined,
     settings: { ...settings, gap: { ...settings.gap, width: 2 * Math.round((settings.gap.width * scale) / 2) } },
   };
 }
 
-const { dir: outDir, plan, clips, sourcePaths, settings } = opts.fixture != null ? await fromFixture(opts.fixture) : await fromProject();
+const { dir: outDir, plan, clips, sourcePaths, sourceFrames, settings } = opts.fixture != null ? await fromFixture(opts.fixture) : await fromProject();
 await mkdir(outDir, { recursive: true });
 console.log(formatPlan(plan));
 if (plan.warnings.length > 0) console.log('warnings:', JSON.stringify(plan.warnings));
@@ -212,6 +214,7 @@ const job = buildRenderJob({
   plan,
   clips,
   sourcePaths,
+  sourceFrames,
   settings,
   encoding: { crf: Number(opts.crf), preset: opts.preset },
   workDir,

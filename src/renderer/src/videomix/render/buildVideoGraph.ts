@@ -2,7 +2,8 @@ import invariant from 'tiny-invariant';
 
 import { getCropForAspect } from '../geometry';
 import { getPlanAxis, getPlanAxisLengths } from '../planner/types';
-import type { MixClip, MixSettings, Rect } from '../types';
+import { isSquareSar, toCodedRect } from '../sampleAspect';
+import type { MixClip, MixSettings, MixSource, Rect } from '../types';
 import type { RenderChunk } from './renderChunks';
 import { getColumnsAtFrame, getFillSpansAtFrame, getPlacementsInRange } from './renderTimeline';
 import type { ColumnGeometry, PlacementFrames, RenderTimeline } from './renderTimeline';
@@ -58,17 +59,30 @@ export function stepExpr(values: number[], fps: number) {
   return terms.length > 1 ? `'${terms.join('')}'` : terms[0]!;
 }
 
-/** Blurred "cover" of the input at `w`×`h`: blur at 1/8 resolution (2.5× cheaper than a full-size gblur, ADR-001 §4). */
-export function blurCover(w: number, h: number) {
+/**
+ * Blurred "cover" of the input at `w`×`h`: blur at 1/8 resolution (2.5× cheaper than a full-size gblur, ADR-001 §4).
+ * `inputAspect`: display aspect ratio of an input with non-square pixels (B1), whose cover size is then computed here,
+ * because force_original_aspect_ratio uses the coded size.
+ */
+export function blurCover(w: number, h: number, inputAspect?: number | undefined) {
   const sw = Math.max(2, roundEven(w / 8));
   const sh = Math.max(2, roundEven(h / 8));
   // boxblur rejects radii above half the (chroma) plane size
   const radius = Math.min(6, Math.floor(Math.min(sw, sh) / 4));
   const blur = radius > 0 ? `,boxblur=luma_radius=${radius}:luma_power=2` : '';
-  return `scale=${sw}:${sh}:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=${sw}:${sh}${blur},scale=${w}:${h}:flags=bilinear,setsar=1`;
+  const cover = inputAspect == null
+    ? `${sw}:${sh}:force_original_aspect_ratio=increase`
+    : (inputAspect > sw / sh ? `${Math.max(sw, ceilEven(sh * inputAspect))}:${sh}` : `${sw}:${Math.max(sh, ceilEven(sw / inputAspect))}`);
+  return `scale=${cover}:flags=fast_bilinear,crop=${sw}:${sh}${blur},scale=${w}:${h}:flags=bilinear,setsar=1`;
 }
 
 const cropFilter = (r: Rect) => `crop=${r.width}:${r.height}:${r.x}:${r.y}`;
+
+/**
+ * Per source id: its display size and SAR (B1). Clip rects are in display pixels; the crop of a source with
+ * non-square pixels is converted to coded pixels (sampleAspect.toCodedRect). Missing = square pixels.
+ */
+export type RenderSourceFrames = Record<string, Pick<MixSource, 'width' | 'height' | 'sar'>>;
 
 /** A column or a fill area, composed left to right. Per chunk frame: offset and visible length along the main axis. */
 interface Element {
@@ -88,12 +102,14 @@ interface Segment { label: string, start: number, end: number }
 
 /**
  * Filter graph for the frames [chunk.f0, chunk.f1) of the plan.
- * `sourcePaths` maps `sourceId` → media path. Clip rects are in oriented source pixels (ffmpeg autorotates).
+ * `sourcePaths` maps `sourceId` → media path. Clip rects are in source display pixels (ffmpeg autorotates; `sourceFrames`
+ * gives the SAR of anamorphic sources).
  */
-export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, chunk, overlays }: {
+export function buildVideoGraph({ timeline: tl, clips, sourcePaths, sourceFrames, settings, chunk, overlays }: {
   timeline: RenderTimeline,
   clips: RenderClip[],
   sourcePaths: Record<string, string>,
+  sourceFrames?: RenderSourceFrames | undefined,
   settings: VideoGraphSettings,
   chunk: Pick<RenderChunk, 'f0' | 'f1'>,
   /** Images, countdowns and progress bars drawn over the composition (T20). */
@@ -256,13 +272,20 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
     const shift = preroll > 0 ? `setpts=PTS-${formatNumber(preroll)}/TB,` : '';
     const head = `[${inputIndex}:v]${shift}fps=${fps}:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=${nf},setpts=PTS-STARTPTS`;
     const out = newLabel('clip');
+    // B1: rects in display pixels → crop in coded pixels; the scale that follows (to explicit sizes, setsar=1) fixes
+    // the proportion, and the blurred cover is told the display aspect
+    const frame = sourceFrames?.[clip.sourceId];
+    const sar = frame?.sar;
+    const frameSize = frame?.width != null && frame.height != null ? { width: frame.width, height: frame.height } : undefined;
+    const cropFilterOf = (r: Rect) => cropFilter(toCodedRect(r, sar, frameSize));
+    const blurCoverOf = (w: number, h: number, r: Rect) => blurCover(w, h, isSquareSar(sar) ? undefined : r.width / r.height);
 
     if (!element.varying) {
       // the cell in output px (a column: layerWidth × H; a row: W × layerWidth)
       const { w, h } = layerSize(element.layerWidth);
       const { crop, fit } = getCropForAspect(clip.maxRect, clip.minRect, w / h);
       if (fit === 'fill') {
-        filters.push(`${head},${cropFilter(crop)},scale=${w}:${h}:flags=bicubic,setsar=1[${out}]`);
+        filters.push(`${head},${cropFilterOf(crop)},scale=${w}:${h}:flags=bicubic,setsar=1[${out}]`);
         return { label: out, start: pf0 - f0, end: pf1 - f0 };
       }
       // pillarbox: full height, centred; letterbox: full width, centred. Background: the clip's own blurred cover.
@@ -271,9 +294,9 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
       const [fg, bg] = [newLabel('fg'), newLabel('bg')];
       if (settings.fill.mode === 'blur') {
         const [a, b] = [newLabel('s'), newLabel('s')];
-        filters.push(`${head},${cropFilter(crop)},split[${a}][${b}]`, `[${a}]scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `[${b}]${blurCover(w, h)}[${bg}]`);
+        filters.push(`${head},${cropFilterOf(crop)},split[${a}][${b}]`, `[${a}]scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `[${b}]${blurCoverOf(w, h, crop)}[${bg}]`);
       } else {
-        filters.push(`${head},${cropFilter(crop)},scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `${colorSource(fillColor, w, h, nf)}[${bg}]`);
+        filters.push(`${head},${cropFilterOf(crop)},scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `${colorSource(fillColor, w, h, nf)}[${bg}]`);
       }
       filters.push(`[${bg}][${fg}]overlay=x=${(w - fw) / 2}:y=${(h - fh) / 2}:shortest=1[${out}]`);
       return { label: out, start: pf0 - f0, end: pf1 - f0 };
@@ -317,9 +340,9 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, settings, ch
     if (needsBg && settings.fill.mode === 'blur') {
       const [a, b] = [newLabel('s'), newLabel('s')];
       const layer = layerSize(element.layerWidth);
-      filters.push(`${head},${cropFilter(U)},split[${a}][${b}]`, `[${b}]${blurCover(layer.w, layer.h)}[${base}]`, `[${a}]${scale}[${sc}]`);
+      filters.push(`${head},${cropFilterOf(U)},split[${a}][${b}]`, `[${b}]${blurCoverOf(layer.w, layer.h, U)}[${base}]`, `[${a}]${scale}[${sc}]`);
     } else {
-      filters.push(`${head},${cropFilter(U)},${scale}[${sc}]`, `${colorLayer(needsBg ? fillColor : 'black', element.layerWidth, nf)}[${base}]`);
+      filters.push(`${head},${cropFilterOf(U)},${scale}[${sc}]`, `${colorLayer(needsBg ? fillColor : 'black', element.layerWidth, nf)}[${base}]`);
     }
     filters.push(`[${base}][${sc}]overlay=x=${stepExpr(ox, fps)}:y=${stepExpr(oy, fps)}:eval=frame:shortest=1[${out}]`);
     return { label: out, start: pf0 - f0, end: pf1 - f0 };

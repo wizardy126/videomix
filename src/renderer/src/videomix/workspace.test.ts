@@ -54,12 +54,33 @@ describe('getSourceMeta', () => {
         stream({ codec_type: 'video', width: 600, height: 600, disposition: { attached_pic: 1 } as FFprobeStream['disposition'] }),
         stream({ codec_type: 'video', width: 1920, height: 1080 }),
       ],
-    })).toEqual({ width: 1920, height: 1080, duration: 12.5 });
+    })).toEqual({ width: 1920, height: 1080, duration: 12.5, sar: { num: 1, den: 1 } });
   });
 
   test('oriented size with rotation', () => {
     expect(getSourceMeta({ format, streams: [stream({ codec_type: 'video', width: 1920, height: 1080, tags: { rotate: '90' } })] }))
-      .toEqual({ width: 1080, height: 1920, duration: 12.5 });
+      .toEqual({ width: 1080, height: 1920, duration: 12.5, sar: { num: 1, den: 1 } });
+  });
+
+  test('B1: display size with the SAR, like videoWidth/videoHeight', () => {
+    expect(getSourceMeta({ format, streams: [stream({ codec_type: 'video', width: 1280, height: 720, sample_aspect_ratio: '679:640' })] }))
+      .toEqual({ width: 1358, height: 720, duration: 12.5, sar: { num: 679, den: 640 } });
+    expect(getSourceMeta({ format, streams: [stream({ codec_type: 'video', width: 720, height: 480, sample_aspect_ratio: '8:9' })] }))
+      .toEqual({ width: 720, height: 540, duration: 12.5, sar: { num: 8, den: 9 } });
+    // unknown SAR = square
+    expect(getSourceMeta({ format, streams: [stream({ codec_type: 'video', width: 1280, height: 720, sample_aspect_ratio: '0:1' })] }))
+      .toEqual({ width: 1280, height: 720, duration: 12.5, sar: { num: 1, den: 1 } });
+  });
+
+  test('B1: SAR applied before the rotation, stored for the rotated frame', () => {
+    // display-matrix rotation (side data, ffmpeg ≥ 5) and the old rotate tag
+    const sideData = stream({ codec_type: 'video', width: 1280, height: 720, sample_aspect_ratio: '679:640' });
+    Object.assign(sideData, { side_data_list: [{ side_data_type: 'Display Matrix', rotation: 90 }] });
+    expect(getSourceMeta({ format, streams: [sideData] })).toEqual({ width: 720, height: 1358, duration: 12.5, sar: { num: 640, den: 679 } });
+    expect(getSourceMeta({ format, streams: [stream({ codec_type: 'video', width: 1280, height: 720, sample_aspect_ratio: '679:640', tags: { rotate: '270' } })] }))
+      .toEqual({ width: 720, height: 1358, duration: 12.5, sar: { num: 640, den: 679 } });
+    expect(getSourceMeta({ format, streams: [stream({ codec_type: 'video', width: 1280, height: 720, sample_aspect_ratio: '679:640', tags: { rotate: '180' } })] }))
+      .toEqual({ width: 1358, height: 720, duration: 12.5, sar: { num: 679, den: 640 } });
   });
 
   test('audio only or invalid duration', () => {
@@ -76,6 +97,13 @@ describe('isSourceMetaChanged', () => {
     expect(isSourceMetaChanged(source, { width: undefined, height: undefined, duration: undefined })).toBe(false);
     expect(isSourceMetaChanged(source, { width: 1920, height: 1080, duration: 10.5 })).toBe(true);
     expect(isSourceMetaChanged({ id: 's', path: '/a.mp4', absolutePath: '/a.mp4', name: 'a.mp4' }, { width: 1, height: undefined, duration: undefined })).toBe(true);
+  });
+
+  test('B1: the SAR counts; square = no SAR stored', () => {
+    expect(isSourceMetaChanged(source, { width: 1920, height: 1080, duration: 10, sar: { num: 1, den: 1 } })).toBe(false);
+    expect(isSourceMetaChanged(source, { width: 1920, height: 1080, duration: 10, sar: { num: 4, den: 3 } })).toBe(true);
+    expect(isSourceMetaChanged({ ...source, sar: { num: 4, den: 3 } }, { width: 1920, height: 1080, duration: 10, sar: { num: 1, den: 1 } })).toBe(true);
+    expect(isSourceMetaChanged({ ...source, sar: { num: 4, den: 3 } }, { width: 1920, height: 1080, duration: 10, sar: undefined })).toBe(false);
   });
 });
 

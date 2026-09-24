@@ -150,6 +150,24 @@ export default function useMixProject() {
   }, [dispatch]);
   const ungroupClips = useCallback((clipIds: string[]) => dispatch({ type: 'ungroupClips', clipIds }), [dispatch]);
 
+  // Clip links and always-visible sequence (E2, E5, T36)
+  /** `undefined` clears the manual exception, back to the automatic rule. */
+  const setClipLink = useCallback((clipId: string, link: MixClip['link'], options?: EditOptions) => dispatch({ type: 'setClipLink', clipId, link }, options), [dispatch]);
+  const setAlwaysVisibleClips = useCallback((clipIds: string[]) => dispatch({ type: 'setAlwaysVisibleClips', clipIds }), [dispatch]);
+  /** Appends the clip to the always-visible sequence (no-op if it's already there), at `index` or at the end. */
+  const addToAlwaysVisible = useCallback((clipId: string, index?: number) => {
+    const current = historyRef.current.present.settings.alwaysVisible.clipIds;
+    if (current.includes(clipId)) return;
+    const clipIds = [...current];
+    clipIds.splice(index ?? clipIds.length, 0, clipId);
+    dispatch({ type: 'setAlwaysVisibleClips', clipIds });
+  }, [dispatch]);
+  const removeFromAlwaysVisible = useCallback((clipId: string) => {
+    const current = historyRef.current.present.settings.alwaysVisible.clipIds;
+    if (!current.includes(clipId)) return;
+    dispatch({ type: 'setAlwaysVisibleClips', clipIds: current.filter((id) => id !== clipId) });
+  }, [dispatch]);
+
   // Music playlist (C2, T27)
   /** Adds audio files (absolute paths) as tracks, at `index` or at the end. Returns the new track ids. */
   const addMusicTracks = useCallback((filePaths: string[], index?: number) => {
@@ -191,7 +209,7 @@ export default function useMixProject() {
    * Refresh the informative cache of a source (size, duration), e.g. from the probe done when it's activated (T05).
    * Like the loudness cache: not an undo step and doesn't make the project dirty. Undefined values don't erase the cache.
    */
-  const setSourceMeta = useCallback((sourceId: string, meta: Pick<MixSourceRelink, 'width' | 'height' | 'duration'>) => {
+  const setSourceMeta = useCallback((sourceId: string, meta: Pick<MixSourceRelink, 'width' | 'height' | 'duration' | 'sar'>) => {
     const definedMeta = Object.fromEntries(Object.entries(meta).filter(([, value]) => value != null)) as typeof meta;
     const update = history.memoizeByRef((p: MixProject) => {
       const source = p.sources.find((s) => s.id === sourceId);
@@ -345,6 +363,10 @@ export default function useMixProject() {
     setClipPinTime,
     groupClips,
     ungroupClips,
+    setClipLink,
+    setAlwaysVisibleClips,
+    addToAlwaysVisible,
+    removeFromAlwaysVisible,
     addMusicTracks,
     updateMusicTrack,
     removeMusicTrack,

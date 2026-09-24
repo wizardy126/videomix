@@ -302,6 +302,8 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
           plan,
           clips: project.clips,
           sourcePaths,
+          // B1: anamorphic sources are cropped in coded pixels
+          sourceFrames: Object.fromEntries(project.sources.map((source) => [source.id, source])),
           settings,
           encoding,
           resolvedEncoder,

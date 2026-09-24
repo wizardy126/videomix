@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { ThumbnailQueue, THUMBNAIL_DIR_NAME, captureThumbnail, getThumbnailCacheKey, getThumbnailFileName } from '../thumbnails';
+import { ThumbnailQueue, THUMBNAIL_DIR_NAME, captureThumbnail, getThumbnailCacheKey, getThumbnailCrop, getThumbnailFileName } from '../thumbnails';
 import type { MixClip, MixSource } from '../types';
 
 const path = window.require('node:path');
@@ -43,7 +43,7 @@ export interface UseClipThumbnails {
  */
 export default function useClipThumbnails({ clips, sources, enabled = true }: {
   clips: Pick<MixClip, 'id' | 'sourceId' | 'start' | 'maxRect'>[],
-  sources: Pick<MixSource, 'id' | 'absolutePath'>[],
+  sources: Pick<MixSource, 'id' | 'absolutePath' | 'width' | 'height' | 'sar'>[],
   enabled?: boolean | undefined,
 }): UseClipThumbnails {
   const [paths, setPaths] = useState<Map<string, string>>(new Map());
@@ -99,7 +99,8 @@ export default function useClipThumbnails({ clips, sources, enabled = true }: {
     clips.forEach((clip) => {
       const source = sourcesById.get(clip.sourceId);
       if (source == null) return;
-      const spec = `${source.absolutePath}\n${clip.start}\n${clip.maxRect.x},${clip.maxRect.y},${clip.maxRect.width},${clip.maxRect.height}`;
+      // the SAR (B1) changes the crop in coded pixels, e.g. when the meta of a source cached before T35 is refreshed
+      const spec = `${source.absolutePath}\n${clip.start}\n${clip.maxRect.x},${clip.maxRect.y},${clip.maxRect.width},${clip.maxRect.height}\n${source.sar?.num}:${source.sar?.den}`;
       if (lastSpecs.get(clip.id) === spec) return; // unrelated change (name, color, gain…): keep the current thumbnail
       lastSpecs.set(clip.id, spec);
 
@@ -110,7 +111,7 @@ export default function useClipThumbnails({ clips, sources, enabled = true }: {
         (async () => {
           try {
             const { mtimeMs, size } = await fs.stat(source.absolutePath);
-            const key = await getThumbnailCacheKey({ absolutePath: source.absolutePath, mtimeMs, size, start: clip.start, maxRect: clip.maxRect });
+            const key = await getThumbnailCacheKey({ absolutePath: source.absolutePath, mtimeMs, size, start: clip.start, maxRect: clip.maxRect, sar: source.sar });
             activeKeysRef.current.add(key);
             const outPath = path.join(getCacheDir(), getThumbnailFileName(key));
             if (await pathExists(outPath)) {
@@ -121,7 +122,7 @@ export default function useClipThumbnails({ clips, sources, enabled = true }: {
             queue.enqueue(key, async () => {
               try {
                 await fs.mkdir(getCacheDir(), { recursive: true });
-                await captureThumbnail({ filePath: source.absolutePath, timestamp: clip.start, crop: clip.maxRect, outPath });
+                await captureThumbnail({ filePath: source.absolutePath, timestamp: clip.start, ...getThumbnailCrop(clip.maxRect, source), outPath });
                 setPaths((prev) => new Map(prev).set(clip.id, outPath));
               } catch (err) {
                 console.warn('captureThumbnail failed', clip.id, err);

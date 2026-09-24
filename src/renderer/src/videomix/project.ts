@@ -1,5 +1,5 @@
 import { MIN_RECT_SIZE, MIX_PROJECT_VERSION, OVERLAY_COLOR_REGEX, defaultMixSettings, defaultMusicPlaylist, mixProjectSchema } from './types';
-import type { MixClip, MixOverlay, MixProject, Rect } from './types';
+import type { MixClip, MixOverlay, MixProject, MixSettings, Rect } from './types';
 import { rectContains } from './geometry';
 import { findOverlayCycleIds, getOverlaysById } from './overlays/anchors';
 
@@ -32,6 +32,8 @@ const migrations: Record<number, (json: Record<string, unknown>) => Record<strin
   1: (json) => ({ ...json, version: 2, overlays: [] }),
   // v3 (T24): output aspect/resolution, encoder, music playlist (and, additive: text overlays, pinned/grouped clips)
   2: ({ settings, ...json }) => ({ ...json, version: 3, settings: isObject(settings) ? migrateSettingsV2ToV3(settings) : settings }),
+  // v4 (T36): everything is additive (settings.links/maxDuration/alwaysVisible, MixClip.link), filled by parseMixProject's default merge
+  3: (json) => ({ ...json, version: 4 }),
 };
 
 /**
@@ -87,7 +89,12 @@ export type MixProjectIssueCode =
   | 'pin-time-after-end'
   | 'group-too-small'
   | 'group-pin-conflict'
-  | 'duplicate-music-track-id';
+  | 'duplicate-music-track-id'
+  // v4 (T36)
+  | 'max-duration-out-of-range'
+  | 'always-visible-unknown-clip'
+  | 'duplicate-always-visible-id'
+  | 'clip-in-sequence-and-group';
 
 /** A problem found by {@link validateMixProject}. `message` is English for logs; the UI should map `code` to a translated text. */
 export interface MixProjectIssue {
@@ -113,6 +120,62 @@ export function clipsBySource(clips: MixClip[]) {
     else map.set(clip.sourceId, [clip]);
   });
   return map;
+}
+
+/**
+ * Clips of the same source are considered "touching" (gap ≈ 0) within this tolerance (s), about a couple of frames at
+ * a low fps: a clip cut a hair short of the previous one's end (rounding, or the user's own trim) still counts as
+ * adjacent for the automatic link, instead of as an overlap.
+ */
+export const LINK_GAP_TOLERANCE = 0.05;
+
+/**
+ * Automatic clip links (E2, T36): chains of clips of the same source that share a slot (column or row), one after
+ * the other with a hard cut (or the project's global transition, `settings.links.transition`).
+ *
+ * - Clips are grouped by `sourceId` and, inside each source, ordered by `start`.
+ * - A clip links to the *previous eligible* clip of its source (in that order) when `0 ≤ start − prev.end ≤ maxGap`
+ *   (allowing a little slack below 0, `LINK_GAP_TOLERANCE`, for clips that only *touch*), unless overridden by
+ *   `MixClip.link`: `'break'` never links it, `'force'` always does — including past `maxGap` or over an overlap.
+ *   `maxGap: 0` disables automatic linking entirely (01-requisitos §11 E2): only `'force'` still links.
+ * - Clips that actually **overlap** (start well before the previous one ends, past the tolerance) are *never*
+ *   auto-linked, regardless of `maxGap`: E6 creates such pairs deliberately (duplicate a clip, or "new clip from
+ *   here") to frame the *same* footage differently, and playing them one after the other would repeat the content.
+ *   Only `'force'` links an overlapping pair.
+ * - Pinned (`pinTime != null`) or grouped (`groupId != null`) clips are never auto-linked: they keep their own
+ *   placement rules (T30) and are left out of the chains entirely (not even as a lone chain), same as the clips of
+ *   the always-visible sequence (E5), which get their own dedicated slot. `link` is ignored on them.
+ *
+ * A chain always has at least one clip (an eligible clip with no link on either side is a chain of its own). Chains
+ * are returned grouped by source (in the order the sources first appear among the eligible clips) and, inside a
+ * source, ordered by the `start` of their first clip.
+ */
+export function getClipChains(project: Pick<MixProject, 'clips' | 'settings'>): MixClip[][] {
+  const { maxGap } = project.settings.links;
+  const alwaysVisible = new Set(project.settings.alwaysVisible.clipIds);
+  const eligible = project.clips.filter((clip) => clip.pinTime == null && clip.groupId == null && !alwaysVisible.has(clip.id));
+
+  const chains: MixClip[][] = [];
+  const pushChain = (chain: MixClip[]) => { if (chain.length > 0) chains.push(chain); };
+
+  clipsBySource(eligible).forEach((clips) => {
+    const sorted = [...clips].sort((a, b) => a.start - b.start);
+    let chain: MixClip[] = [];
+    sorted.forEach((clip) => {
+      const prev = chain.at(-1);
+      const gap = prev == null ? undefined : clip.start - prev.end;
+      const autoLinks = gap != null && maxGap > 0 && gap >= -LINK_GAP_TOLERANCE && gap <= maxGap;
+      const linked = prev != null && (clip.link === 'force' || (clip.link !== 'break' && autoLinks));
+      if (linked) {
+        chain.push(clip);
+      } else {
+        pushChain(chain);
+        chain = [clip];
+      }
+    });
+    pushChain(chain);
+  });
+  return chains;
 }
 
 // Tolerance for boxes computed with floats (e.g. 1 - margin - height)
@@ -227,6 +290,38 @@ function validateClipPlacement(clips: MixClip[]): MixProjectIssue[] {
 }
 
 /**
+ * `settings.maxDuration` (E4), the always-visible sequence (E5, one per project) and the interaction between the
+ * two features (T36). `clipIds` unknown or duplicated inside the sequence are errors; a clip that is both in the
+ * sequence and in a group is a warning (the sequence gives it its own slot, so grouping it has no effect).
+ */
+function validateLinksAndSequence(settings: MixSettings, clips: MixClip[]): MixProjectIssue[] {
+  const issues: MixProjectIssue[] = [];
+  const { maxDuration, alwaysVisible } = settings;
+
+  if (maxDuration != null && !(Number.isFinite(maxDuration) && maxDuration > 0)) {
+    issues.push({ level: 'error', code: 'max-duration-out-of-range', message: `Invalid maxDuration ${maxDuration}` });
+  }
+
+  const clipsById = new Map(clips.map((clip) => [clip.id, clip]));
+  const seen = new Set<string>();
+  alwaysVisible.clipIds.forEach((clipId) => {
+    if (seen.has(clipId)) {
+      issues.push({ level: 'error', code: 'duplicate-always-visible-id', message: `Duplicate always-visible clip id ${clipId}`, clipId });
+    } else if (!clipsById.has(clipId)) {
+      issues.push({ level: 'error', code: 'always-visible-unknown-clip', message: `Always-visible sequence references unknown clip ${clipId}`, clipId });
+    } else {
+      const clip = clipsById.get(clipId)!;
+      if (clip.groupId != null) {
+        issues.push({ level: 'warning', code: 'clip-in-sequence-and-group', message: `Clip ${clipId} is both in the always-visible sequence and in a group`, clipId, groupId: clip.groupId });
+      }
+    }
+    seen.add(clipId);
+  });
+
+  return issues;
+}
+
+/**
  * Semantic checks of 04-diseno §1.2 and §8.1 that the schema can't express.
  * Source size/duration come from the source cache, overridable with fresher values (e.g. from ffprobe).
  * Checks that need an unknown size/duration are skipped.
@@ -282,7 +377,7 @@ export function validateMixProject(project: MixProject, { sourceDurations = {}, 
     }
   });
 
-  issues.push(...validateClipPlacement(project.clips));
+  issues.push(...validateClipPlacement(project.clips), ...validateLinksAndSequence(settings, project.clips));
 
   const trackIds = new Set<string>();
   settings.musicPlaylist.tracks.forEach(({ id: trackId }) => {

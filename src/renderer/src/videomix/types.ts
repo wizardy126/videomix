@@ -9,7 +9,7 @@ export type { OverlayFile } from '../../../common/videomix/overlayStyles';
 export { mixEncoderCodecs, mixEncoderHardware } from '../../../common/videomix/encoder';
 export type { MixEncoderSettings, MixEncoderCodec, MixEncoderHardware, HardwareEncoderCandidate, ResolvedEncoder } from '../../../common/videomix/encoder';
 
-/** Rectangle in oriented source pixels (after applying rotation metadata). Integer values. */
+/** Rectangle in source display pixels (after applying rotation metadata and the sample aspect ratio, B1). Integer values. */
 export const rectSchema = z.object({
   x: z.number().int().nonnegative(),
   y: z.number().int().nonnegative(),
@@ -32,12 +32,20 @@ export const mixSourceSchema = z.object({
   absolutePath: z.string(),
   name: z.string(),
   // informative cache, refreshed when opening the project
+  /** Display size (B1, v3): oriented and with the sample aspect ratio applied, like Chromium's `videoWidth`/`videoHeight`. */
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
   duration: z.number().nonnegative().optional(),
+  /**
+   * B1 (v3): sample aspect ratio of the *oriented* frame (as ffmpeg delivers it after autorotate: a quarter turn
+   * inverts it), see sampleAspect.ts. Missing = square pixels. Needed to convert rects to coded pixels for ffmpeg.
+   */
+  sar: z.object({ num: z.number().int().positive(), den: z.number().int().positive() }).optional(),
 });
 
 export type MixSource = z.infer<typeof mixSourceSchema>;
+
+export const mixClipLinkTypes = ['break', 'force'] as const;
 
 export const mixClipSchema = z.object({
   /** Also used as segId in the timeline. */
@@ -59,9 +67,18 @@ export const mixClipSchema = z.object({
   pinTime: z.number().optional(),
   /** A4 (v3): the clips sharing a group id start together (T30). A group needs at least 2 clips. */
   groupId: z.string().min(1).optional(),
+  /**
+   * E2 (v4): manual exception over the automatic link with the *previous* clip of its source (by `start`), see
+   * `getClipChains`. `'break'` never links to it; `'force'` always does, even with `settings.links.maxGap: 0` or
+   * over an overlap (which are otherwise never auto-linked).
+   * Ignored for a pinned or grouped clip (never auto-linked) or for the first eligible clip of its source.
+   */
+  link: z.enum(mixClipLinkTypes).optional(),
 });
 
 export type MixClip = z.infer<typeof mixClipSchema>;
+
+export type MixClipLink = MixClip['link'];
 
 /** Subset of ffmpeg `xfade` transitions offered in the UI. */
 export const transitionTypes = [
@@ -140,6 +157,33 @@ export const defaultMusicPlaylist: MixMusicPlaylist = {
  */
 export const DEFAULT_MUSIC_VOLUME_DB = -12;
 
+export const mixLinksTransitionTypes = ['cut', 'global'] as const;
+
+/**
+ * E2 (v4): automatic links between clips of the same source, see `getClipChains`. `maxGap` (s) is the largest gap
+ * between the end of a clip and the start of the next of the same source that still links them; `0` disables
+ * automatic linking entirely (only `MixClip.link: 'force'` still links). Clips that actually overlap are never
+ * auto-linked (E6 creates such pairs on purpose, to frame the same footage differently), regardless of `maxGap`. A
+ * chain shares one slot (column or row), with a hard cut by default or the project's global transition.
+ */
+export const mixLinksSchema = z.object({
+  maxGap: z.number().nonnegative(),
+  transition: z.enum(mixLinksTransitionTypes),
+});
+
+export type MixLinksSettings = z.infer<typeof mixLinksSchema>;
+
+export const defaultLinksSettings: MixLinksSettings = { maxGap: 10, transition: 'cut' };
+
+/** E5 (v4): the always-visible sequence, one per project. Order is playback order. */
+export const mixAlwaysVisibleSchema = z.object({
+  clipIds: z.string().min(1).array(),
+});
+
+export type MixAlwaysVisible = z.infer<typeof mixAlwaysVisibleSchema>;
+
+export const defaultAlwaysVisible: MixAlwaysVisible = { clipIds: [] };
+
 export const mixSettingsSchema = z.object({
   output: mixOutputSchema,
   encoder: mixEncoderSchema,
@@ -156,6 +200,12 @@ export const mixSettingsSchema = z.object({
   transition: z.object({ type: transitionTypeSchema, duration: z.number().nonnegative() }),
   /** Fade from/to black at the start/end of the video (video and audio). */
   fadeInOut: z.boolean(),
+  /** E2 (v4): automatic clip links. */
+  links: mixLinksSchema,
+  /** E4 (v4): seconds. Undefined = no limit. The video is cut there with the global fade-out (video and audio). */
+  maxDuration: z.number().optional(),
+  /** E5 (v4). */
+  alwaysVisible: mixAlwaysVisibleSchema,
   /** How to fill space that no clip can cover. */
   fill: z.object({ mode: z.enum(['blur', 'color']), color: hexColorSchema }),
   musicPlaylist: mixMusicPlaylistSchema,
@@ -313,9 +363,12 @@ export type MixOverlay = z.infer<typeof mixOverlaySchema>;
 
 export type MixOverlayType = MixOverlay['type'];
 
-/** v3 (T24). v1 → v2 (T19): overlays; v2 → v3: output, encoder, music playlist, text overlays, pinned and grouped clips. */
+/**
+ * v4 (T36). v1 → v2 (T19): overlays; v2 → v3 (T24): output, encoder, music playlist, text overlays, pinned and
+ * grouped clips; v3 → v4: automatic clip links, `MixClip.link`, `settings.maxDuration`, `settings.alwaysVisible`.
+ */
 export const mixProjectSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(4),
   sources: mixSourceSchema.array(),
   /** Array order is the list order. */
   clips: mixClipSchema.array(),
@@ -328,7 +381,7 @@ export const mixProjectSchema = z.object({
 
 export type MixProject = z.infer<typeof mixProjectSchema>;
 
-export const MIX_PROJECT_VERSION = 3;
+export const MIX_PROJECT_VERSION = 4;
 
 export const defaultMixSettings: MixSettings = {
   output: { aspect: '16:9', resolution: '1080' },
@@ -342,6 +395,8 @@ export const defaultMixSettings: MixSettings = {
   order: { mode: 'list', seed: 0 },
   transition: { type: 'fade', duration: 0.5 },
   fadeInOut: true,
+  links: defaultLinksSettings,
+  alwaysVisible: defaultAlwaysVisible,
   fill: { mode: 'blur', color: '#000000' },
   musicPlaylist: defaultMusicPlaylist,
 };

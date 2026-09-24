@@ -40,6 +40,10 @@ export function getIssueText(issue: MixProjectIssue, clipName: string | undefine
     case 'group-too-small': { return i18n.t('Clip "{{clip}}" is the only clip of its group: it is not grouped', { clip }); }
     case 'group-pin-conflict': { return i18n.t('A group has clips fixed at different times'); }
     case 'duplicate-music-track-id': { return i18n.t('The project has duplicate music track ids'); }
+    case 'max-duration-out-of-range': { return i18n.t('The maximum duration must be greater than 0'); }
+    case 'always-visible-unknown-clip': { return i18n.t('The always-visible sequence references a clip that is not in the project'); }
+    case 'duplicate-always-visible-id': { return i18n.t('The always-visible sequence has a clip more than once'); }
+    case 'clip-in-sequence-and-group': { return i18n.t('Clip "{{clip}}" is in the always-visible sequence and in a group', { clip }); }
     default: { return issue.message; }
   }
 }

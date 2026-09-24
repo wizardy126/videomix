@@ -5,6 +5,7 @@ import type { FFprobeStream } from '../../../../common/ffprobe';
 import type { MixClip } from '../types';
 import type { ClipRects, Size } from '../overlayMath';
 import { applyAspect, createDefaultMin, fillFrame, getOrientedSize, getStreamRotation } from '../overlayMath';
+import { getDisplaySize, getOrientedSar, parseSampleAspectRatio } from '../sampleAspect';
 import RectOverlay from './RectOverlay';
 import RectOverlayToolbar from './RectOverlayToolbar';
 
@@ -29,7 +30,7 @@ function ClipRectEditor({ videoRef, compatPlayerEnabled, cssRotation, videoStrea
 }) {
   const [elementSize, setElementSize] = useState<Size>();
 
-  // Chromium's videoWidth/videoHeight already include the rotation metadata
+  // Chromium's videoWidth/videoHeight already include the rotation metadata and the sample aspect ratio (display pixels)
   useEffect(() => {
     const video = videoRef.current;
     if (video == null) return undefined;
@@ -47,15 +48,18 @@ function ClipRectEditor({ videoRef, compatPlayerEnabled, cssRotation, videoStrea
     };
   }, [videoRef]);
 
-  // The master <video> may be a dummy with the compat player, so use the stream's size instead
+  // The master <video> may be a dummy with the compat player, so use the stream's size instead, in display pixels
+  // like videoWidth/videoHeight (B1: with the sample aspect ratio)
   const streamWidth = videoStream?.width;
   const streamHeight = videoStream?.height;
   const streamRotation = videoStream != null ? getStreamRotation(videoStream) : 0;
+  const streamSar = videoStream?.sample_aspect_ratio;
   const videoSize = useMemo(() => {
     if (!compatPlayerEnabled) return elementSize;
     if (streamWidth == null || streamHeight == null) return undefined;
-    return getOrientedSize({ width: streamWidth, height: streamHeight }, streamRotation);
-  }, [compatPlayerEnabled, elementSize, streamHeight, streamRotation, streamWidth]);
+    const sar = getOrientedSar(parseSampleAspectRatio(streamSar), streamRotation);
+    return getDisplaySize(getOrientedSize({ width: streamWidth, height: streamHeight }, streamRotation), sar);
+  }, [compatPlayerEnabled, elementSize, streamHeight, streamRotation, streamSar, streamWidth]);
 
   const rects = useMemo<ClipRects>(() => ({ maxRect: clip.maxRect, minRect: clip.minRect }), [clip.maxRect, clip.minRect]);
 

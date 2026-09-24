@@ -7,12 +7,14 @@ import type { OverlayTimeRange } from './overlays/anchors';
 import { isVisualOverlay } from './overlays/factories';
 import { refitImageOverlayBox } from './overlayTimeline';
 import type { Size } from './overlayMath';
+import { normalizeSar } from './sampleAspect';
+import { getSourceFrameChange, rescaleClipRects } from './sourceResize';
 
 /** Fields of a clip that can be edited after creation. */
 export type MixClipPatch = Partial<Omit<MixClip, 'id' | 'sourceId'>>;
 
 /** Fields updated when a missing source is located again (or its cached probe info refreshed). */
-export type MixSourceRelink = Pick<MixSource, 'path' | 'absolutePath'> & Partial<Pick<MixSource, 'name' | 'width' | 'height' | 'duration'>>;
+export type MixSourceRelink = Pick<MixSource, 'path' | 'absolutePath'> & Partial<Pick<MixSource, 'name' | 'width' | 'height' | 'duration' | 'sar'>>;
 
 /** Editable fields of an overlay (of its own type: the reducer doesn't check that the patch matches it). */
 export type MixOverlayPatch = { [T in MixOverlay as T['type']]: Partial<Omit<T, 'id' | 'type'>> }[MixOverlay['type']];
@@ -58,6 +60,10 @@ export type MixProjectAction =
   | { type: 'groupClips', clipIds: string[], groupId: string }
   /** The clips leave their groups; a group left with a single clip is dissolved. */
   | { type: 'ungroupClips', clipIds: string[] }
+  /** Manual exception over the automatic link with the previous clip of its source (E2, T36), or clears it (`undefined`). */
+  | { type: 'setClipLink', clipId: string, link: MixClip['link'] }
+  /** Replaces the always-visible sequence (E5, T36). Ids not in the project are dropped. */
+  | { type: 'setAlwaysVisibleClips', clipIds: string[] }
   /**
    * `imageSizes` (T34, pending from T29): pixel size of each image overlay whose file could be read, keyed by overlay id.
    * When `patch.output` changes the aspect, the boxes of the image overlays present in this map are refit to keep the
@@ -116,10 +122,16 @@ export function dissolveSingleClipGroups(clips: MixClip[]): MixClip[] {
   return clips.map((clip) => (clip.groupId != null && counts.get(clip.groupId) === 1 ? withoutUndefined({ ...clip, groupId: undefined }, ['groupId']) : clip));
 }
 
-const clipOptionalKeys: (keyof MixClip)[] = ['minRect', 'pinTime', 'groupId'];
+const clipOptionalKeys: (keyof MixClip)[] = ['minRect', 'pinTime', 'groupId', 'link'];
 
 function updateMusicPlaylist(project: MixProject, musicPlaylist: MixMusicPlaylist): MixProject {
   return { ...project, settings: { ...project.settings, musicPlaylist } };
+}
+
+/** Drops ids no longer in `clipIds` from the always-visible sequence (E5), e.g. after removing a clip/source. Same array if none. */
+function pruneAlwaysVisible(clipIds: ReadonlySet<string>, sequence: string[]): string[] {
+  const pruned = sequence.filter((id) => clipIds.has(id));
+  return pruned.length === sequence.length ? sequence : pruned;
 }
 
 export function mixProjectReducer(project: MixProject, action: MixProjectAction): MixProject {
@@ -139,10 +151,14 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
     case 'removeSource': {
       if (!project.sources.some((s) => s.id === action.sourceId)) return project;
       const clipIds = new Set(project.clips.filter((c) => c.sourceId === action.sourceId).map((c) => c.id));
+      const clips = dissolveSingleClipGroups(project.clips.filter((c) => c.sourceId !== action.sourceId));
+      const { alwaysVisible } = project.settings;
+      const prunedAlwaysVisible = pruneAlwaysVisible(new Set(clips.map((c) => c.id)), alwaysVisible.clipIds);
       return {
         ...project,
         sources: project.sources.filter((s) => s.id !== action.sourceId),
-        clips: dissolveSingleClipGroups(project.clips.filter((c) => c.sourceId !== action.sourceId)),
+        clips,
+        ...(prunedAlwaysVisible !== alwaysVisible.clipIds && { settings: { ...project.settings, alwaysVisible: { clipIds: prunedAlwaysVisible } } }),
         overlays: detachOverlayReferences(project.overlays, { clipIds, resolved: action.resolved }),
       };
     }
@@ -150,10 +166,16 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
     case 'relinkSource': {
       const index = project.sources.findIndex((s) => s.id === action.sourceId);
       const source = project.sources[index];
-      if (source == null || !hasChanges(source, action.source)) return project;
+      // B1: square pixels are stored as no SAR
+      const patch = 'sar' in action.source ? { ...action.source, sar: normalizeSar(action.source.sar) } : action.source;
+      if (source == null || !hasChanges(source, patch)) return project;
       const sources = [...project.sources];
-      sources[index] = withoutUndefined({ ...source, ...action.source }, ['width', 'height', 'duration']);
-      return { ...project, sources };
+      sources[index] = withoutUndefined({ ...source, ...patch }, ['width', 'height', 'duration', 'sar']);
+      // B2: a new frame size scales the rects of the source's clips
+      const change = getSourceFrameChange(source, patch);
+      if (change == null) return { ...project, sources };
+      const clips = project.clips.map((c) => (c.sourceId === source.id ? withoutUndefined({ ...c, ...rescaleClipRects(c, change) }, clipOptionalKeys) : c));
+      return { ...project, sources, clips };
     }
 
     case 'addClip': {
@@ -174,9 +196,13 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
 
     case 'removeClip': {
       if (!project.clips.some((c) => c.id === action.clipId)) return project;
+      const clips = dissolveSingleClipGroups(project.clips.filter((c) => c.id !== action.clipId));
+      const { alwaysVisible } = project.settings;
+      const prunedAlwaysVisible = pruneAlwaysVisible(new Set(clips.map((c) => c.id)), alwaysVisible.clipIds);
       return {
         ...project,
-        clips: dissolveSingleClipGroups(project.clips.filter((c) => c.id !== action.clipId)),
+        clips,
+        ...(prunedAlwaysVisible !== alwaysVisible.clipIds && { settings: { ...project.settings, alwaysVisible: { clipIds: prunedAlwaysVisible } } }),
         overlays: detachOverlayReferences(project.overlays, { clipIds: new Set([action.clipId]), resolved: action.resolved }),
       };
     }
@@ -187,9 +213,10 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
       if (clip == null) return project;
       if (project.clips.some((c) => c.id === action.newId)) throw new Error(`Duplicate clip id ${action.newId}`);
       const clips = [...project.clips];
-      // The copy is neither pinned nor grouped: it would start at the same time as the original
-      const copy = { ...structuredClone(clip), id: action.newId, name: action.name ?? clip.name, pinTime: undefined, groupId: undefined };
-      clips.splice(index + 1, 0, withoutUndefined(copy, ['pinTime', 'groupId']));
+      // The copy is neither pinned nor grouped (it would start at the same time as the original), and has no link
+      // exception of its own (T36): it's a new, unrelated clip until the user re-times it.
+      const copy = { ...structuredClone(clip), id: action.newId, name: action.name ?? clip.name, pinTime: undefined, groupId: undefined, link: undefined };
+      clips.splice(index + 1, 0, withoutUndefined(copy, ['pinTime', 'groupId', 'link']));
       return { ...project, clips };
     }
 
@@ -213,6 +240,19 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
       const ids = new Set(action.clipIds);
       const clips = dissolveSingleClipGroups(project.clips.map((c) => (ids.has(c.id) && c.groupId != null ? withoutUndefined({ ...c, groupId: undefined }, ['groupId']) : c)));
       return clips.every((c, i) => c === project.clips[i]) ? project : { ...project, clips };
+    }
+
+    case 'setClipLink': {
+      return mixProjectReducer(project, { type: 'updateClip', clipId: action.clipId, patch: { link: action.link } });
+    }
+
+    case 'setAlwaysVisibleClips': {
+      const { alwaysVisible } = project.settings;
+      const knownIds = new Set(project.clips.map((c) => c.id));
+      // Drops duplicates and unknown ids (kept, deduplicated, in the given order)
+      const clipIds = [...new Set(action.clipIds.filter((id) => knownIds.has(id)))];
+      if (isEqual(clipIds, alwaysVisible.clipIds)) return project;
+      return { ...project, settings: { ...project.settings, alwaysVisible: { clipIds } } };
     }
 
     case 'updateSettings': {
