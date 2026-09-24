@@ -22,7 +22,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M6 · Empaquetado** | Builds de VideoMix | T18 |
 | **M7 · Overlays** | Imágenes PNG, contadores, barras de progreso y efectos de sonido sobre el vídeo final | T19–T23 |
 | **M8 · Mejoras v2** | A1, A2, A4, B1, B2, B5, C1, C2, D1, D2, E3 | T24–T34 |
-| **M9 · Mejoras v3 y correcciones** | E1–E7, B1, B2 | T35–T40 |
+| **M9 · Mejoras v3 y correcciones** | E1–E8, B1, B2 | T35–T40 |
 
 ## Tareas
 
@@ -69,6 +69,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T37 | v3: contador, "Nuevo clip desde aquí", duración estimada y máxima en UI (E1, E3, E4, E6) | M9 | Sonnet | T36 | pendiente |
 | T38 | v3: planificador — cadenas, secuencia y duración máxima (E2, E4, E5) | M9 | Opus | T36 | pendiente |
 | T38b | v3: ampliar más allá del máx. (E7) | M9 | Opus | T37, T38 | pendiente |
+| T38c | v3: ventana de reorden ilimitada y ampliable (E8) | M9 | Opus | T38b | pendiente |
 | T39 | v3: UI de cadenas y secuencia, y render cortado al límite (E2, E4, E5) | M9 | Opus | T37, T38 | pendiente |
 | T40 | v3: i18n, manual, e2e y cierre | M9 | Sonnet | T35–T39 | pendiente |
 
@@ -113,8 +114,9 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 1. T35 ∥ T36.
 2. T37 ∥ T38.
 3. T38b.
-4. T39.
-5. T40.
+4. T38c.
+5. T39.
+6. T40.
 
 ## Pendientes al integrar en la rama por defecto
 

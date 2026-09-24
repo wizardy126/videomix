@@ -85,5 +85,6 @@
 | T37 | [T37-v3-ui-edicion.md](T37-v3-ui-edicion.md) |
 | T38 | [T38-v3-planificador.md](T38-v3-planificador.md) |
 | T38b | [T38b-v3-ampliar-max.md](T38b-v3-ampliar-max.md) |
+| T38c | [T38c-v3-reorden-ilimitado.md](T38c-v3-reorden-ilimitado.md) |
 | T39 | [T39-v3-ui-cadenas-render.md](T39-v3-ui-cadenas-render.md) |
 | T40 | [T40-v3-cierre.md](T40-v3-cierre.md) |
