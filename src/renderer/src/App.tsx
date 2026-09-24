@@ -47,9 +47,11 @@ import useMixOverlays from './videomix/hooks/useMixOverlays';
 import useMixDuration from './videomix/hooks/useMixDuration';
 import useMixLivePreview from './videomix/hooks/useMixLivePreview';
 import MixLivePreview from './videomix/components/MixLivePreview';
+import RenderProgressDialog from './videomix/components/RenderProgressDialog';
 import useClipThumbnails from './videomix/hooks/useClipThumbnails';
 import useMixVideoSize from './videomix/hooks/useMixVideoSize';
 import useMixPlayerTurn from './videomix/hooks/useMixPlayerTurn';
+import usePreviewConversion from './videomix/hooks/usePreviewConversion';
 import { getClipRotation } from './videomix/clipRotation';
 import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
 import { isKeyboardActionRetired } from '../../common/videomix/legacyUi';
@@ -627,8 +629,11 @@ function App() {
     concatFiles, html5ifyDummy, cutMultiple, concatCutSegments, html5ify, fixInvalidDuration, decimate, extractStreams, tryDeleteFiles,
   } = useFfmpegOperations({ filePath, treatInputFileModifiedTimeAsStart, treatOutputFileModifiedTimeAsStart, isEncoding, lossyMode, enableOverwriteOutput, outputPlaybackRate, cutFromAdjustmentFrames, cutToAdjustmentFrames, appendLastCommandsLog, encCustomBitrate: encBitrate, appendFfmpegCommandLog, ffmpegHwaccel });
 
+  // VideoMix (T42): with a saved project, preview conversions go into (and are found in) its cache folder
+  const { ensureConversionOutDir, findExistingConvertedFile } = usePreviewConversion({ enabled: videoMixMode, getProjectPath: mixProject.getProjectPath });
+
   const { previewFilePath, setPreviewFilePath, usingDummyVideo, setUsingDummyVideo, userHtml5ifyCurrentFile, convertFormatBatch, html5ifyAndLoadWithPreferences } = useHtml5ify({
-    filePath, hasVideo, hasAudio, workingRef, setWorking, ensureWritableOutDir, customOutDir, batchFiles, enableAutoHtml5ify, setProgress, html5ify, html5ifyDummy, withErrorHandling, showGenericDialog,
+    filePath, hasVideo, hasAudio, workingRef, setWorking, ensureWritableOutDir, customOutDir, batchFiles, enableAutoHtml5ify, setProgress, html5ify, html5ifyDummy, withErrorHandling, showGenericDialog, getConversionOutDir: ensureConversionOutDir,
   });
 
   const compatPlayerRequired = (
@@ -1521,7 +1526,8 @@ function App() {
       // if storeProjectInSourceDir is true, we will be writing project file to input path's dir, so ensure that one too
       if (storeProjectInSourceDir) await ensureAccessToSourceDir(fp);
 
-      const existingHtml5FriendlyFile = await findExistingHtml5FriendlyFile(fp, cod);
+      // VideoMix (T42): the project cache first, then next to the source (conversions made before T42)
+      const existingHtml5FriendlyFile = (await findExistingConvertedFile(fp)) ?? await findExistingHtml5FriendlyFile(fp, cod);
 
       const needsAutoHtml5ify = !existingHtml5FriendlyFile && !willPlayerProperlyHandleVideo({ streams: ffprobeMeta.streams, hevcPlaybackSupported, isMasBuild }) && validDuration;
 
@@ -1596,7 +1602,7 @@ function App() {
       resetState();
       throw err;
     }
-  }, [storeProjectInWorkingDir, setWorking, loadEdlFile, getEdlFilePath, enableImportChapters, ensureAccessToSourceDir, loadCutSegments, autoLoadTimecode, enableNativeHevc, ensureWritableOutDir, customOutDir, resetState, clearSegColorCounter, setCopyStreamIdsForPath, setDetectedFileFormat, outFormatLocked, setUsingDummyVideo, setPreviewFilePath, html5ifyAndLoadWithPreferences, setFileFormat, showNotification, showPreviewFileLoadedMessage, showNotNativelySupportedMessage]);
+  }, [storeProjectInWorkingDir, setWorking, loadEdlFile, getEdlFilePath, enableImportChapters, ensureAccessToSourceDir, loadCutSegments, autoLoadTimecode, enableNativeHevc, ensureWritableOutDir, customOutDir, findExistingConvertedFile, resetState, clearSegColorCounter, setCopyStreamIdsForPath, setDetectedFileFormat, outFormatLocked, setUsingDummyVideo, setPreviewFilePath, html5ifyAndLoadWithPreferences, setFileFormat, showNotification, showPreviewFileLoadedMessage, showNotNativelySupportedMessage]);
 
   const closeMedia = useCallback(() => {
     resetState();
@@ -3109,8 +3115,11 @@ function App() {
 
                 {/* This should probably be last, so that it's always on top */}
                 <AnimatePresence>
-                  {working && <Working text={working.text} progress={progress} onAbortClick={abortWorking} />}
+                  {working && working.mixRender == null && <Working text={working.text} progress={progress} onAbortClick={abortWorking} />}
                 </AnimatePresence>
+
+                {/* VideoMix render/preview: its own progress dialog instead of Working (T41) */}
+                {working?.mixRender != null && <RenderProgressDialog status={working.mixRender} progress={progress} onCancel={abortWorking} />}
 
                 <GenericDialog dialog={genericDialog} onOpenChange={(open) => !open && closeGenericDialog()} />
 

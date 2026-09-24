@@ -54,6 +54,7 @@ Localiza ffmpeg igual que la app en desarrollo (`ffmpeg/<platform>-<arch>/[lib/]
 | `v-720x1280-silent-7s.mp4` | vertical 720×1280, 30 fps, 7 s, con pista de audio en silencio |
 | `ana-1280x720-sar-6s.mp4` | anamórfico (T35): codificado 1280×720 con SAR 87:82 (se pide 679:640; x264 escribe la razón más cercana que puede señalar), se ve a 1358×720; `testsrc2` + rejilla de 64 px + tono |
 | `ana-rotated-6s.mp4` | el mismo anamórfico con matriz de rotación 90°: se ve a 720×1358 |
+| `mpeg4-640x360-5s.mkv` | 640×360, 30 fps, 5 s, vídeo MPEG-4 Part 2 (no reproducible en Chromium: se convierte al cargarlo, T42) + tono 500 Hz |
 | `music-20s.m4a` | 20 s de acordes sintéticos (`sine` + `amix`), aac |
 | `music-60s.mp3` | 60 s, mismo generador, mp3 |
 

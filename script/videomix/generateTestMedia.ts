@@ -212,6 +212,15 @@ const anamorphicArgs = (seconds: number, freq: number) => [
 await generate('ana-1280x720-sar-6s.mp4', anamorphicArgs(6, 330));
 await generateRotated('ana-rotated-6s.mp4', anamorphicArgs(6, 370));
 
+// T42: MPEG-4 Part 2 video, which Chromium can't play: loading it converts it for the preview (html5ify)
+await generate('mpeg4-640x360-5s.mkv', [
+  '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30:duration=5',
+  '-f', 'lavfi', '-i', 'sine=frequency=500:duration=5',
+  '-vf', withTimeOverlay('null', hasDrawtext),
+  '-c:v', 'mpeg4', '-q:v', '5',
+  '-c:a', 'aac',
+]);
+
 await generateMusic('music-20s.m4a', 20, ['-c:a', 'aac', '-b:a', '128k']);
 await generateMusic('music-60s.mp3', 60, ['-c:a', 'libmp3lame', '-b:a', '128k']);
 

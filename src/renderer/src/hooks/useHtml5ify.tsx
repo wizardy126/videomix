@@ -17,7 +17,7 @@ import { ButtonRow } from '../components/Dialog';
 import { DialogButton } from '../components/Button';
 
 
-export default function useHtml5ify({ filePath, hasVideo, hasAudio, workingRef, setWorking, ensureWritableOutDir, customOutDir, batchFiles, enableAutoHtml5ify, setProgress, html5ify, withErrorHandling, showGenericDialog }: {
+export default function useHtml5ify({ filePath, hasVideo, hasAudio, workingRef, setWorking, ensureWritableOutDir, customOutDir, batchFiles, enableAutoHtml5ify, setProgress, html5ify, withErrorHandling, showGenericDialog, getConversionOutDir }: {
   filePath: string | undefined,
   hasVideo: boolean,
   hasAudio: boolean,
@@ -32,6 +32,8 @@ export default function useHtml5ify({ filePath, hasVideo, hasAudio, workingRef, 
   html5ifyDummy: FfmpegOperations['html5ifyDummy'],
   withErrorHandling: WithErrorHandling,
   showGenericDialog: ShowGenericDialog,
+  /** VideoMix (T42): where to put the converted file instead of `cod` (the project cache), or undefined. */
+  getConversionOutDir?: ((sourcePath: string) => Promise<string | undefined>) | undefined,
 }) {
   const [previewFilePath, setPreviewFilePath] = useState<string>();
   const [usingDummyVideo, setUsingDummyVideo] = useState(false);
@@ -40,7 +42,8 @@ export default function useHtml5ify({ filePath, hasVideo, hasAudio, workingRef, 
   const html5ifyAndLoad = useCallback(async (cod: string | undefined, fp: string, speed: Html5ifyMode, hv: boolean, ha: boolean) => {
     try {
       setProgress(0);
-      const path = await html5ify({ customOutDir: cod, filePath: fp, speed, hasAudio: ha, hasVideo: hv, onProgress: setProgress });
+      const outDir = (await getConversionOutDir?.(fp)) ?? cod;
+      const path = await html5ify({ customOutDir: outDir, filePath: fp, speed, hasAudio: ha, hasVideo: hv, onProgress: setProgress });
       if (!path) return;
 
       setPreviewFilePath(path);
@@ -48,7 +51,7 @@ export default function useHtml5ify({ filePath, hasVideo, hasAudio, workingRef, 
     } finally {
       setProgress(undefined);
     }
-  }, [html5ify, setProgress]);
+  }, [getConversionOutDir, html5ify, setProgress]);
 
   const askForHtml5ifySpeed = useCallback(async ({ allowedOptions, showRemember, initialOption }: {
     allowedOptions: Html5ifyMode[],

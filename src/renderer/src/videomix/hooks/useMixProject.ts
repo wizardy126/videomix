@@ -80,6 +80,8 @@ export default function useMixProject() {
   // Reads the ref, not the `project` snapshot above: up to date right after a same-tick update like `setSourceMeta`
   // (T35b), without waiting for the next render.
   const getProject = useCallback(() => historyRef.current.present, []);
+  // Same for the path: right after opening a project, its sources are loaded before the next render (T42)
+  const getProjectPath = useCallback(() => projectPathRef.current, []);
 
   const dispatch = useCallback((action: MixProjectAction, { transient }: EditOptions = {}) => {
     // T22: every removal (clip, source, overlay; also inside batches from the timeline sync) gets the overlay times
@@ -347,6 +349,7 @@ export default function useMixProject() {
     project,
     getProject,
     projectPath,
+    getProjectPath,
     dirty,
     canUndo: history.canUndo(historyState),
     canRedo: history.canRedo(historyState),

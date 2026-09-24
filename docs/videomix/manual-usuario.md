@@ -36,6 +36,8 @@ Si al abrir un proyecto falta un fichero de fuente, la fila lo indica con un avi
 
 **Abrir carpeta** (menú Archivo) añade como fuentes todos los vídeos de una carpeta (y sus subcarpetas); los ficheros de imagen se ignoran.
 
+Si el reproductor no puede mostrar una fuente (por ejemplo, un códec que Chromium no soporta, como MPEG-4 Part 2 o ProRes), VideoMix crea automáticamente una versión convertida solo para verla en el reproductor; el render usa siempre el fichero original. Con el proyecto guardado, esa conversión se guarda en la carpeta de caché del proyecto (`.<nombre>.vmx.cache/converted/`, ver la sección 8.1) y se reutiliza al volver a activar la fuente o al reabrir el proyecto. Mientras el proyecto no se ha guardado, se guarda junto al vídeo original (como en LosslessCut); esas conversiones antiguas se siguen reutilizando después de guardar el proyecto.
+
 Las fuentes con **píxeles no cuadrados** (relación de aspecto de muestra o SAR distinta de 1:1, algo habitual en vídeo anamórfico o grabado con ciertas cámaras) se gestionan de forma automática: no hace falta hacer nada especial. El reproductor, los rectángulos, las miniaturas y el render usan siempre los píxeles "de visualización" (los que se ven, con la fuente ya estirada a su proporción real), igual que la rotación del vídeo.
 
 ### Música de fondo
@@ -258,6 +260,15 @@ Con clips en el proyecto:
 
 Antes de generar el vídeo (previsualización o render final) se muestran los avisos del proyecto si los hay (por ejemplo, un clip que se amplía más de ×2, o huecos que se rellenan porque no hay suficientes clips en ese momento), con la opción de continuar de todos modos.
 
+Mientras se genera el vídeo (render final o previsualización) se muestra una ventana de progreso con:
+
+- la fase en curso: **Analizando la sonoridad del audio** (solo lo que aún no se había medido; suele ser breve) y **Renderizando el vídeo y el audio**;
+- una barra de progreso con el porcentaje;
+- el tiempo **Transcurrido** desde el inicio y el tiempo **Restante** aproximado. El restante se calcula con la velocidad del render de los últimos segundos, así que al principio pone **Calculando…** (unos segundos) y luego se va afinando; los fragmentos que vienen de la caché (sección 8.1) no cuentan para esa velocidad;
+- el botón **Cancelar**, que detiene el render en el momento: no se genera el fichero, se borran los temporales, los fragmentos ya terminados se quedan en la caché para la próxima vez y no aparece ningún error.
+
+La ventana no se cierra con `Esc` ni haciendo clic fuera, para no cancelar un render sin querer: solo con **Cancelar**. El porcentaje sigue apareciendo también en el título de la ventana y en el icono de la barra de tareas.
+
 Al terminar el render aparece un diálogo con la ruta del fichero y un botón para abrir la carpeta.
 
 ### 8.1 Caché de render
@@ -265,6 +276,8 @@ Al terminar el render aparece un diálogo con la ruta del fichero y un botón pa
 VideoMix guarda en una carpeta oculta junto al proyecto (`.<nombre>.vmx.cache/`, o en una carpeta temporal de la aplicación mientras el proyecto no se ha guardado) los fragmentos de vídeo y audio ya codificados de renders y previsualizaciones anteriores. Si vuelves a renderizar sin haber cambiado nada relevante (mismo recorte, mismos ajustes, mismos ficheros), esos fragmentos se reutilizan tal cual en vez de volver a codificarlos, lo que acelera mucho los renders repetidos (por ejemplo, tras cambiar solo un elemento superpuesto al final del vídeo). Un cambio que sí afecta a un fragmento (otro recorte, otra transición, otro clip, otro codificador...) simplemente hace que ese fragmento se recodifique; el resto sigue viniendo de la caché.
 
 **Proyecto → Vaciar caché de render** borra toda la caché de render de este proyecto (y la de los proyectos sin guardar que ya no se usan); el próximo render vuelve a codificar todo desde cero. No hace falta usarlo en el uso normal: la caché se recorta ella sola por tamaño (un límite por proyecto; los fragmentos menos usados recientemente se borran primero) y las cachés de proyectos sin guardar y abandonados se limpian solas al cabo de unos días.
+
+En la misma carpeta, `converted/` guarda las versiones convertidas para el reproductor de las fuentes que no se pueden ver directamente (ver la sección 2). El recorte automático por tamaño no las toca; **Vaciar caché de render** sí las borra, y se vuelven a crear la próxima vez que se active esa fuente.
 
 ## 9. Atajos de teclado
 

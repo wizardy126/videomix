@@ -2,12 +2,13 @@ import type { RefObject } from 'react';
 import { useCallback, useEffect, useRef } from 'react';
 import i18n from 'i18next';
 import { nanoid } from 'nanoid';
+import invariant from 'tiny-invariant';
 
 import mainApi from '../../mainApi';
 import { UserFacingError } from '../../../errors';
 import { abortFfmpegs, getDefaultOverlayFontPath, getDuration, readFileFfprobeMeta, runFfmpegWithProgress } from '../../ffmpeg';
 import getSwal from '../../swal';
-import type { SetWorking } from '../../hooks/useLoading';
+import type { SetWorking, WorkingState } from '../../hooks/useLoading';
 import type { WithErrorHandling } from '../../hooks/useErrorHandling';
 import type { ShowGenericDialog } from '../../components/GenericDialog';
 import type { UseMixProject } from './useMixProject';
@@ -26,6 +27,7 @@ import { buildAudioGraph } from '../render/buildAudioGraph';
 import { getDefaultOutputPath, getOrphanTempEntries, getOverlayTimesPlan, getPartialOutputPath, getPreviewOutputPath, getRenderWarnings, getRenderWorkDir, planRender, withOutputExtension } from '../render/renderOutput';
 import { RenderAbortedError, runRenderJob } from '../render/runRenderJob';
 import type { RenderRunnerDeps } from '../render/runRenderJob';
+import type { MixRenderPhase, MixRenderStatus } from '../render/renderStatus';
 import type { CacheDirEntry, RenderCacheFsDeps } from '../render/renderCache';
 import { DEFAULT_RENDER_CACHE_MAX_BYTES, applyRenderCache, getFileIdentity, getProjectCacheRoot, getRenderCacheDir, getRenderCacheFileNames, getRenderCacheKeys, getStaleUnsavedCaches, getUnsavedCacheParent, pruneRenderCache } from '../render/renderCache';
 import { askForRenderWarnings, getIssueText, getRenderWarningText, showHardwareEncoderFallbackWarning, showRenderProblems } from '../renderDialogs';
@@ -155,7 +157,7 @@ async function removeOrphanTempEntries() {
 /**
  * Render and preview of the mix (T13, 04-diseno §6.6): project → validation → plan (+ warnings to confirm) →
  * loudness analysis (cached in the project) → chunked render (runRenderJob) → finished dialog / preview dialog.
- * Both are cancellable from the Working dialog; temp files are always removed.
+ * Both show their progress in RenderProgressDialog (T41), which can cancel them; temp files are always removed.
  */
 export default function useMixRender({ mixProject, workingRef, setWorking, setProgress, withErrorHandling, showGenericDialog, openExportFinishedDialog, appendFfmpegCommandLog }: {
   mixProject: UseMixProject,
@@ -273,8 +275,34 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     const abortController = new AbortController();
     // Sound overlays (T21): measured and mixed in alongside the clips
     const soundOverlays = currentProject.overlays.filter((overlay) => overlay.type === 'sound');
+
+    // T41: the working state carries what the render progress dialog shows; the elapsed time counts from here
+    const renderText = preview ? i18n.t('Rendering preview') : i18n.t('Rendering mix');
+    const startedAt = Date.now();
+    let status: WorkingState = { text: i18n.t('Analyzing audio loudness'), abortController, mixRender: { kind: preview ? 'preview' : 'mix', startedAt, phase: 'loudness', phaseStartedAt: startedAt } };
+    const setStatus = (text: string, changes: Partial<MixRenderStatus>) => {
+      invariant(status.mixRender != null);
+      status = { text, abortController, mixRender: { ...status.mixRender, ...changes } };
+      setWorking(status);
+    };
+    const startPhase = (text: string, phase: MixRenderPhase) => {
+      setStatus(text, { phase, phaseStartedAt: Date.now(), etaBaseline: undefined });
+      setProgress(0);
+    };
+    // A question in the middle of the render: the progress dialog steps aside meanwhile (a modal would take the focus)
+    const ask = async <T>(question: () => Promise<T>) => {
+      const previous = status;
+      setStatus(previous.text, { phase: 'confirm' });
+      try {
+        return await question();
+      } finally {
+        status = previous;
+        setWorking(previous);
+      }
+    };
+
     try {
-      setWorking({ text: i18n.t('Analyzing audio loudness'), abortController });
+      setWorking(status);
       setProgress(0);
       // Measures only what isn't cached yet; the new measurements are stored in the project (also when cancelled)
       const loudness = await ensureLoudness({ project: currentProject, musicTracks: currentProject.settings.musicPlaylist.tracks, sounds: soundOverlays, onProgress: setProgress, abortSignal: abortController.signal, onCacheEntries: setLoudnessCache });
@@ -285,11 +313,10 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       const unmeasuredSounds = soundOverlays.filter((overlay) => isUnmeasured(loudness[overlay.id]));
       if (unmeasuredSounds.length > 0) {
         const lines = unmeasuredSounds.map((overlay) => i18n.t('Sound overlay "{{overlay}}": couldn\'t measure its loudness, so it will play at its manual gain only, without normalization.', { overlay: overlay.name }));
-        if (!(await askForRenderWarnings({ lines, preview }))) throw new RenderAbortedError();
+        if (!(await ask(async () => askForRenderWarnings({ lines, preview })))) throw new RenderAbortedError();
       }
 
-      setWorking({ text: preview ? i18n.t('Rendering preview') : i18n.t('Rendering mix'), abortController });
-      setProgress(0);
+      startPhase(renderText, 'render');
       const { plan, settings, encoding } = renderPlan;
       const overlayTimes = resolveOverlayTimes(currentProject, getOverlayTimesPlan(renderPlan), { soundDurations: getSoundDurations(loudness, soundOverlays) });
 
@@ -328,6 +355,20 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
           // images, countdowns and progress bars (T20)
           overlays: { overlays: currentProject.overlays, times: overlayTimes, defaultFontPath: getDefaultOverlayFontPath() },
         });
+        // T41: the first ffmpeg starts the timed work, for the remaining time estimate: the cached blocks, which count
+        // as done at once, come before it
+        let lastProgress = 0;
+        let started = false;
+        const deps: RenderRunnerDeps = {
+          ...runnerDeps,
+          runFfmpeg: async (params) => {
+            if (!started) {
+              started = true;
+              setStatus(renderText, { etaBaseline: { time: Date.now(), progress: lastProgress } });
+            }
+            await runnerDeps.runFfmpeg(params);
+          },
+        };
         const job = cacheMaxBytes > 0
           ? applyRenderCache(uncachedJob, { dir: cacheDir, keys: await getRenderCacheKeys(uncachedJob, { fileIdentities }), runId: nanoid(8), join: path.join, fps: settings.fps })
           : uncachedJob;
@@ -337,8 +378,11 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
           outPath,
           // by the short side (T29): a 1080×1920 output has the pixels of 1080p, not of 2160p
           concurrency: getChunkConcurrency({ height: Math.min(plan.width, plan.height), cpuCount: navigator.hardwareConcurrency }),
-          deps: runnerDeps,
-          onProgress: setProgress,
+          deps,
+          onProgress: (value) => {
+            lastProgress = value;
+            setProgress(value);
+          },
           onCommand: appendFfmpegCommandLog,
           abortSignal: abortController.signal,
         });
@@ -361,9 +405,8 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
         // driver quirk a short test-encode didn't catch): retry once with software rather than losing the render.
         if (hardware === 'none' || err instanceof RenderAbortedError) throw err;
         console.warn('Hardware encoder failed, retrying with software', err);
-        await showHardwareEncoderFallbackWarning();
-        setWorking({ text: preview ? i18n.t('Rendering preview') : i18n.t('Rendering mix'), abortController });
-        setProgress(0);
+        await ask(showHardwareEncoderFallbackWarning);
+        startPhase(renderText, 'render');
         await runWithEncoder({ codec: settings.encoder.codec, hardware: 'none' });
       }
     } finally {

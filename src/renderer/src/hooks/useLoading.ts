@@ -1,11 +1,14 @@
 import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { abortFfmpegs } from '../ffmpeg';
+import type { MixRenderStatus } from '../videomix/render/renderStatus';
 
 
 export interface WorkingState {
   text: string,
   abortController?: AbortController | undefined,
+  /** VideoMix render or preview (T41): shown in its progress dialog instead of the Working overlay */
+  mixRender?: MixRenderStatus | undefined,
 }
 
 export default function useLoading() {

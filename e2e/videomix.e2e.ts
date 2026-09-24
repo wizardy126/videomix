@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +49,35 @@ async function seekBy(page: Page, seconds: number) {
     for (let i = 0; i < Math.abs(remaining); i += 1) await pressShortcut(page, remaining > 0 ? 'ArrowRight' : 'ArrowLeft');
     await expect.poll(async () => playerTime(page), { timeout: 2000 }).toBeCloseTo(target, 1);
   }).toPass({ timeout: 15_000 });
+}
+
+/** The file shown by the source player (a converted preview, if any). */
+const playerSrc = async (page: Page) => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).src).then((src) => (src.startsWith('file:') ? fileURLToPath(src.replace(/\?.*$/, '')) : src));
+
+/**
+ * The render progress dialog (T41) is shown, on top (not hidden behind the Mix view), with its title, a progress bar
+ * and the times.
+ */
+async function expectRenderProgress(page: Page, title: string) {
+  const dialog = page.getByTestId('render-progress');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: title })).toBeVisible();
+  const bar = dialog.getByRole('progressbar');
+  await expect(bar).toHaveAttribute('aria-valuenow', /^\d+(\.\d)?$/);
+  await expect(dialog.getByTestId('render-progress-percent')).toHaveText(/^\d+\.\d %$/);
+  await expect(dialog.getByTestId('render-progress-elapsed')).toHaveText(/^\d+:\d\d$/);
+  await expect(dialog.getByTestId('render-progress-remaining')).toHaveText(/^(Calculating…|≈ \d+:\d\d)$/);
+  // what's at the middle of the dialog is the dialog itself: nothing covers it (the Working overlay the render used
+  // before was hidden behind the Mix view's live preview). The modal dialog turns off the pointer events of the rest
+  // of the page, which hit testing skips: on again for the check.
+  expect(await dialog.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const { pointerEvents } = document.body.style;
+    document.body.style.pointerEvents = 'auto';
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    document.body.style.pointerEvents = pointerEvents;
+    return el.contains(top);
+  })).toBe(true);
 }
 
 /** Until the "working" overlay (loading a source, rendering…), which covers the whole window, is gone. */
@@ -479,7 +509,35 @@ test.describe.serial('VideoMix (English UI)', () => {
     console.log('Live preview audio, normalized:', JSON.stringify({ twoClips, farFromKeyframe }));
   });
 
-  test('8b. render and check the file with ffprobe', async () => {
+  test('8b. a render can be cancelled from its progress dialog (T41)', async () => {
+    const outPath = join(workDir, 'e2e-render-cancelled.mp4');
+    await mockSaveDialog(ctx.app, outPath);
+    await page.getByRole('button', { name: 'Render', exact: true }).click();
+
+    const renderAnyway = page.getByRole('button', { name: 'Render anyway' });
+    const progressDialog = page.getByTestId('render-progress');
+    await expect(renderAnyway.or(progressDialog)).toBeVisible({ timeout: 30_000 });
+    if (await renderAnyway.isVisible()) await renderAnyway.click();
+    await expectRenderProgress(page, 'Rendering the mix');
+    // (the loudness was analysed in 8a)
+    await expect(progressDialog.getByTestId('render-progress-phase')).toHaveText('Rendering video and audio');
+    // Esc doesn't close it (nor cancel the render)
+    await page.keyboard.press('Escape');
+    await expect(progressDialog).toBeVisible();
+    await screenshot(page, '08b-render-progress');
+
+    await progressDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(progressDialog).toHaveCount(0, { timeout: 15_000 });
+    // no error, no result, and the progress is gone from the title
+    await expect(page).not.toHaveTitle(/%/);
+    await expect(page.getByText('Failed to render the mix')).toHaveCount(0);
+    await expect(page.getByText('Success!')).toHaveCount(0);
+    expect(existsSync(outPath)).toBe(false);
+    await screenshot(page, '08b-render-cancelled');
+    // the UI works again: 8c renders
+  });
+
+  test('8c. render and check the file with ffprobe', async () => {
     const outPath = join(workDir, 'e2e-render.mp4');
     const expectedDuration = Number(await page.getByTestId('mix-live-preview').getByRole('slider').getAttribute('aria-valuemax'));
 
@@ -489,10 +547,24 @@ test.describe.serial('VideoMix (English UI)', () => {
     // plan warnings (e.g. fill around the vertical clip), if any
     const renderAnyway = page.getByRole('button', { name: 'Render anyway' });
     const success = page.getByText('Success!');
-    await expect(renderAnyway.or(success)).toBeVisible({ timeout: 30_000 });
+    const progressDialog = page.getByTestId('render-progress');
+    await expect(renderAnyway.or(progressDialog).or(success)).toBeVisible({ timeout: 30_000 });
     if (await renderAnyway.isVisible()) {
       await screenshot(page, '08-render-warnings');
       await renderAnyway.click();
+    }
+    // T41: the progress dialog (checked in 8b), with some progress, for the screenshot (this render is short: it may be
+    // over already)
+    for (let i = 0; i < 100 && await progressDialog.isVisible(); i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const percent = Number(await progressDialog.getByRole('progressbar').getAttribute('aria-valuenow', { timeout: 500 }).catch(() => 0));
+      if (percent >= 30) {
+        // eslint-disable-next-line no-await-in-loop
+        await screenshot(page, '08c-render-progress');
+        break;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await page.waitForTimeout(100);
     }
     await expect(success).toBeVisible({ timeout: 110_000 });
     await expect(page.getByText(`The mix has been rendered to: ${outPath}`)).toBeVisible();
@@ -880,6 +952,80 @@ test.describe('VideoMix (chains, always-visible sequence and maximum duration)',
       const probe = ffprobe(out);
       expect(Number(probe.format.duration)).toBeCloseTo(6, 1);
       await screenshot(page, '14d-preview');
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test.describe('VideoMix (preview conversion of unsupported sources)', () => {
+  test('15. a saved project keeps the converted previews in its cache folder and reuses them (T42)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    const workDir = mkdtempSync(join(tmpdir(), 'videomix-e2e-html5ify-'));
+    try {
+      // MPEG-4 Part 2, which Chromium can't play: loading it makes an ffmpeg-assisted preview ("fastest" dummy).
+      // Two copies with the same name in different folders; copies, so nothing is written into test-media/.
+      const fileName = 'mpeg4-640x360-5s.mkv';
+      const [unsavedSource, savedSource] = ['a', 'b'].map((dir) => {
+        mkdirSync(join(workDir, dir));
+        const copy = join(workDir, dir, fileName);
+        copyFileSync(media(fileName), copy);
+        return copy;
+      }) as [string, string];
+      const convertedNextTo = (source: string) => readdirSync(join(source, '..')).filter((name) => name.startsWith('mpeg4-640x360-5s-html5ified-'));
+
+      // Unsaved project: inherited behaviour, next to the source
+      await mockOpenDialog(ctx.app, [unsavedSource]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await expect.poll(() => convertedNextTo(unsavedSource), { timeout: 30_000 }).toHaveLength(1);
+      await waitIdle(page);
+      const legacyPath = join(workDir, 'a', convertedNextTo(unsavedSource)[0]!);
+      // the player shows the converted file
+      await expect.poll(async () => playerSrc(page)).toBe(legacyPath);
+
+      const projectPath = join(workDir, 'converted.vmx');
+      await mockSaveDialog(ctx.app, projectPath);
+      await pressShortcut(page, 'Control+s');
+      await expect(page).toHaveTitle(/^converted - /);
+
+      // Saved project: into .converted.vmx.cache/converted/<hash of the source path>/, not next to the source
+      await mockOpenDialog(ctx.app, [savedSource]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(2);
+      const conversionDir = join(workDir, '.converted.vmx.cache', 'converted', createHash('sha256').update(savedSource).digest('hex').slice(0, 16));
+      const convertedInCache = () => (existsSync(conversionDir) ? readdirSync(conversionDir) : []);
+      await expect.poll(convertedInCache, { timeout: 30_000 }).toEqual(['mpeg4-640x360-5s-html5ified-dummy.mkv']);
+      await waitIdle(page);
+      expect(convertedNextTo(savedSource)).toEqual([]);
+      const convertedPath = join(conversionDir, 'mpeg4-640x360-5s-html5ified-dummy.mkv');
+      await expect.poll(async () => playerSrc(page)).toBe(convertedPath);
+      // ctime changes with any write (the conversion also sets the mtime from the source)
+      const convertedCtime = statSync(convertedPath).ctimeMs;
+      const legacyCtime = statSync(legacyPath).ctimeMs;
+      await screenshot(page, '15-converted-in-cache');
+
+      // Reopen: the first source uses its old conversion (next to it), the second the cached one; nothing is converted
+      await pressShortcut(page, 'Control+s');
+      await expect(page).toHaveTitle(/^converted - /);
+      await sendMenuAction(ctx.app, 'newProject');
+      await expect(page.getByTestId('source-row')).toHaveCount(0);
+      await mockOpenDialog(ctx.app, [projectPath]);
+      await sendMenuAction(ctx.app, 'openProject');
+      await expect(page.getByTestId('source-row')).toHaveCount(2);
+      await expect.poll(async () => playerSrc(page)).toBe(legacyPath);
+      await waitIdle(page);
+      await page.getByTestId('source-row').nth(1).click();
+      await expect.poll(async () => playerSrc(page)).toBe(convertedPath);
+      await waitIdle(page);
+      expect(convertedInCache()).toEqual(['mpeg4-640x360-5s-html5ified-dummy.mkv']);
+      expect(statSync(convertedPath).ctimeMs).toBe(convertedCtime);
+      expect(convertedNextTo(unsavedSource)).toHaveLength(1);
+      expect(statSync(legacyPath).ctimeMs).toBe(legacyCtime);
+      expect(convertedNextTo(savedSource)).toEqual([]);
       expect(ctx.consoleErrors).toEqual([]);
     } finally {
       await ctx.close();
