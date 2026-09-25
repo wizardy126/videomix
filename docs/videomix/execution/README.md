@@ -94,6 +94,7 @@
 | T42 | [T42-html5ify-cache.md](T42-html5ify-cache.md) |
 | T43 | [T43-capas-preview.md](T43-capas-preview.md) |
 | T44 | [T44-v4-modelo.md](T44-v4-modelo.md) |
+| T44b | [T44b-v4-tolerancia.md](T44b-v4-tolerancia.md) |
 | T45 | [T45-v4-encaje-ui.md](T45-v4-encaje-ui.md) |
 | T46 | [T46-v4-copiar-pegar.md](T46-v4-copiar-pegar.md) |
 | T47 | [T47-v4-bandas-negras.md](T47-v4-bandas-negras.md) |

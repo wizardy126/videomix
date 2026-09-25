@@ -24,7 +24,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M8 · Mejoras v2** | A1, A2, A4, B1, B2, B5, C1, C2, D1, D2, E3 | T24–T34 |
 | **M9 · Mejoras v3 y correcciones** | E1–E9, B1, B2 | T35–T40 |
 | **M10 · Render y conversiones** | Modal de progreso del render, vídeos convertidos en la caché del proyecto | T41–T43 |
-| **M11 · Mejoras v4** | F1, F2, A5, A7, A9 | T44–T50 |
+| **M11 · Mejoras v4** | F1, F2, A5, A7, A9 | T44, T44b, T45–T50 |
 
 ## Tareas
 
