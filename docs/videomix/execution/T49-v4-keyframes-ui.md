@@ -1,6 +1,6 @@
 # T49 · v4: edición de keyframes (A9)
 
-- **Hito**: M11 · **Modelo**: Opus · **Depende de**: T44, T45, T48 · **Estado**: pendiente
+- **Hito**: M11 · **Modelo**: Opus · **Depende de**: T44, T45, T48 · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 
