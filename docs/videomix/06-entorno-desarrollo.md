@@ -49,6 +49,8 @@ Localiza ffmpeg igual que la app en desarrollo (`ffmpeg/<platform>-<arch>/[lib/]
 | `h-1080p-10s.mp4` | 1920×1080, 30 fps, 10 s, `testsrc2` + tono 440 Hz |
 | `h-720p-25fps-8s.mp4` | 1280×720, 25 fps, 8 s, `smptebars` + tono 660 Hz a −12 dB |
 | `v-1080x1920-12s.mp4` | vertical 1080×1920, 30 fps, 12 s, `testsrc2` + ruido rosa a −24 dB |
+| `h-bars-1280x960-6s.mp4` | 1280×960, 30 fps, 6 s; contenido 1280×720 (`testsrc2`) centrado con bandas negras arriba/abajo de 120 px (A7) |
+| `v-bars-960x1280-6s.mp4` | 960×1280, 30 fps, 6 s; contenido 720×1280 (`testsrc2`) centrado con bandas negras a los lados de 120 px (A7) |
 | `v-rotated-9s.mp4` | codificado 1920×1080, 9 s, con audio; matriz de rotación 90° en el `tkhd` (se ve vertical) |
 | `sq-1080-6s.mp4` | 1080×1080, 30 fps, 6 s, sin audio |
 | `v-720x1280-silent-7s.mp4` | vertical 720×1280, 30 fps, 7 s, con pista de audio en silencio |

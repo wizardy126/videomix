@@ -19,7 +19,7 @@ const magnetButtonStyle: CSSProperties = { display: 'flex', alignItems: 'center'
 const magnetOnStyle: CSSProperties = { ...magnetButtonStyle, color: 'white', backgroundColor: 'var(--cyan-9)', borderColor: 'var(--cyan-11)' };
 
 /** Aspect presets for the max rect and quick actions. `aspect` undefined means free. */
-function RectOverlayToolbar({ aspect, hasMin, rotation, magnet, onAspectChange, onAddMin, onClearMin, onFillFrame, onRotate, onToggleMagnet, onFitTo }: {
+function RectOverlayToolbar({ aspect, hasMin, rotation, magnet, onAspectChange, onAddMin, onClearMin, onFillFrame, onRotate, onToggleMagnet, onFitTo, onRemoveBlackBars }: {
   aspect: number | undefined,
   hasMin: boolean,
   /** E9 (T38d): the clip's turn, and turning it by a delta (clockwise degrees). */
@@ -34,6 +34,8 @@ function RectOverlayToolbar({ aspect, hasMin, rotation, magnet, onAspectChange, 
   onToggleMagnet: () => void,
   /** F2: "Fit to" a fraction (one undo step). */
   onFitTo: (fraction: FitFraction) => void,
+  /** A7 (T47): analyzes the clip's range and cuts the max (and the min) to the picture found, one undo step. */
+  onRemoveBlackBars: () => void,
 }) {
   const { t } = useTranslation();
   const actionTitle = useActionTitle();
@@ -60,6 +62,9 @@ function RectOverlayToolbar({ aspect, hasMin, rotation, magnet, onAspectChange, 
       )}
 
       <Button onClick={onFillFrame}>{t('Fill frame')}</Button>
+
+      {/* A7 (T47): analyzes the clip's range and cuts the max (and the min) to the picture found */}
+      <Button data-testid="remove-black-bars" onClick={onRemoveBlackBars} title={t('Analyze this clip\'s range and cut the max to the picture found (the min is cut to stay inside it)')}>{t('Remove black bars')}</Button>
 
       {/* E9 (T38d): turn the clip, the rects turn with the picture */}
       <Button data-testid="rotate-clip-ccw" onClick={() => onRotate(-90)} title={actionTitle(t('Rotate −90°'), 'rotateClipCounterclockwise')} style={rotateButtonStyle}><MdRotate90DegreesCcw /></Button>

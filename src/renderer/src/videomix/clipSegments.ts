@@ -2,7 +2,9 @@ import type { StateSegment } from '../types';
 import type { MixClipPatch, MixProjectAction } from './projectReducer';
 import type { MixClip, MixSource } from './types';
 import type { Size } from './overlayMath';
+import { getFrameRect } from './overlayMath';
 import { createClip, getDefaultClipName, getNextClipColor } from './clips';
+import { getNewClipMaxRect } from './blackBars';
 
 // Pure sync between the project clips (source of truth) and the LosslessCut segments of the active source's timeline.
 // See docs/videomix/decisiones/ADR-002-clips-segmentos.md.
@@ -49,15 +51,18 @@ export function isSegmentsInSync(segments: StateSegment[], clips: MixClip[]) {
  * - a clip whose segment changed start/end/name is updated (an empty segment name keeps the clip name);
  * - a clip whose segment is gone, or became a marker, is removed;
  * - a new segment with an end (not the placeholder) becomes a new clip with the segment's id, the default name and next
- *   color, and the whole frame as max rect. Needs `frameSize`; without it (no video) the segment is not added.
+ *   color, and its max rect the source's picture rect with `autoCropBlackBars` (A7, T47), else the whole frame. Needs
+ *   `frameSize`; without it (no video) the segment is not added.
  * New clips are appended to the list, in timeline order.
  */
-export function getClipActionsFromSegments({ segments, source, clips, frameSize, paletteSize }: {
+export function getClipActionsFromSegments({ segments, source, clips, frameSize, autoCropBlackBars, paletteSize }: {
   segments: StateSegment[],
-  source: Pick<MixSource, 'id' | 'name'>,
+  source: Pick<MixSource, 'id' | 'name' | 'width' | 'height' | 'blackBars'>,
   /** All project clips (for names and colors). */
   clips: MixClip[],
   frameSize: Size | undefined,
+  /** A7 (T47): see `getNewClipMaxRect`. */
+  autoCropBlackBars: boolean,
   paletteSize: number,
 }): MixProjectAction[] {
   const actions: MixProjectAction[] = [];
@@ -82,6 +87,7 @@ export function getClipActionsFromSegments({ segments, source, clips, frameSize,
   });
 
   if (frameSize != null) {
+    const maxRect = getNewClipMaxRect({ source, autoCropBlackBars }) ?? getFrameRect(frameSize);
     const remaining = clips.filter((c) => c.sourceId !== source.id || segmentsById.get(c.id)?.end != null);
     clipSegments.forEach((segment) => {
       if (sourceClipIds.has(segment.segId) || otherClipIds.has(segment.segId) || segment.end == null) return;
@@ -92,7 +98,7 @@ export function getClipActionsFromSegments({ segments, source, clips, frameSize,
         color: getNextClipColor(remaining, paletteSize),
         start: segment.start,
         end: segment.end,
-        frameSize,
+        maxRect,
       });
       remaining.push(clip);
       actions.push({ type: 'addClip', clip });
@@ -125,20 +131,22 @@ export type SyncStep =
  * - otherwise, if the timeline doesn't show the project clips (undo/redo, an edit in the clip list, reorder...), it's rewritten.
  * After a `dispatch` the next step normally finds both in sync; if only the order differs, it rewrites the timeline.
  */
-export function getSyncStep({ segments, segmentsChanged, sourceLoaded, source, clips, frameSize, paletteSize }: {
+export function getSyncStep({ segments, segmentsChanged, sourceLoaded, source, clips, frameSize, autoCropBlackBars, paletteSize }: {
   segments: StateSegment[],
   segmentsChanged: boolean,
   sourceLoaded: boolean,
-  source: Pick<MixSource, 'id' | 'name'>,
+  source: Pick<MixSource, 'id' | 'name' | 'width' | 'height' | 'blackBars'>,
   clips: MixClip[],
   frameSize: Size | undefined,
+  /** A7 (T47): see `getNewClipMaxRect`. */
+  autoCropBlackBars: boolean,
   paletteSize: number,
 }): SyncStep {
   const sourceClips = clips.filter((c) => c.sourceId === source.id);
   if (!sourceLoaded) return { type: 'write', segments: buildSourceSegments({ clips: sourceClips, segments: [] }) };
 
   if (segmentsChanged) {
-    const actions = getClipActionsFromSegments({ segments, source, clips, frameSize, paletteSize });
+    const actions = getClipActionsFromSegments({ segments, source, clips, frameSize, autoCropBlackBars, paletteSize });
     if (actions.length > 0) return { type: 'dispatch', actions, transient: isTimeOnlyEdit(actions) };
   }
 

@@ -9,7 +9,7 @@ const repoDir = join(import.meta.dirname, '..');
 
 function run(): number {
   // The tests use the synthetic media of T02 and the app needs ffmpeg (both git-ignored)
-  if (!['h-1080p-10s.mp4', 'h-720p-25fps-8s.mp4', 'v-1080x1920-12s.mp4', 'ana-1280x720-sar-6s.mp4', 'mpeg4-640x360-5s.mkv', 'overlay-beep.wav'].every((name) => existsSync(join(repoDir, 'test-media', name)))) {
+  if (!['h-1080p-10s.mp4', 'h-720p-25fps-8s.mp4', 'v-1080x1920-12s.mp4', 'ana-1280x720-sar-6s.mp4', 'mpeg4-640x360-5s.mkv', 'overlay-beep.wav', 'h-bars-1280x960-6s.mp4', 'v-bars-960x1280-6s.mp4'].every((name) => existsSync(join(repoDir, 'test-media', name)))) {
     console.error('Missing test media: run `yarn generate-test-media` first.');
     return 1;
   }

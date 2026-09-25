@@ -193,6 +193,11 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ fill: { ...settings.fill, color: e.target.value } });
   }, [onChange, settings.fill]);
 
+  // A7 (T47): on by default (01-requisitos §12)
+  const handleAutoCropBlackBarsChange = useCallback((checked: boolean) => {
+    onChange({ autoCropBlackBars: checked });
+  }, [onChange]);
+
   const handleOrderModeChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
     onChange({ order: { ...settings.order, mode: e.target.value as MixSettings['order']['mode'] } });
   }, [onChange, settings.order]);
@@ -395,6 +400,13 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
                 <input type="color" disabled={settings.fill.mode !== 'color'} value={settings.fill.color} onChange={handleFillColorChange} />
               </label>
             </div>
+
+            {/* A7 (T47) */}
+            <div style={inlineRowStyle}>
+              <span>{t('Remove black bars automatically')}</span>
+              <Switch data-testid="auto-crop-black-bars" checked={settings.autoCropBlackBars} onCheckedChange={handleAutoCropBlackBarsChange} />
+            </div>
+            <div style={detailsStyle}>{t('New clips of a source are created without its black bars (letterbox/pillarbox), once detected in the background. The "Remove black bars" button in the clip editor always works, on or off.')}</div>
           </Section>
 
           <Section title={t('Order')}>

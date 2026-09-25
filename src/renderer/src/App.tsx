@@ -38,6 +38,7 @@ import useMixProject from './videomix/hooks/useMixProject';
 import useMixWorkspace from './videomix/hooks/useMixWorkspace';
 import useMixClips from './videomix/hooks/useMixClips';
 import useMixClipPins from './videomix/hooks/useMixClipPins';
+import useBlackBars from './videomix/hooks/useBlackBars';
 import useMixRender from './videomix/hooks/useMixRender';
 import MixSettingsDialog from './videomix/components/MixSettingsDialog';
 import MixRenderButtons from './videomix/components/MixRenderButtons';
@@ -1655,7 +1656,10 @@ function App() {
   const mixThumbnails = useClipThumbnails({ clips: mixProject.project.clips, sources: mixProject.project.sources, enabled: videoMixMode });
 
   // VideoMix: pinned and grouped clips (A4, T30) and the clip multi-selection, in ClipList and MixPlanView
-  const mixClipPins = useMixClipPins({ clips: mixProject.project.clips, settings: mixProject.project.settings, selectedClipId: mixClips.selectedClipId, cursorTime: mixOverlays.cursorTime, selectClip: mixClips.userSelectClip, dispatchStep: mixClips.dispatchStep });
+  const mixClipPins = useMixClipPins({ clips: mixProject.project.clips, sources: mixProject.project.sources, settings: mixProject.project.settings, selectedClipId: mixClips.selectedClipId, cursorTime: mixOverlays.cursorTime, selectClip: mixClips.userSelectClip, dispatchStep: mixClips.dispatchStep });
+
+  // A7 (T47): background per-source black bars caching, and the "Remove black bars" button
+  const mixBlackBars = useBlackBars({ sources: mixProject.project.sources, clips: mixProject.project.clips, autoCropBlackBars: mixProject.project.settings.autoCropBlackBars, setSourceBlackBars: mixProject.setSourceBlackBars, dispatchStep: mixClips.dispatchStep, workingRef, setWorking, withErrorHandling });
 
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
   const toggleSettings = useCallback(() => setSettingsVisible((val) => !val), []);
@@ -2317,6 +2321,9 @@ function App() {
       rotateClipClockwise: () => mixClips.userRotateClip(90),
       rotateClipCounterclockwise: () => mixClips.userRotateClip(-90),
       rotateClip180: () => mixClips.userRotateClip(180),
+      // A5 (T46)
+      copyClipFraming: () => mixClipPins.userCopyFraming(mixClips.selectedClipId),
+      pasteClipFraming: () => mixClipPins.userPasteFraming(mixClips.selectedClipId),
       // E6 "New clip from here": unlike setCutStart (I), always starts a new marker, even inside another clip
       // (addSegment always appends one, ignoring the current segment; setCutStart only falls back to it past the end)
       newClipFromCursor: () => { if (checkFileOpened()) addSegment(); },
@@ -2334,7 +2341,7 @@ function App() {
     }
 
     return ret;
-  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, mixRender, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState, mixPreviewActive, toggleMixPreview, playMixPreview, pauseMixPreview]);
+  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, mixClipPins, mixRender, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState, mixPreviewActive, toggleMixPreview, playMixPreview, pauseMixPreview]);
 
   const getKeyboardAction = useCallback((action: MainKeyboardAction) => mainActions[action], [mainActions]);
 
@@ -2766,6 +2773,7 @@ function App() {
                           onCommit={mixClips.handleRectsCommit}
                           onEdit={mixClips.handleRectsEdit}
                           onRotate={mixClips.userRotateClip}
+                          onRemoveBlackBars={() => mixBlackBars.userRemoveBlackBars(mixClips.selectedClipId)}
                         />
                       )}
                     </div>

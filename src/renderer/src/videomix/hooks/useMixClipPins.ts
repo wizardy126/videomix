@@ -2,10 +2,13 @@ import { useCallback, useMemo, useState } from 'react';
 import { nanoid } from 'nanoid';
 import i18n from 'i18next';
 
+import getSwal from '../../swal';
 import { formatDuration } from '../../util/duration';
 import type { ContextMenuTemplate } from '../../types';
 import type { MixProjectAction } from '../projectReducer';
-import type { MixClip, MixSettings } from '../types';
+import type { ClipFraming } from '../clipFraming';
+import { copyClipFraming, getPasteFramingAction } from '../clipFraming';
+import type { MixClip, MixSettings, MixSource } from '../types';
 import { getClipPinTime, getGroupColors, getGroupMembers, getPinClipAction, getSelectionRange, getUnpinClipAction } from '../clipGroups';
 import { canExtendBeyondMax } from '../planner/plannerInput';
 import { addRotation, getClipRotation } from '../clipRotation';
@@ -38,8 +41,10 @@ export const getRotateClipAction = (clip: Pick<MixClip, 'id' | 'rotation'>, delt
  * always-visible sequence (E5)), the group colours, the chains, the sequence and pinning by dragging a block. Each edit
  * is one undo step.
  */
-export default function useMixClipPins({ clips, settings, selectedClipId, cursorTime, selectClip, dispatchStep }: {
+export default function useMixClipPins({ clips, sources, settings, selectedClipId, cursorTime, selectClip, dispatchStep }: {
   clips: MixClip[],
+  /** A5 (T46): to scale a pasted framing when the target source has another size. */
+  sources: MixSource[],
   /** E2/E5 (T39): the chains and the always-visible sequence. */
   settings: MixSettings,
   selectedClipId: string | undefined,
@@ -130,8 +135,35 @@ export default function useMixClipPins({ clips, settings, selectedClipId, cursor
     dispatchStep({ type: 'setAlwaysVisibleClips', clipIds });
   }, [dispatchStep, sequence]);
 
+  // A5 (T46): an app-internal clipboard (not the project, so it isn't undoable and survives closing the clip), holding
+  // one clip's framing (max + min + turn + keyframes).
+  const sourcesById = useMemo(() => new Map(sources.map((source) => [source.id, source])), [sources]);
+  const [framing, setFraming] = useState<ClipFraming>();
+
+  const userCopyFraming = useCallback((clipId: string | undefined) => {
+    const clip = clips.find((c) => c.id === clipId);
+    const copied = clip != null ? copyClipFraming(clip, sourcesById.get(clip.sourceId)) : undefined;
+    if (copied == null) return;
+    setFraming(copied);
+  }, [clips, sourcesById]);
+
+  // Pastes on the clip (if it isn't part of the selection) or on the whole selection, as one undo step.
+  const userPasteFraming = useCallback((clipId: string | undefined) => {
+    if (clipId == null || framing == null) return;
+    const clipIds = selectedClipIds.has(clipId) ? [...selectedClipIds] : [clipId];
+    const { action, aspectChangedClipIds } = getPasteFramingAction({ project: { clips, sources }, framing, clipIds });
+    if (action == null) return;
+    dispatchStep(action);
+    if (aspectChangedClipIds.length > 0) {
+      getSwal().toast.fire({ icon: 'warning', timer: 6000, title: i18n.t('The framing was fitted to the frame: {{count}} pasted clip(s) have another proportion', { count: aspectChangedClipIds.length }) });
+    }
+  }, [clips, dispatchStep, framing, selectedClipIds, sources]);
+
   /** Entries of a clip's context menu, for the clip list and the Mix view. */
   const getClipMenu = useCallback((clip: MixClip): ContextMenuTemplate => [
+    { type: 'separator' },
+    { label: i18n.t('Copy framing'), enabled: copyClipFraming(clip, sourcesById.get(clip.sourceId)) != null, click: () => userCopyFraming(clip.id) },
+    { label: i18n.t('Paste framing'), enabled: framing != null, click: () => userPasteFraming(clip.id) },
     { type: 'separator' },
     { label: i18n.t('Pin here ({{time}})', { time: formatDuration({ seconds: cursorTime, shorten: true }) }), click: () => userPinClip(clip.id, cursorTime) },
     { label: i18n.t('Unpin'), enabled: pinTimes.has(clip.id), click: () => userUnpinClip(clip.id) },
@@ -154,7 +186,7 @@ export default function useMixClipPins({ clips, settings, selectedClipId, cursor
     sequenceIndexes.has(clip.id)
       ? { label: i18n.t('Remove from the always-visible sequence'), click: () => userRemoveFromSequence(selectedClipIds.has(clip.id) ? [...selectedClipIds].filter((id) => sequenceIndexes.has(id)) : [clip.id]) }
       : { label: i18n.t('Add to the always-visible sequence'), click: () => userAddToSequence(selectedClipIds.has(clip.id) ? clips.filter((c) => selectedClipIds.has(c.id) && !sequenceIndexes.has(c.id)).map((c) => c.id) : [clip.id]) },
-  ], [clips, cursorTime, dispatchStep, groupColors, linkInfos, pinTimes, selectedClipIds, sequenceIndexes, userAddToSequence, userGroupSelectedClips, userPinClip, userRemoveFromSequence, userSetClipLink, userUngroupClip, userUnpinClip]);
+  ], [clips, cursorTime, dispatchStep, framing, groupColors, linkInfos, pinTimes, selectedClipIds, sequenceIndexes, sourcesById, userAddToSequence, userCopyFraming, userGroupSelectedClips, userPasteFraming, userPinClip, userRemoveFromSequence, userSetClipLink, userUngroupClip, userUnpinClip]);
 
   /**
    * Opens the clip menu right away (Mix view blocks: a block per clip, so the native menu is only built when it's
@@ -176,6 +208,10 @@ export default function useMixClipPins({ clips, settings, selectedClipId, cursor
     userUngroupClip,
     getClipMenu,
     openClipMenu,
+    /** A5 (T46): "Copy framing" / "Paste framing" (menu and keyboard). `hasFraming`: whether paste has anything to apply. */
+    hasFraming: framing != null,
+    userCopyFraming,
+    userPasteFraming,
     /** E2 (T39): link state of the clips that can be in a chain. */
     linkInfos,
     userSetClipLink,

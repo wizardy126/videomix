@@ -1,7 +1,5 @@
 import type { MixProjectAction } from './projectReducer';
-import type { MixClip, MixSettings, MixSource } from './types';
-import type { Size } from './overlayMath';
-import { getFrameRect } from './overlayMath';
+import type { MixClip, MixSettings, MixSource, Rect } from './types';
 import { getClipDuration } from './project';
 
 // Pure helpers for creating and editing clips (T07). No React/Electron, tested with vitest.
@@ -70,18 +68,18 @@ export function getNextClipColor(clips: Pick<MixClip, 'color'>[], paletteSize: n
   return Math.max(0, counts.indexOf(min));
 }
 
-/** A new clip showing the whole frame (max = full frame, no min), not muted, no extra gain. */
-export function createClip({ id, sourceId, name, color, start, end, frameSize }: {
+/** A new clip, not muted and with no extra gain. */
+export function createClip({ id, sourceId, name, color, start, end, maxRect }: {
   id: string,
   sourceId: string,
   name: string,
   color: number,
   start: number,
   end: number,
-  /** Oriented size of the source. */
-  frameSize: Size,
+  /** A7 (T47): the whole (oriented) frame (`getFrameRect`), or, with `autoCropBlackBars`, the source's picture rect (`getNewClipMaxRect`). */
+  maxRect: Rect,
 }): MixClip {
-  return { id, sourceId, name, color, start, end, maxRect: getFrameRect(frameSize), muted: false, gainDb: 0 };
+  return { id, sourceId, name, color, start, end, maxRect, muted: false, gainDb: 0 };
 }
 
 /**

@@ -809,6 +809,15 @@ const KeyboardShortcuts = memo(({
         name: t('Rotate clip 180°'),
         category: mixProjectCategory,
       },
+      copyClipFraming: {
+        // A5 (T46): the max, min, turn and keyframes of the selected clip, to paste them on another one
+        name: t('Copy framing'),
+        category: mixProjectCategory,
+      },
+      pasteClipFraming: {
+        name: t('Paste framing'),
+        category: mixProjectCategory,
+      },
       showMixSettings: {
         name: t('Mix settings'),
         category: mixProjectCategory,

@@ -9,10 +9,11 @@ import type { StateSegment } from '../../types';
 import type { UseMixProject } from './useMixProject';
 import type { MixClipPatch, MixProjectAction } from '../projectReducer';
 import type { ClipRects, Size } from '../overlayMath';
-import { aspectPresets, isQuarterTurn } from '../overlayMath';
+import { aspectPresets, getFrameRect, isQuarterTurn } from '../overlayMath';
 import { getSyncStep } from '../clipSegments';
 import { getRotateClipAction } from './useMixClipPins';
 import { createClip, getDefaultClipName, getDuplicateClipName, getNewClipRange, getNextClipColor, getSplitClipAction } from '../clips';
+import { getNewClipMaxRect } from '../blackBars';
 
 /** An aspect turned a quarter (1 / aspect), as the preset value when it is one, so the toolbar still shows it. */
 const getTurnedAspect = (aspect: number) => aspectPresets.find(({ value }) => Math.abs(value * aspect - 1) < 1e-9)?.value ?? 1 / aspect;
@@ -142,6 +143,7 @@ export default function useMixClips({ mixProject, currentSourceId, activateSourc
       source: currentSource,
       clips: project.clips,
       frameSize,
+      autoCropBlackBars: project.settings.autoCropBlackBars,
       paletteSize: segColorsCount,
     });
     syncRef.current = { sourceId: currentSource.id, segments: cutSegments };
@@ -167,7 +169,7 @@ export default function useMixClips({ mixProject, currentSourceId, activateSourc
         setCurrentSegIndex(0);
       }
     }
-  }, [cutSegments, currentSegId, currentSource, dispatchMerged, dispatchStep, frameSize, project.clips, setCurrentSegIndex, setCutSegments]);
+  }, [cutSegments, currentSegId, currentSource, dispatchMerged, dispatchStep, frameSize, project.clips, project.settings.autoCropBlackBars, setCurrentSegIndex, setCutSegments]);
 
   // Seek to the clip selected in another source once that source is loaded (before, the <video> has no duration)
   const mediaReady = isDurationValid(fileDuration);
@@ -206,6 +208,9 @@ export default function useMixClips({ mixProject, currentSourceId, activateSourc
     const range = getNewClipRange({ time: getRelevantTime(), duration: fileDuration, marker });
     if (range == null) return;
     const id = range.fromMarker && marker != null ? marker.segId : nanoid();
+    // A7 (T47): the source's picture rect with autoCropBlackBars (undefined only if the size isn't known, which
+    // frameSize above already ruled out for this source)
+    const maxRect = getNewClipMaxRect({ source: currentSource, autoCropBlackBars: project.settings.autoCropBlackBars }) ?? getFrameRect(frameSize);
     const clip = createClip({
       id,
       sourceId: currentSource.id,
@@ -213,11 +218,11 @@ export default function useMixClips({ mixProject, currentSourceId, activateSourc
       color: getNextClipColor(project.clips, segColorsCount),
       start: range.start,
       end: range.end,
-      frameSize,
+      maxRect,
     });
     pendingSelectRef.current = { clipId: id, sourceId: currentSource.id };
     dispatchStep({ type: 'addClip', clip });
-  }, [currentCutSeg, currentSource, dispatchStep, fileDuration, frameSize, getRelevantTime, project.clips]);
+  }, [currentCutSeg, currentSource, dispatchStep, fileDuration, frameSize, getRelevantTime, project.clips, project.settings.autoCropBlackBars]);
 
   const userDuplicateClip = useCallback((clipId: string | undefined) => {
     const clip = project.clips.find((c) => c.id === clipId);

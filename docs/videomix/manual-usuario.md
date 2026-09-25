@@ -40,6 +40,8 @@ Si el reproductor no puede mostrar una fuente (por ejemplo, un códec que Chromi
 
 Las fuentes con **píxeles no cuadrados** (relación de aspecto de muestra o SAR distinta de 1:1, algo habitual en vídeo anamórfico o grabado con ciertas cámaras) se gestionan de forma automática: no hace falta hacer nada especial. El reproductor, los rectángulos, las miniaturas y el render usan siempre los píxeles "de visualización" (los que se ven, con la fuente ya estirada a su proporción real), igual que la rotación del vídeo.
 
+Al añadir o activar una fuente, VideoMix analiza en segundo plano si tiene **bandas negras** (superiores/inferiores o laterales, típico de vídeo con otra proporción incrustado). Con el ajuste **Quitar bandas negras automáticamente** activado (por defecto, ver §5), los clips **nuevos** que se creen de esa fuente a partir de entonces nacen ya recortados a la zona con imagen; si la detección todavía no ha terminado, el clip nace con el fotograma completo, como antes.
+
 ### Música de fondo
 
 Si sueltas o añades un fichero de audio (mp3, m4a, aac, wav, flac, ogg, opus...), se te preguntará si quieres usarlo como música del proyecto (o sustituir la música actual). El volumen y el bucle de la música se ajustan en **Ajustes de montaje** (ver §5).
@@ -87,9 +89,12 @@ La barra de herramientas sobre el vídeo permite:
 - fijar una **proporción** para el máx. (Libre, 9:16, 3:4, 1:1, 4:3, 16:9);
 - **Mín. = Máx.** (quita el mínimo) / **Añadir mín.**;
 - **Rellenar fotograma** (el máx. vuelve a ocupar todo el vídeo);
+- **Quitar bandas negras**: analiza el tramo de este clip y ajusta el máx. a la zona con imagen encontrada (el mín. se recorta para seguir dentro, sin llegar a quedar más pequeño que el mínimo permitido); si no encuentra bandas, avisa y no cambia nada. Funciona siempre, esté o no activado el ajuste automático de §5;
 - **girar el clip** −90°, +90° o 180° (ver abajo); si está girado, muestra el giro (p. ej. `90°`).
 
 **Girar un clip**: cada clip puede girarse +90°, −90° o 180° (por ejemplo, un vídeo grabado de lado) con los botones de giro de esta barra, con su menú contextual (lista de clips y pestaña **Montaje**) o con `R` (+90°), `Mayús+R` (−90°) y `Alt+R` (180°). Con el clip seleccionado, el reproductor muestra la imagen ya girada y los rectángulos se editan sobre ella; al girar, los rectángulos giran con la imagen, así que el encuadre se conserva. Todo lo demás usa la imagen girada: la orientación del clip (un vídeo horizontal girado 90° es vertical), el montaje, la previsualización en vivo, las miniaturas y el render. El giro se suma a la rotación que ya indique el propio fichero. Su fila de la lista muestra el giro junto a la orientación.
+
+**Copiar y pegar el encuadre**: el menú contextual de un clip (lista de clips o pestaña **Montaje**) tiene **Copiar encuadre** (máx., mín., giro y, si el clip está animado, sus keyframes) y **Pegar encuadre**, también con `Ctrl/Cmd+Mayús+C` y `Ctrl/Cmd+Mayús+V`. Pegar se aplica al clip activo o, si hay varios seleccionados, a todos ellos, en un solo paso de deshacer. Si la fuente del clip de destino tiene otro tamaño se escala proporcionalmente (como al volver a vincular una fuente, §2); si además tiene otra proporción, el encuadre se ajusta al fotograma y aparece un aviso. **Ampliar más allá del máx. si hace falta** y el audio del clip no se copian.
 
 El montaje elige, para cada clip y cada columna, un recorte que respeta el mínimo, cabe dentro del máximo y tiene la proporción de esa columna; si hace falta ampliar mucho la imagen (más de ×2), el clip lo indica en su fila de la lista.
 
@@ -149,7 +154,7 @@ Se abren con **Proyecto → Ajustes de montaje...** (`Ctrl/Cmd+Shift+M`) o el bo
 | Sección | Ajustes |
 |---|---|
 | **Salida** | **proporción** (16:9 horizontal con clips lado a lado, 9:16 vertical con clips apilados, 1:1 cuadrado — el montaje elige lado a lado o apilados, lo que mejor encaje), resolución (lado corto: 720p / 1080p / 4K), fotogramas por segundo, calidad (CRF), preset de velocidad, **códec de vídeo** (H.264 / H.265-HEVC), **codificador** (Automático, Solo software, o uno de hardware — NVIDIA NVENC, Intel Quick Sync, Apple VideoToolbox, VAAPI — marcado como detectado o no según el equipo) y **límite de duración del vídeo** (desactivado por defecto; ver más abajo) |
-| **Composición** | máximo de columnas o filas visibles (1–6, según la proporción), separación entre columnas o filas en px (y su color), relleno del hueco (desenfoque o color sólido) |
+| **Composición** | máximo de columnas o filas visibles (1–6, según la proporción), separación entre columnas o filas en px (y su color), relleno del hueco (desenfoque o color sólido), **quitar bandas negras automáticamente** (activado por defecto; ver §2 y §3) |
 | **Orden** | orden de la lista o aleatorio (con semilla y "barajar de nuevo"), ventana de reordenación (número de posiciones o casilla "Ilimitado") |
 | **Enlaces** | margen para enlazar automáticamente clips de una misma fuente (segundos; 10 por defecto, `0` lo desactiva) y transición entre clips enlazados (corte directo o la transición global) — ver "Clips enlazados" en §3 |
 | **Transición** | tipo (fundido, disolución, barridos, deslizamientos...) y duración; fundido de entrada/salida al principio y final del vídeo |
@@ -295,6 +300,7 @@ Puedes ver y personalizar todos los atajos en **Ayuda → Atajos de teclado y ra
 | Quitar punto de corte (elimina el clip) | `Retroceso` |
 | Duplicar / eliminar clip seleccionado | `Ctrl/Cmd+D` / `Supr` |
 | Girar el clip seleccionado +90° / −90° / 180° | `R` / `Mayús+R` / `Alt+R` |
+| Copiar / pegar el encuadre del clip seleccionado | `Ctrl/Cmd+Mayús+C` / `Ctrl/Cmd+Mayús+V` |
 | Ir al clip anterior / siguiente | `↑` / `↓` |
 | Ir al primer / último clip | `Av Pág` / `Re Pág` |
 | Deshacer / rehacer | `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` |

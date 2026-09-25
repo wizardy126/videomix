@@ -6,6 +6,7 @@ export type KeyboardAction = 'addSegment' | 'togglePlayResetSpeed' | 'togglePlay
   | 'newProject' | 'openProject' | 'saveProject' | 'saveProjectAs' | 'addSourcesDialog'
   | 'addClip' | 'duplicateCurrentClip' | 'removeCurrentClip' | 'newClipFromCursor'
   | 'rotateClipClockwise' | 'rotateClipCounterclockwise' | 'rotateClip180'
+  | 'copyClipFraming' | 'pasteClipFraming'
   | 'showMixSettings' | 'previewMix' | 'renderMix' | 'clearRenderCache';
 
 export interface KeyBinding {

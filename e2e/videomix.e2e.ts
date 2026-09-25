@@ -691,7 +691,8 @@ test.describe('VideoMix (anamorphic source)', () => {
       const projectPath = join(workDir, 'sar.vmx');
       await mockSaveDialog(ctx.app, projectPath);
       await pressShortcut(page, 'Control+s');
-      await expect.poll(() => existsSync(projectPath)).toBe(true);
+      // Not just existsSync: the title loses its "*" only once the save (the write included) has actually finished
+      await expect(page).toHaveTitle(/^sar - /);
       const saved = JSON5.parse(readFileSync(projectPath, 'utf8')) as { sources: { width: number, height: number, sar?: { num: number, den: number } }[], clips: SavedProject['clips'] };
       expect(saved.sources[0]).toMatchObject({ width: 1358, height: 720, sar: { num: 87, den: 82 } });
       expect(saved.clips[0]!.maxRect).toEqual({ x: 0, y: 0, width: 1358, height: 720 });
@@ -1156,6 +1157,159 @@ test.describe('VideoMix (fit in fractions, magnet and "Fit to")', () => {
       await screenshot(page, '16c-fit-to-half');
       await pressShortcut(page, 'Control+z');
       await expect(label).toContainText(`Max ${before}×1080`);
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+test.describe('VideoMix (copy/paste framing)', () => {
+  test('17. copy a clip\'s framing and paste it on two selected clips of another source, scaled, with a warning on another proportion (A5, T46)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    try {
+      // source 1 (1920×1080), source 2 (1280×720, same 16:9), source 3 (1080×1920, another proportion)
+      await mockOpenDialog(ctx.app, sourceFiles.map((f) => media(f)));
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(3);
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      await waitIdle(page);
+
+      // clip #1 on source 1, its max shrunk to about half width by dragging the right edge
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(1);
+      const label = page.getByTestId('rect-label');
+      await expect(label).toContainText('Max 1920×1080');
+      const maxWidth = async () => Number(/Max (\d+)×/.exec((await label.textContent()) ?? '')?.[1]);
+      const east = page.getByTestId('rect-handle-max-e');
+      const west = page.getByTestId('rect-handle-max-w');
+      const eastBox = (await east.boundingBox())!;
+      const westBox = (await west.boundingBox())!;
+      const frameWidth = eastBox.x - westBox.x;
+      const grab = { x: eastBox.x + eastBox.width * 0.25, y: eastBox.y + eastBox.height / 2 };
+      await page.mouse.move(grab.x, grab.y);
+      await page.mouse.down();
+      await page.mouse.move(grab.x - frameWidth / 4, grab.y, { steps: 5 });
+      await page.mouse.up();
+      const copiedWidth = await maxWidth();
+      await expect(label).toContainText(`Max ${copiedWidth}×1080`);
+      expect(copiedWidth).toBeLessThan(1920);
+
+      // Copy framing (clip menu / Ctrl+Shift+C)
+      await pressShortcut(page, 'Control+Shift+c');
+
+      // source 2: 2 clips, both selected (Ctrl-click adds to the selection), pasted as one undo step
+      await activateSource(page, 1, sourceFiles[1]!);
+      await seekBy(page, 1);
+      await pressShortcut(page, 'i');
+      await seekBy(page, 1);
+      await pressShortcut(page, 'o');
+      await seekBy(page, 1);
+      await pressShortcut(page, 'i');
+      await seekBy(page, 1);
+      await pressShortcut(page, 'o');
+      await expect(clipRows(page)).toHaveCount(3);
+      const clip2a = clipRows(page).nth(1);
+      const clip2b = clipRows(page).nth(2);
+      await clip2a.getByText('0:01 – 0:02').click();
+      await expect(label).toContainText('Max 1280×720');
+      await clip2b.getByText('0:03 – 0:04').click({ modifiers: ['Control'] });
+      await pressShortcut(page, 'Control+Shift+v');
+
+      // both scaled the same way (source 2 is 1280×720, 2/3 the width of source 1): no warning
+      const swalToast = page.locator('.swal2-toast');
+      await expect(swalToast).toHaveCount(0);
+      await clip2a.getByText('0:01 – 0:02').click();
+      await expect(label).toContainText(/Max \d+×720/);
+      const pastedWidth = await maxWidth();
+      expect(pastedWidth).toBeGreaterThan(copiedWidth * (1280 / 1920) - 20);
+      expect(pastedWidth).toBeLessThan(copiedWidth * (1280 / 1920) + 20);
+      await clip2b.getByText('0:03 – 0:04').click();
+      await expect(label).toContainText(`Max ${pastedWidth}×720`);
+      await screenshot(page, '17a-pasted-framing');
+
+      // one undo step reverts both
+      await pressShortcut(page, 'Control+z');
+      await expect(label).toContainText('Max 1280×720');
+      await clip2a.getByText('0:01 – 0:02').click();
+      await expect(label).toContainText('Max 1280×720');
+
+      // source 3 (another proportion): pasting fits the framing into the frame and warns
+      await activateSource(page, 2, sourceFiles[2]!);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(4);
+      // clicked explicitly (not just relying on it being auto-selected): clears any leftover multi-selection from
+      // source 2, so the paste below targets only this clip
+      await clipRows(page).nth(3).getByText('0:00 – 0:05').click();
+      await expect(label).toContainText('Max 1080×1920');
+      await pressShortcut(page, 'Control+Shift+v');
+      await expect(swalToast).toBeVisible();
+      await expect(swalToast).toContainText('another proportion');
+      const [, pastedOtherWidth, pastedOtherHeight] = /Max (\d+)×(\d+)/.exec((await label.textContent()) ?? '') ?? [];
+      expect(Number(pastedOtherWidth)).toBeLessThanOrEqual(1080);
+      expect(Number(pastedOtherHeight)).toBeLessThanOrEqual(1920);
+      // keeps the copied framing's own proportion (not the frame's)
+      expect(Number(pastedOtherWidth) / Number(pastedOtherHeight)).toBeCloseTo(copiedWidth / 1080, 1);
+      await screenshot(page, '17b-pasted-framing-other-proportion');
+
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+test.describe('VideoMix (black bars)', () => {
+  test('18. a source with black bars gets a bar-free new clip once detected, and the button removes them from an existing one (A7, T47)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    try {
+      // 1280×960, content 1280×720 letterboxed (top/bottom bars of 120 px, generateTestMedia.ts)
+      await mockOpenDialog(ctx.app, [media('h-bars-1280x960-6s.mp4')]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      await waitIdle(page);
+
+      const label = page.getByTestId('rect-label');
+
+      // autoCropBlackBars (on by default): the per-source detection runs in the background (T47 point 2); until it's
+      // done, a new clip is born as before (the whole frame) — so retry "n" (undoing a premature one) until it isn't.
+      await expect.poll(async () => {
+        await pressShortcut(page, 'n');
+        const text = (await label.textContent()) ?? '';
+        if (text.includes('Max 1280×720')) return true;
+        await pressShortcut(page, 'Control+z');
+        return false;
+      }, { timeout: 20_000, intervals: [400] }).toBe(true);
+      await expect(clipRows(page)).toHaveCount(1);
+      await screenshot(page, '18a-clip-without-bars');
+
+      // turn autoCropBlackBars off: a new clip is now born with the bars
+      await textButton(page, 'Settings').click();
+      const dialog = page.getByTestId('mix-settings');
+      await expect(dialog).toBeVisible();
+      await page.getByTestId('auto-crop-black-bars').click();
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(2);
+      await expect(label).toContainText('Max 1280×960');
+
+      // "Remove black bars" (A7 point 1): analyzes this clip's own range and cuts the max to the picture found
+      await page.getByTestId('remove-black-bars').click();
+      await waitIdle(page);
+      await expect(label).toContainText('Max 1280×720');
+      await screenshot(page, '18b-remove-black-bars-button');
+
+      // nothing left to remove: a warning toast, the max unchanged
+      await page.getByTestId('remove-black-bars').click();
+      await waitIdle(page);
+      await expect(page.locator('.swal2-toast')).toContainText('No black bars found in this clip');
+      await expect(label).toContainText('Max 1280×720');
+
       expect(ctx.consoleErrors).toEqual([]);
     } finally {
       await ctx.close();

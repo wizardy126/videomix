@@ -68,8 +68,8 @@ describe('getNextClipColor', () => {
 });
 
 describe('createClip', () => {
-  test('whole (even) frame as max, no min, audio defaults', () => {
-    expect(createClip({ id: 'c', sourceId: 's', name: 'n', color: 2, start: 1, end: 3, frameSize: { width: 1081, height: 720 } })).toEqual({
+  test('the given max, no min, audio defaults', () => {
+    expect(createClip({ id: 'c', sourceId: 's', name: 'n', color: 2, start: 1, end: 3, maxRect: { x: 0, y: 0, width: 1080, height: 720 } })).toEqual({
       id: 'c', sourceId: 's', name: 'n', color: 2, start: 1, end: 3, maxRect: { x: 0, y: 0, width: 1080, height: 720 }, muted: false, gainDb: 0,
     });
   });

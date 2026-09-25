@@ -19,7 +19,7 @@ import RectOverlayToolbar from './RectOverlayToolbar';
  * E9 (T38d): a turned clip's rects live in the turned frame; the parent turns the player (useMixPlayerTurn) and the
  * overlay works on the turned picture.
  */
-function ClipRectEditor({ videoSize, cssRotation, clip, color, aspectLock, fitLayout, onAspectLockChange, onChange, onCommit, onEdit, onRotate }: {
+function ClipRectEditor({ videoSize, cssRotation, clip, color, aspectLock, fitLayout, onAspectLockChange, onChange, onCommit, onEdit, onRotate, onRemoveBlackBars }: {
   /** Display size of the video, unturned (useMixVideoSize). */
   videoSize: Size | undefined,
   cssRotation: number | undefined,
@@ -36,6 +36,8 @@ function ClipRectEditor({ videoSize, cssRotation, clip, color, aspectLock, fitLa
   onEdit: (rects: ClipRects) => void,
   /** E9: turn the clip by `delta` degrees (clockwise). */
   onRotate: (delta: number) => void,
+  /** A7 (T47): "Remove black bars" (useBlackBars's userRemoveBlackBars, already bound to this clip). */
+  onRemoveBlackBars: () => void,
 }) {
   const { t } = useTranslation();
   const { magnet, toggleMagnet } = useFitMagnet();
@@ -81,7 +83,7 @@ function ClipRectEditor({ videoSize, cssRotation, clip, color, aspectLock, fitLa
     <>
       <RectOverlay maxRect={clip.maxRect} minRect={clip.minRect} videoSize={frameSize} color={color} aspectLock={aspectLock} cssRotation={cssRotation} clipRotation={rotation} fits={fits} fitLayout={fitLayout} magnet={magnet} onChange={onChange} onCommit={onCommit} />
       <div style={{ position: 'absolute', top: '.5em', left: '50%', transform: 'translateX(-50%)', width: 'max-content', maxWidth: 'calc(100% - 1em)' }}>
-        <RectOverlayToolbar aspect={aspectLock} hasMin={clip.minRect != null} rotation={rotation} onAspectChange={handleAspectChange} onAddMin={handleAddMin} onClearMin={handleClearMin} onFillFrame={handleFillFrame} onRotate={onRotate} magnet={magnet} onToggleMagnet={toggleMagnet} onFitTo={handleFitTo} />
+        <RectOverlayToolbar aspect={aspectLock} hasMin={clip.minRect != null} rotation={rotation} onAspectChange={handleAspectChange} onAddMin={handleAddMin} onClearMin={handleClearMin} onFillFrame={handleFillFrame} onRotate={onRotate} magnet={magnet} onToggleMagnet={toggleMagnet} onFitTo={handleFitTo} onRemoveBlackBars={onRemoveBlackBars} />
       </div>
     </>
   );

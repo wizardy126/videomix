@@ -203,12 +203,22 @@ export default function useMixProject() {
     dispatch({ type: 'updateOverlay', overlayId, patch: kind === 'font' ? { font: file } : file });
   }, [dispatch]);
 
+  // The project being written by a save in progress: a cache update that lands during the write must reach it too,
+  // or the save would mark a stale project as saved and leave the project dirty (T47's background detection)
+  const savingProjectRef = useRef<MixProject>(undefined);
+
+  /** Derived-data update (caches): applied to every snapshot and to the saved project, without an undo step or dirty. */
+  const applyCacheUpdate = useCallback((update: (p: MixProject) => MixProject) => {
+    setHistory((h) => history.applyToAll(h, update));
+    setSavedProject(update(savedProjectRef.current));
+    if (savingProjectRef.current != null) savingProjectRef.current = update(savingProjectRef.current);
+  }, [setHistory, setSavedProject]);
+
   /** Merge measurements into the cache. Not an undo step and doesn't make the project dirty (it's recomputable). */
   const setLoudnessCache = useCallback((entries: Record<string, LoudnessMeasurement>) => {
     const update = history.memoizeByRef((p: MixProject) => mixProjectReducer(p, { type: 'setLoudnessCache', loudnessCache: { ...p.loudnessCache, ...entries } }));
-    setHistory((h) => history.applyToAll(h, update));
-    setSavedProject(update(savedProjectRef.current));
-  }, [setHistory, setSavedProject]);
+    applyCacheUpdate(update);
+  }, [applyCacheUpdate]);
 
   /**
    * Refresh the informative cache of a source (size, duration), e.g. from the probe done when it's activated (T05).
@@ -221,9 +231,8 @@ export default function useMixProject() {
       if (source == null) return p;
       return mixProjectReducer(p, { type: 'relinkSource', sourceId, source: { path: source.path, absolutePath: source.absolutePath, ...definedMeta } });
     });
-    setHistory((h) => history.applyToAll(h, update));
-    setSavedProject(update(savedProjectRef.current));
-  }, [setHistory, setSavedProject]);
+    applyCacheUpdate(update);
+  }, [applyCacheUpdate]);
 
   /**
    * A7 (T44): cache (or clear, `undefined`) the black bars detection of a source. Like the loudness cache: not an undo
@@ -231,9 +240,8 @@ export default function useMixProject() {
    */
   const setSourceBlackBars = useCallback((sourceId: string, blackBars: BlackBarsDetection | undefined) => {
     const update = history.memoizeByRef((p: MixProject) => mixProjectReducer(p, { type: 'setSourceBlackBars', sourceId, blackBars }));
-    setHistory((h) => history.applyToAll(h, update));
-    setSavedProject(update(savedProjectRef.current));
-  }, [setHistory, setSavedProject]);
+    applyCacheUpdate(update);
+  }, [applyCacheUpdate]);
 
   // Recovery autosave: one file per session, written while dirty, removed when clean.
   // Operations are chained so a slow write can't land after a later delete.
@@ -274,8 +282,13 @@ export default function useMixProject() {
   const saveTo = useCallback(async (filePath: string) => {
     setHistory((h) => history.commitTransient(h));
     const toSave = historyRef.current.present;
-    await saveMixProject(nodeDeps, filePath, toSave);
-    setSavedProject(toSave);
+    savingProjectRef.current = toSave;
+    try {
+      await saveMixProject(nodeDeps, filePath, toSave);
+      setSavedProject(savingProjectRef.current);
+    } finally {
+      savingProjectRef.current = undefined;
+    }
     setProjectPath(filePath);
     await clearRecovery();
   }, [clearRecovery, setHistory, setProjectPath, setSavedProject]);

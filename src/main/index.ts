@@ -43,6 +43,7 @@ import { hasDisabledNetworking, setDisableNetworking } from './networking.js';
 import { measureLoudness } from './videomix/loudness.js';
 import { detectEncoders } from './videomix/encoders.js';
 import { captureThumbnail } from './videomix/thumbnails.js';
+import { detectBlackBars } from './videomix/blackBars.js';
 
 
 electronUnhandled({ showDialog: true, logger: (err) => logger.error('electron-unhandled', err) });
@@ -482,7 +483,7 @@ const remoteApiLegacy = {
   lossyMode,
   pathToFileURL,
   hasDisabledNetworking,
-  videomix: { measureLoudness, detectEncoders, captureThumbnail },
+  videomix: { measureLoudness, detectEncoders, captureThumbnail, detectBlackBars },
 };
 
 export type RemoteApiLegacy = typeof remoteApiLegacy;

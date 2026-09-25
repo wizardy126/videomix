@@ -175,6 +175,24 @@ await generate('v-1080x1920-12s.mp4', [
   '-c:a', 'aac',
 ]);
 
+// A7 (T47): sources with black bars, for cropdetect. The timer overlay is drawn on the content *before* padding, so
+// the bars stay pure black (cropdetect would otherwise "see" the overlay and report a smaller bar).
+await generate('h-bars-1280x960-6s.mp4', [
+  '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30:duration=6',
+  '-f', 'lavfi', '-i', 'sine=frequency=600:duration=6',
+  '-vf', `${withTimeOverlay('null', hasDrawtext)},pad=1280:960:0:120:color=black`,
+  '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+  '-c:a', 'aac',
+]);
+
+await generate('v-bars-960x1280-6s.mp4', [
+  '-f', 'lavfi', '-i', 'testsrc2=size=720x1280:rate=30:duration=6',
+  '-f', 'lavfi', '-i', 'sine=frequency=610:duration=6',
+  '-vf', `${withTimeOverlay('null', hasDrawtext)},pad=960:1280:120:0:color=black`,
+  '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+  '-c:a', 'aac',
+]);
+
 await generateRotated('v-rotated-9s.mp4', [
   '-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=30:duration=9',
   '-f', 'lavfi', '-i', 'sine=frequency=550:duration=9',

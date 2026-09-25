@@ -32,8 +32,8 @@ const newSegment = (segId: string, start: number, end: number): StateSegment => 
 const clips = [makeClip('1', { color: 0 }), makeClip('x', { sourceId: 's2', name: 'city #1', color: 1 }), makeClip('2', { start: 6, end: 9, color: 2 })];
 const sourceClips = clips.filter((c) => c.sourceId === 's1');
 
-const step = (segments: StateSegment[], { segmentsChanged = true, sourceLoaded = true, projectClips = clips } = {}) => (
-  getSyncStep({ segments, segmentsChanged, sourceLoaded, source, clips: projectClips, frameSize, paletteSize })
+const step = (segments: StateSegment[], { segmentsChanged = true, sourceLoaded = true, projectClips = clips, autoCropBlackBars = false } = {}) => (
+  getSyncStep({ segments, segmentsChanged, sourceLoaded, source, clips: projectClips, frameSize, autoCropBlackBars, paletteSize })
 );
 
 function apply(project: MixProject, actions: MixProjectAction[]) {
@@ -119,18 +119,18 @@ describe('timeline → project', () => {
   });
 
   test('setting the end of a marker turns it into a clip with the same id', () => {
-    const actions = getClipActionsFromSegments({ segments: [...inSync(), newSegment('m', 3, 4)], source, clips, frameSize, paletteSize });
+    const actions = getClipActionsFromSegments({ segments: [...inSync(), newSegment('m', 3, 4)], source, clips, frameSize, autoCropBlackBars: false, paletteSize });
     expect(actions).toMatchObject([{ type: 'addClip', clip: { id: 'm', start: 3, end: 4 } }]);
   });
 
   test('several new segments get consecutive names and colors; a named segment keeps its name', () => {
-    const actions = getClipActionsFromSegments({ segments: [newSegment('a', 0, 1), { ...newSegment('b', 1, 2), name: 'Named' }, newSegment('c', 2, 3)], source, clips: [], frameSize, paletteSize });
+    const actions = getClipActionsFromSegments({ segments: [newSegment('a', 0, 1), { ...newSegment('b', 1, 2), name: 'Named' }, newSegment('c', 2, 3)], source, clips: [], frameSize, autoCropBlackBars: false, paletteSize });
     expect(actions.map((a) => (a.type === 'addClip' ? [a.clip.name, a.clip.color] : undefined))).toEqual([['beach #1', 0], ['Named', 1], ['beach #2', 2]]);
   });
 
   test('LosslessCut split (two new segments replace one): new clips with unique names', () => {
     const [, second] = inSync();
-    const actions = getClipActionsFromSegments({ segments: [newSegment('a', 1, 3), newSegment('b', 3, 5), second!], source, clips, frameSize, paletteSize });
+    const actions = getClipActionsFromSegments({ segments: [newSegment('a', 1, 3), newSegment('b', 3, 5), second!], source, clips, frameSize, autoCropBlackBars: false, paletteSize });
     expect(actions.map((a) => a.type)).toEqual(['removeClip', 'addClip', 'addClip']);
     expect(actions.flatMap((a) => (a.type === 'addClip' ? [a.clip.name] : []))).toEqual(['beach #3', 'beach #4']);
   });
@@ -140,7 +140,7 @@ describe('timeline → project', () => {
   // clip for it without touching the clip it overlaps (01-requisitos §11 E6, ADR-002).
   test('a new segment that overlaps an existing clip becomes its own clip; the overlapped clip is untouched', () => {
     // clip '1' is start:1, end:5; this marker was added at 2 (inside it) and closed at 4 (still inside it)
-    const actions = getClipActionsFromSegments({ segments: [...inSync(), newSegment('n', 2, 4)], source, clips, frameSize, paletteSize });
+    const actions = getClipActionsFromSegments({ segments: [...inSync(), newSegment('n', 2, 4)], source, clips, frameSize, autoCropBlackBars: false, paletteSize });
     expect(actions).toEqual([{
       type: 'addClip',
       clip: { id: 'n', sourceId: 's1', name: 'beach #3', color: 3, start: 2, end: 4, maxRect: { x: 0, y: 0, width: 1920, height: 1080 }, muted: false, gainDb: 0 },
@@ -150,12 +150,22 @@ describe('timeline → project', () => {
   });
 
   test('without the frame size (no video) new segments are not added', () => {
-    expect(getClipActionsFromSegments({ segments: [newSegment('n', 1, 2)], source, clips: [], frameSize: undefined, paletteSize })).toEqual([]);
+    expect(getClipActionsFromSegments({ segments: [newSegment('n', 1, 2)], source, clips: [], frameSize: undefined, autoCropBlackBars: false, paletteSize })).toEqual([]);
+  });
+
+  // A7 (T47): new clips of a source use its cached black bars detection with autoCropBlackBars, like createClip
+  test('autoCropBlackBars (A7): a new segment gets the source\'s picture rect, not the whole frame', () => {
+    const letterboxSource = { ...source, width: 1920, height: 1080, blackBars: { rect: { x: 0, y: 140, width: 1920, height: 800 }, frame: frameSize, file: { size: 1, mtimeMs: 1 } } };
+    const cropped = getClipActionsFromSegments({ segments: [newSegment('n', 1, 2)], source: letterboxSource, clips: [], frameSize, autoCropBlackBars: true, paletteSize });
+    expect(cropped).toMatchObject([{ type: 'addClip', clip: { maxRect: { x: 0, y: 140, width: 1920, height: 800 } } }]);
+    // off: the whole frame, even with a cached detection
+    const uncropped = getClipActionsFromSegments({ segments: [newSegment('n', 1, 2)], source: letterboxSource, clips: [], frameSize, autoCropBlackBars: false, paletteSize });
+    expect(uncropped).toMatchObject([{ type: 'addClip', clip: { maxRect: { x: 0, y: 0, width: 1920, height: 1080 } } }]);
   });
 
   test("the placeholder segment and other sources' clips are ignored", () => {
     const placeholder: StateSegment = { ...newSegment('p', 0, 30), initial: true };
-    expect(getClipActionsFromSegments({ segments: [...inSync(), placeholder, newSegment('x', 0, 1)], source, clips, frameSize, paletteSize })).toEqual([]);
+    expect(getClipActionsFromSegments({ segments: [...inSync(), placeholder, newSegment('x', 0, 1)], source, clips, frameSize, autoCropBlackBars: false, paletteSize })).toEqual([]);
   });
 
   test('isTimeOnlyEdit', () => {

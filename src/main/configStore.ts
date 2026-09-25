@@ -117,6 +117,12 @@ const allDefaultKeyBindings: KeyBinding[] = [
   { keys: 'KeyR', action: 'rotateClipClockwise' },
   { keys: 'ShiftLeft+KeyR', action: 'rotateClipCounterclockwise' },
   { keys: 'AltLeft+KeyR', action: 'rotateClip180' },
+  // A5 (T46): copy/paste a clip's framing. Ctrl/Cmd+Shift+C and Ctrl/Cmd+Shift+V are not used by any other binding or
+  // menu accelerator (plain Ctrl/Cmd+Alt+C is copySegmentsToClipboard).
+  { keys: 'ControlLeft+ShiftLeft+KeyC', action: 'copyClipFraming' },
+  { keys: 'MetaLeft+ShiftLeft+KeyC', action: 'copyClipFraming' },
+  { keys: 'ControlLeft+ShiftLeft+KeyV', action: 'pasteClipFraming' },
+  { keys: 'MetaLeft+ShiftLeft+KeyV', action: 'pasteClipFraming' },
 
   // VideoMix mix. Plain E ('export') also renders in VideoMix mode. Ctrl/Cmd+E, Ctrl/Cmd+P and Ctrl/Cmd+Shift+M are not
   // used by any other binding or menu accelerator (Cmd+M alone is the macOS minimize shortcut, so Shift is added).
