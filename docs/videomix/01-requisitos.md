@@ -206,12 +206,20 @@ Añadido tras la v1. Son capas que se dibujan o suenan **encima del vídeo final
 | B1 | **Bug: fuentes con píxeles no cuadrados (SAR ≠ 1)** | Todo trabaja en **píxeles de visualización**. El tamaño de la fuente se guarda aplicando SAR y rotación, y en ffmpeg el rectángulo se convierte a píxeles codificados en el `crop` (sin reescalar el fotograma). Miniaturas y render coherentes con el editor. |
 | B2 | **Bug: re-vincular una fuente a otra resolución** | Los rectángulos de sus clips se **escalan proporcionalmente**. Si cambia la proporción, además se ajustan al fotograma y se avisa. |
 
-## 12. Fuera de alcance (backlog)
+## 12. Mejoras v4 (decididas con el usuario)
 
-- Keyframes o paneo del rectángulo.
-- Ajustes manuales del plan de montaje.
-- Ducking de la música.
-- Varias pistas de música.
+Además, en M10 (sin ID): **modal de progreso del render** (fase, barra, transcurrido, restante aproximado, Cancelar) y **vídeos convertidos para el reproductor** (html5ify) guardados en la caché del proyecto (`.<nombre>.vmx.cache/converted/`) cuando el proyecto está guardado.
+
+| ID | Mejora | Decisiones |
+|---|---|---|
+| F1 | **Indicador de encaje en fracciones** | Al editar los rectángulos se ve **en tiempo real** en qué fracciones del eje principal de la salida encaja el clip: **1/3, 1/2, 2/3 y completo** (teniendo en cuenta proporción de salida, separación entre columnas y el rango de anchos que dan máx. y mín.; en filas, fracciones del alto). Se muestran como **chips** con tres estados: ✓ encaja; **↔ encaja ampliando** (E7 activo y la fuente tiene material); ✗ no encaja. En los ✗ se indica cuánto falta o sobra en **píxeles de la fuente** ("faltan 12 px", "sobran 8 px"). Se ven **sobre el recorte** y de forma compacta **en la lista de clips**. |
+| F2 | **Imán y "Ajustar a" una fracción** | **Imán** al arrastrar un borde del máx. o del mín.: se engancha al tamaño exacto de 1/3, 1/2 o 2/3. **Desactivado por defecto**; un **toggle** lo activa y sirve de indicador de estado; **mantener Alt** mientras se arrastra invierte el toggle (activa si está desactivado, desactiva si está activo). Botones **"Ajustar a 1/3 / 1/2 / 2/3"** que redimensionan el máx. a esa fracción exacta, centrado en el mín. si lo hay, si no en el centro del máx. actual, dentro del fotograma. |
+| A5 | **Copiar y pegar rectángulos** | Copiar el encuadre de un clip (**máx. + mín. + giro**) y pegarlo en el clip activo o en **todos los seleccionados**. Entre fuentes de otra resolución se **escala proporcionalmente** (como al re-vincular, B2); si cambia la proporción, se ajusta al fotograma y se avisa. No se copian "Ampliar más allá del máx." ni el audio. |
+| A7 | **Sugerencia automática de recorte** | (1) Botón **"Quitar bandas negras"**: analiza el tramo del clip con `cropdetect` y ajusta el máx. a la zona con imagen. (2) **Recorte centrado a fracción**: son los botones "Ajustar a" de F2. (3) **Automático al crear**: se detectan las bandas **una vez por fuente** (en segundo plano, cacheado en el proyecto) y los clips nuevos de esa fuente nacen sin ellas. Ajuste del proyecto para desactivarlo, **activo por defecto**. |
+| A9 | **Keyframes del rectángulo (paneo y zoom)** | Se animan **posición y escala** del máx. y el mín. juntos, **sin cambiar su proporción**, así que el encaje (F1) y el planificador no cambian. Limitado al fotograma de la fuente. Edición con **cronómetro + auto-key**: un botón "Animar" activa los keyframes del clip y, desde entonces, mover el recorte en un instante crea o actualiza el keyframe de ese instante; marcas en la línea de tiempo del clip, keyframe anterior/siguiente y borrar. **Interpolación elegible por keyframe**: suave (ease in-out, por defecto), lineal o mantener (salto seco). Render, previsualización en vivo y miniaturas usan el recorte animado. |
+
+## 13. Fuera de alcance (backlog)
+
 - Notas en los clips.
-- H.265 y encoders por hardware.
 - Resolución libre.
+- Las propuestas aún no elegidas del [catálogo de propuestas](07-propuestas.md).

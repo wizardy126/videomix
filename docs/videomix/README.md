@@ -12,6 +12,7 @@ VideoMix es un fork de [LosslessCut](https://github.com/mifi/lossless-cut) (GPL-
 | [04-diseno.md](04-diseno.md) | Diseño técnico de VideoMix (modelo de datos, UI, algoritmo de montaje, render ffmpeg, audio) |
 | [05-plan.md](05-plan.md) | Hitos y tareas |
 | [06-entorno-desarrollo.md](06-entorno-desarrollo.md) | Puesta en marcha, comandos, ffmpeg y vídeos de prueba |
+| [07-propuestas.md](07-propuestas.md) | Catálogo de propuestas de mejora y su estado |
 | [manual-usuario.md](manual-usuario.md) | Manual de usuario de VideoMix |
 | [execution/](execution/README.md) | Proceso de ejecución y task-docs de cada tarea |
 

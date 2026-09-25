@@ -24,6 +24,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M8 · Mejoras v2** | A1, A2, A4, B1, B2, B5, C1, C2, D1, D2, E3 | T24–T34 |
 | **M9 · Mejoras v3 y correcciones** | E1–E9, B1, B2 | T35–T40 |
 | **M10 · Render y conversiones** | Modal de progreso del render, vídeos convertidos en la caché del proyecto | T41–T43 |
+| **M11 · Mejoras v4** | F1, F2, A5, A7, A9 | T44–T50 |
 
 ## Tareas
 
@@ -78,6 +79,13 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T41 | Modal de progreso del render | M10 | Opus | — | hecha |
 | T42 | Vídeos convertidos en la carpeta de caché del proyecto | M10 | Opus | — | hecha |
 | T43 | Diálogos tapados por la previsualización en vivo; conservar conversiones al borrar caché | M10 | Opus | T41, T42 | hecha |
+| T44 | v4: modelo v5 y lógica pura (encaje, keyframes, bandas negras) | M11 | Opus | — | en curso |
+| T45 | v4: indicador de encaje, imán y "Ajustar a" (F1, F2) | M11 | Opus | T44 | pendiente |
+| T46 | v4: copiar y pegar el encuadre (A5) | M11 | Sonnet | T44 | pendiente |
+| T47 | v4: bandas negras (A7) | M11 | Sonnet | T44 | pendiente |
+| T48 | v4: keyframes en render, previsualización y miniaturas (A9) | M11 | Opus | T44 | pendiente |
+| T49 | v4: edición de keyframes (A9) | M11 | Opus | T44, T45, T48 | pendiente |
+| T50 | v4: i18n, manual, e2e y cierre | M11 | Sonnet | T44–T49 | pendiente |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 
@@ -131,20 +139,22 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 1. T41 ∥ T42.
 2. T43.
 
+## Oleadas de M11
+
+1. T44.
+2. T45 ∥ T48.
+3. T46 ∥ T47.
+4. T49.
+5. T50.
+
 ## Pendientes al integrar en la rama por defecto
 
 - `userManualUrl` en `src/common/constants.ts` apunta a la rama `claude/videomix-analysis-planning-97c8lp`; hay que cambiarla a la rama por defecto.
 
-## Backlog (fuera de v1)
+## Backlog
 
-- Keyframes o paneo del rectángulo.
-- Ajustes manuales del plan de montaje.
-- Ducking de la música.
-- Varias pistas de música.
 - Notas en los clips.
-- H.265 y encoders por hardware.
 - Resolución libre.
-- Miniaturas en la lista de clips y en la vista del plan; zoom horizontal del plan.
-- Selector manual de filas o columnas en salida 1:1.
 - Tope de 500 repeticiones de una pista muy corta en bucle.
-- Borrar el código de LosslessCut que ahora está oculto (batch, export lossless, EDL, `reporting.tsx`…).
+- Borrar el código de LosslessCut que ahora está oculto (batch, export lossless, EDL, `reporting.tsx`…), propuesta E2.
+- Las propuestas sin elegir de [07-propuestas](07-propuestas.md).
