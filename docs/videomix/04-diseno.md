@@ -400,6 +400,10 @@ Decidido en el spike T09: **[ADR-001](decisiones/ADR-001-render.md)**, con las m
   4. `overlay=x=…:y=…:eval=frame` sobre una base fija del ancho máximo de la columna en el bloque.
 
   La ventana visible es `[0, w(t))` de la capa.
+- **Clip con keyframes de encuadre** (A9, T48): decidido en **[ADR-003](decisiones/ADR-003-keyframes-render.md)**. El recorte de cada fotograma es el estático de los rectángulos base movido y escalado con el keyframe (`animatedCrop.getAnimatedCellCrop`, sub-píxel, compartido con la previsualización).
+  - En una columna de ancho constante: `crop` fijo de la unión → `perspective` (`sense=source`, `eval=frame`, esquinas por fotograma como suma de escalones sobre `in`, que empieza en 1) → el `scale` a la celda del camino estático. Si el recorte no cambia en el bloque, el camino estático con ese encuadre a px pares.
+  - Durante un re-layout: la capa de columna con el recorte animado de cada fotograma.
+  - Sin keyframes, el grafo es exactamente el de antes.
 - **Sustitución en columna**: `xfade` entre capas del mismo tamaño, encadenadas con su `offset`.
   - En bloques estables es exacto con cualquier tipo.
   - Durante un re-layout, los tipos con geometría (`wipe*`, `slide*`, `smooth*`, `circleopen`) se calculan sobre el ancho máximo de la capa: una pequeña desviación aceptada.
@@ -783,6 +787,7 @@ interface BlackBarsDetection {
 - **Curvas**: entre dos keyframes todos los bordes se mueven con el mismo peso `w = ease(u)`, `u = (t − t₀)/(t₁ − t₀)`, según la interpolación del primero: `smooth` = `u²·(3 − 2u)` (smoothstep), `linear` = `u`, `hold` = 0 hasta el siguiente. `centro = c₀ + w·(c₁ − c₀)`, `escala = s₀ + w·(s₁ − s₀)`. Antes del primero y después del último se mantienen los extremos (los que quedan fuera del tramo del clip se conservan).
 - **Dentro del fotograma**: `clampTransform` limita primero la escala (el máx. cabe) y luego el centro. `getClipRectsAt(clip, t, fotograma)` devuelve los rectángulos pares y dentro del fotograma; sin keyframes, exactamente los guardados.
 - **Transformaciones**: `rotateKeyframes` (E9), `rescaleKeyframes` (B2, A5), `shiftKeyframes` (A5).
+- **Render, previsualización y miniaturas** (T48, [ADR-003](decisiones/ADR-003-keyframes-render.md)): `getAnimatedCellCrop({ clip, aspect, time, frame, extendedMaxRect })` (`animatedCrop.ts`) da el recorte de una celda en un instante de la fuente: el de `getExtendedCropForAspect` sobre los rectángulos base, movido y escalado con la transformación limitada al fotograma, en números reales; E7 amplía `extra · escala` alrededor del máx. animado, dentro del fotograma. Lo usan el render (por fotograma: `perspective` en columnas estables, capa de columna en re-layouts) y la previsualización en vivo (tiempo real de la fuente). Las miniaturas muestran el máx. animado en `clip.start` (`getThumbnailMaxRect`, pares).
 
 ### 10.4 Copiar y pegar el encuadre (A5; `clipFraming.ts`)
 

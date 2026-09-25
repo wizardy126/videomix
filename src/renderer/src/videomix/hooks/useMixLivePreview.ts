@@ -114,7 +114,7 @@ export default function useMixLivePreview({ mixProject, mixOverlays, enabled, vo
     if (!enabled || plan == null) return undefined;
     const tl = getRenderTimeline(plan, { fps: settings.fps, gap: settings.gap.width, transitionDuration: settings.transition.duration });
     return {
-      drawModel: createPreviewDrawModel(tl, clips, settings),
+      drawModel: createPreviewDrawModel(tl, clips, settings, sources),
       // the exact duration of the render (frames / fps)
       audioModel: buildPreviewAudioModel({ plan, clips, settings, duration: tl.totalFrames / settings.fps, loudness, musicDurations, overlays: overlays.flatMap((o) => (o.type === 'sound' ? [o] : [])), overlayTimes: resolved }),
       clips: new Map(clips.map((clip) => [clip.id, clip])),

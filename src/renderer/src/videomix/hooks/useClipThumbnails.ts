@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getClipRotation } from '../clipRotation';
-import { ThumbnailQueue, THUMBNAIL_DIR_NAME, captureThumbnail, getThumbnailCacheKey, getThumbnailCrop, getThumbnailFileName } from '../thumbnails';
+import { ThumbnailQueue, THUMBNAIL_DIR_NAME, captureThumbnail, getThumbnailCacheKey, getThumbnailCrop, getThumbnailFileName, getThumbnailMaxRect } from '../thumbnails';
 import type { MixClip, MixSource } from '../types';
 
 const path = window.require('node:path');
@@ -31,7 +31,8 @@ export interface UseClipThumbnails {
 }
 
 /**
- * Thumbnails of the project's clips (A2, T31): the frame at each clip's `start`, cropped to its `maxRect`, cached as
+ * Thumbnails of the project's clips (A2, T31): the frame at each clip's `start`, cropped to its `maxRect` (A9: to its
+ * animated framing at `start`, `getThumbnailMaxRect`), cached as
  * JPEGs in `userData/videomix-thumbs/` and generated on demand by main's ffmpeg (`captureThumbnail`). Used by
  * `ClipList`'s rows and the Mix view's blocks (`MixPlanView`); App.tsx calls this hook once and hands both the same
  * map, so a clip's thumbnail is generated only once even though both can be visible together.
@@ -43,7 +44,7 @@ export interface UseClipThumbnails {
  * - Cache files no longer referenced by any current clip are removed after a debounced cleanup pass.
  */
 export default function useClipThumbnails({ clips, sources, enabled = true }: {
-  clips: Pick<MixClip, 'id' | 'sourceId' | 'start' | 'maxRect' | 'rotation'>[],
+  clips: Pick<MixClip, 'id' | 'sourceId' | 'start' | 'maxRect' | 'minRect' | 'keyframes' | 'rotation'>[],
   sources: Pick<MixSource, 'id' | 'absolutePath' | 'width' | 'height' | 'sar'>[],
   enabled?: boolean | undefined,
 }): UseClipThumbnails {
@@ -102,7 +103,9 @@ export default function useClipThumbnails({ clips, sources, enabled = true }: {
       if (source == null) return;
       // the SAR (B1) changes the crop in coded pixels, e.g. when the meta of a source cached before T35 is refreshed
       const rotation = getClipRotation(clip);
-      const spec = `${source.absolutePath}\n${clip.start}\n${clip.maxRect.x},${clip.maxRect.y},${clip.maxRect.width},${clip.maxRect.height}\n${source.sar?.num}:${source.sar?.den}\n${rotation}`;
+      // A9 (T48): an animated clip shows its framing at its start
+      const maxRect = getThumbnailMaxRect(clip, source);
+      const spec = `${source.absolutePath}\n${clip.start}\n${maxRect.x},${maxRect.y},${maxRect.width},${maxRect.height}\n${source.sar?.num}:${source.sar?.den}\n${rotation}`;
       if (lastSpecs.get(clip.id) === spec) return; // unrelated change (name, color, gain…): keep the current thumbnail
       lastSpecs.set(clip.id, spec);
 
@@ -113,7 +116,7 @@ export default function useClipThumbnails({ clips, sources, enabled = true }: {
         (async () => {
           try {
             const { mtimeMs, size } = await fs.stat(source.absolutePath);
-            const key = await getThumbnailCacheKey({ absolutePath: source.absolutePath, mtimeMs, size, start: clip.start, maxRect: clip.maxRect, sar: source.sar, rotation });
+            const key = await getThumbnailCacheKey({ absolutePath: source.absolutePath, mtimeMs, size, start: clip.start, maxRect, sar: source.sar, rotation });
             activeKeysRef.current.add(key);
             const outPath = path.join(getCacheDir(), getThumbnailFileName(key));
             if (await pathExists(outPath)) {
@@ -124,7 +127,7 @@ export default function useClipThumbnails({ clips, sources, enabled = true }: {
             queue.enqueue(key, async () => {
               try {
                 await fs.mkdir(getCacheDir(), { recursive: true });
-                await captureThumbnail({ filePath: source.absolutePath, timestamp: clip.start, ...getThumbnailCrop(clip.maxRect, source, rotation), outPath });
+                await captureThumbnail({ filePath: source.absolutePath, timestamp: clip.start, ...getThumbnailCrop(maxRect, source, rotation), outPath });
                 setPaths((prev) => new Map(prev).set(clip.id, outPath));
               } catch (err) {
                 console.warn('captureThumbnail failed', clip.id, err);

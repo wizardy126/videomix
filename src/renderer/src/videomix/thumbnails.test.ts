@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { ThumbnailQueue, getThumbnailCacheKey, getThumbnailCrop, getThumbnailFileName } from './thumbnails';
+import { ThumbnailQueue, getThumbnailCacheKey, getThumbnailCrop, getThumbnailFileName, getThumbnailMaxRect } from './thumbnails';
 import type { Rect } from './types';
 
 const rect: Rect = { x: 0, y: 0, width: 1920, height: 1080 };
@@ -131,5 +131,24 @@ describe('ThumbnailQueue', () => {
     queue.enqueue('a', async () => { throw new Error('boom'); });
     queue.enqueue('b', async () => { calls.push('b'); });
     await vi.waitFor(() => expect(calls).toEqual(['b']));
+  });
+});
+
+describe('getThumbnailMaxRect (A9, T48)', () => {
+  const maxRect = { x: 160, y: 90, width: 1600, height: 900 };
+  const source = { width: 1920, height: 1080 };
+
+  test('without keyframes: the max rect itself', () => {
+    const clip = { start: 2, maxRect, minRect: undefined };
+    expect(getThumbnailMaxRect(clip, source)).toBe(maxRect);
+  });
+
+  test('an animated clip: its framing at its start, inside the frame', () => {
+    const keyframes = [{ time: 1, centerX: 960, centerY: 540, scale: 1, interpolation: 'linear' as const }, { time: 3, centerX: 1100, centerY: 500, scale: 0.5 }];
+    // source 2 s: half way, centre 1030,520 at 0.75 → 1200x676 (even), from 430,182
+    expect(getThumbnailMaxRect({ start: 2, maxRect, minRect: undefined, keyframes }, source)).toEqual({ x: 430, y: 182, width: 1200, height: 676 });
+    // turned clips: in the turned frame (1080x1920)
+    const turned = getThumbnailMaxRect({ start: 0, maxRect: { x: 0, y: 0, width: 900, height: 1600 }, minRect: undefined, rotation: 90, keyframes: [{ time: 0, centerX: 1000, centerY: 1800, scale: 1 }] }, source);
+    expect(turned).toEqual({ x: 180, y: 320, width: 900, height: 1600 });
   });
 });

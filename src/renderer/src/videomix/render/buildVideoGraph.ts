@@ -1,7 +1,10 @@
 import invariant from 'tiny-invariant';
 
-import { getClipRotation, getRotationFilter, getUnrotatedCrop } from '../clipRotation';
+import { getAnimatedCellCrop } from '../animatedCrop';
+import { isClipAnimated } from '../clipKeyframes';
+import { getClipRotation, getRotationFilter, getUnrotatedCrop, rotateRect, rotateSize } from '../clipRotation';
 import { getExtendedCropForAspect } from '../geometry';
+import type { CellCrop, CropFit } from '../geometry';
 import { getPlanAxis, getPlanAxisLengths } from '../planner/types';
 import { isSquareSar, toCodedRect } from '../sampleAspect';
 import type { MixClip, MixSettings, MixSource, Rect } from '../types';
@@ -18,12 +21,14 @@ import type { VideoGraphOverlays } from './overlayFilters';
 // base), anchored left: its visible window is [0, w(t)) and the next element to its right hides the rest.
 // Along the plan's main axis (T29): for rows the same holds with y/height, i.e. layers span the whole output width, are
 // anchored at the top and composed top to bottom, and the gap bars are horizontal.
+// A clip with keyframes (A9, ADR-003) in a column of constant width crops the union of its animated crops once and maps
+// the sub-pixel crop of every frame with `perspective`; during a re-layout it goes through the column layer.
 
 export { formatNumber, toFfmpegColor } from './ffmpegArgs';
 
 export type VideoGraphSettings = Pick<MixSettings, 'fps' | 'gap' | 'transition' | 'fadeInOut' | 'fill'>;
 
-export type RenderClip = Pick<MixClip, 'id' | 'sourceId' | 'start' | 'maxRect' | 'minRect'> & Partial<Pick<MixClip, 'rotation'>>;
+export type RenderClip = Pick<MixClip, 'id' | 'sourceId' | 'start' | 'maxRect' | 'minRect'> & Partial<Pick<MixClip, 'rotation' | 'keyframes'>>;
 
 export interface VideoGraph {
   /** Per input: its input options followed by `-i <path>`, in input index order. */
@@ -41,9 +46,16 @@ const SEEK_PREROLL = 0.1;
 /** Fills narrower than this use a plain colour: a blurred cover of a few px wide is pointless and fragile. */
 const MIN_BLUR_FILL_WIDTH = 16;
 
+/**
+ * A9 (ADR-003): an animated crop is pre-scaled before the perspective when the source has at least this many times the
+ * resolution the most zoomed frame needs (e.g. 4K into a column): the perspective's cost follows the size it works on.
+ */
+const PERSPECTIVE_PRESCALE_MAX = 0.5;
+
 const roundEven = (v: number) => 2 * Math.round(v / 2) + 0;
 const ceilEven = (v: number) => 2 * Math.ceil(v / 2 - 1e-6) + 0;
 const floorEven = (v: number) => 2 * Math.floor(v / 2 + 1e-6) + 0;
+const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
 /**
  * Piecewise-constant expression of the frame values `values[m]` (frame m shown at t = m / fps), written as a flat sum
@@ -76,6 +88,46 @@ export function blurCover(w: number, h: number, inputAspect?: number | undefined
     : (inputAspect > sw / sh ? `${Math.max(sw, ceilEven(sh * inputAspect))}:${sh}` : `${sw}:${Math.max(sh, ceilEven(sw / inputAspect))}`);
   return `scale=${cover}:flags=fast_bilinear,crop=${sw}:${sh}${blur},scale=${w}:${h}:flags=bilinear,setsar=1`;
 }
+
+/**
+ * {@link stepExpr} over the frame number instead of the time, for filters without `t` (perspective: `in`, which counts
+ * from 1). Values in px, rounded to 1/1000.
+ */
+export function frameStepExpr(values: number[], variable = 'in', first = 1) {
+  invariant(values.length > 0, 'frameStepExpr: no values');
+  const rounded = values.map((v) => Math.round(v * 1000) / 1000 + 0);
+  const terms = [formatNumber(rounded[0]!)];
+  for (let m = 1; m < rounded.length; m += 1) {
+    const d = Math.round((rounded[m]! - rounded[m - 1]!) * 1000) / 1000;
+    if (d !== 0) terms.push(`${d > 0 ? '+' : ''}${formatNumber(d)}*gte(${variable},${m + first})`);
+  }
+  return terms.length > 1 ? `'${terms.join('')}'` : terms[0]!;
+}
+
+/** Union of real-valued rects, grown to even px (kept inside `bounds`, if given): what an animated layer crops once. */
+function getEvenUnion(rects: Rect[], bounds: { width: number, height: number } | undefined): Rect {
+  const x0 = Math.max(0, floorEven(Math.min(...rects.map((r) => r.x))));
+  const y0 = Math.max(0, floorEven(Math.min(...rects.map((r) => r.y))));
+  const x1 = Math.min(ceilEven(Math.max(...rects.map((r) => r.x + r.width))), bounds != null ? floorEven(bounds.width) : Infinity);
+  const y1 = Math.min(ceilEven(Math.max(...rects.map((r) => r.y + r.height))), bounds != null ? floorEven(bounds.height) : Infinity);
+  return { x: x0, y: y0, width: Math.max(2, x1 - x0), height: Math.max(2, y1 - y0) };
+}
+
+/** A real-valued crop as even px around the same centre (inside `bounds`, if given); even crops stay as they are. */
+function snapCropEven(r: Rect, bounds: { width: number, height: number } | undefined): Rect {
+  const fit = (start: number, length: number, limit: number | undefined) => {
+    const size = Math.max(2, Math.min(roundEven(length), limit != null ? floorEven(limit) : Infinity));
+    const s = roundEven(start + length / 2 - size / 2);
+    return [limit != null ? clamp(s, 0, floorEven(limit) - size) : Math.max(0, s), size] as const;
+  };
+  const [x, width] = fit(r.x, r.width, bounds?.width);
+  const [y, height] = fit(r.y, r.height, bounds?.height);
+  return { x, y, width, height };
+}
+
+const sameCrop = (a: CellCrop, b: CellCrop) => a.fit === b.fit
+  && Math.abs(a.crop.x - b.crop.x) < 1e-9 && Math.abs(a.crop.y - b.crop.y) < 1e-9
+  && Math.abs(a.crop.width - b.crop.width) < 1e-9 && Math.abs(a.crop.height - b.crop.height) < 1e-9;
 
 const cropFilter = (r: Rect) => `crop=${r.width}:${r.height}:${r.x}:${r.y}`;
 
@@ -286,39 +338,104 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, sourceFrames
     const blurCoverOf = (w: number, h: number, r: Rect) => blurCover(w, h, isSquareSar(sar) ? undefined : r.width / r.height);
     // E7 (T38b): the crop may grow beyond the max into the rect the planner extended it to (same function as the preview)
     const cropFor = (aspect: number) => getExtendedCropForAspect(clip.maxRect, clip.minRect, p.placement.extendedMaxRect, aspect);
+    // A9 (T48): an animated clip's crop follows its keyframes, per frame of the chunk (real-valued, ADR-003)
+    const animated = isClipAnimated(clip);
+    const clipFrame = frameSize != null ? rotateSize(frameSize, rotation) : undefined;
+    const cropAt = (n: number, aspect: number): CellCrop => (animated
+      ? getAnimatedCellCrop({ clip, aspect, time: seek + n / fps, frame: clipFrame, extendedMaxRect: p.placement.extendedMaxRect })
+      : cropFor(aspect));
+    const layer = { label: out, start: pf0 - f0, end: pf1 - f0 };
+
+    /** Size of the picture in a cell of w×h: all of it, or (pillarbox/letterbox) one axis, centred. */
+    const pictureSize = (crop: Rect, fit: CropFit, w: number, h: number) => ({
+      fw: fit === 'pillarbox' ? Math.min(w, roundEven((crop.width * h) / crop.height)) : w,
+      fh: fit === 'pillarbox' ? h : Math.min(h, roundEven((crop.height * w) / crop.width)),
+    });
+    /**
+     * The chain `picture` (the clip's picture of display aspect `aspect`) into the cell w×h: scaled to it, or
+     * (pillarbox/letterbox) scaled to `pictureSize` and centred on a background, its own blurred cover or the fill colour.
+     */
+    const pushCell = (picture: string, crop: Rect, fit: CropFit, w: number, h: number, blurAspect: number | undefined) => {
+      if (fit === 'fill') {
+        filters.push(`${picture},scale=${w}:${h}:flags=bicubic,setsar=1[${out}]`);
+        return;
+      }
+      const { fw, fh } = pictureSize(crop, fit, w, h);
+      const [fg, bg] = [newLabel('fg'), newLabel('bg')];
+      if (settings.fill.mode === 'blur') {
+        const [a, b] = [newLabel('s'), newLabel('s')];
+        filters.push(`${picture},split[${a}][${b}]`, `[${a}]scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `[${b}]${blurCover(w, h, blurAspect)}[${bg}]`);
+      } else {
+        filters.push(`${picture},scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `${colorSource(fillColor, w, h, nf)}[${bg}]`);
+      }
+      filters.push(`[${bg}][${fg}]overlay=x=${(w - fw) / 2}:y=${(h - fh) / 2}:shortest=1[${out}]`);
+    };
 
     if (!element.varying) {
       // the cell in output px (a column: layerWidth × H; a row: W × layerWidth)
       const { w, h } = layerSize(element.layerWidth);
-      const { crop, fit } = cropFor(w / h);
-      if (fit === 'fill') {
-        filters.push(`${head},${cropFilterOf(crop)},scale=${w}:${h}:flags=bicubic,setsar=1[${out}]`);
-        return { label: out, start: pf0 - f0, end: pf1 - f0 };
+      if (!animated) {
+        const { crop, fit } = cropFor(w / h);
+        pushCell(`${head},${cropFilterOf(crop)}`, crop, fit, w, h, isSquareSar(sar) ? undefined : crop.width / crop.height);
+        return layer;
       }
-      // pillarbox: full height, centred; letterbox: full width, centred. Background: the clip's own blurred cover.
-      const fw = fit === 'pillarbox' ? Math.min(w, roundEven((crop.width * h) / crop.height)) : w;
-      const fh = fit === 'pillarbox' ? h : Math.min(h, roundEven((crop.height * w) / crop.width));
-      const [fg, bg] = [newLabel('fg'), newLabel('bg')];
-      if (settings.fill.mode === 'blur') {
-        const [a, b] = [newLabel('s'), newLabel('s')];
-        filters.push(`${head},${cropFilterOf(crop)},split[${a}][${b}]`, `[${a}]scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `[${b}]${blurCoverOf(w, h, crop)}[${bg}]`);
-      } else {
-        filters.push(`${head},${cropFilterOf(crop)},scale=${fw}:${fh}:flags=bicubic,setsar=1[${fg}]`, `${colorSource(fillColor, w, h, nf)}[${bg}]`);
+      const per = Array.from({ length: nf }, (_v, n) => cropAt(n, w / h));
+      const first = per[0]!;
+      if (per.every((q) => sameCrop(q, first))) {
+        // still during the chunk (holding a keyframe, or before/after them): a static crop, to even px
+        const crop = snapCropEven(first.crop, clipFrame);
+        pushCell(`${head},${cropFilterOf(crop)}`, crop, first.fit, w, h, isSquareSar(sar) ? undefined : crop.width / crop.height);
+        return layer;
       }
-      filters.push(`[${bg}][${fg}]overlay=x=${(w - fw) / 2}:y=${(h - fh) / 2}:shortest=1[${out}]`);
-      return { label: out, start: pf0 - f0, end: pf1 - f0 };
+      const aspect = first.crop.width / first.crop.height;
+      if (per.every((q) => q.fit === first.fit && Math.abs((q.crop.width / q.crop.height) / aspect - 1) < 1e-9)) {
+        // Pan and zoom with a fixed proportion (ADR-003): crop the union U once, then perspective (sense=source,
+        // eval=frame) maps the sub-pixel crop of every frame, as corners inside U, onto a picture of fixed size, which
+        // the static path scales to the cell. Unlike scale+overlay it doesn't round positions and sizes to even px.
+        const crops = per.map((q) => q.crop);
+        const U = getEvenUnion(crops, clipFrame);
+        const unturned = getUnrotatedCrop(U, frameSize, rotation);
+        const coded = toCodedRect(unturned, sar, frameSize);
+        // B1: what the coded crop really shows (its edges are even coded px), in display px of the clip's frame
+        const [fx, fy] = isSquareSar(sar) ? [1, 1] : (sar.num > sar.den ? [sar.num / sar.den, 1] : [1, sar.den / sar.num]);
+        const codedDisplay = { x: coded.x * fx, y: coded.y * fy, width: coded.width * fx, height: coded.height * fy };
+        const shown = rotation !== 0 && frameSize != null ? rotateRect(codedDisplay, frameSize, rotation) : codedDisplay;
+        const quarter = rotation === 90 || rotation === 270;
+        let pw = quarter ? coded.height : coded.width;
+        let ph = quarter ? coded.width : coded.height;
+        const { fw, fh } = pictureSize(first.crop, first.fit, w, h);
+        // picture px per display px; pre-scaled when the most zoomed frame needs much less than the source has
+        const k = Math.min(1, Math.max(...crops.map((c) => Math.max(fw / ((c.width * pw) / shown.width), fh / ((c.height * ph) / shown.height)))));
+        let prescale = '';
+        if (k <= PERSPECTIVE_PRESCALE_MAX) {
+          pw = Math.max(2, ceilEven(pw * k));
+          ph = Math.max(2, ceilEven(ph * k));
+          prescale = `,scale=${pw}:${ph}:flags=bicubic`;
+        }
+        const kx = pw / shown.width;
+        const ky = ph / shown.height;
+        const left = frameStepExpr(crops.map((c) => (c.x - shown.x) * kx));
+        const top = frameStepExpr(crops.map((c) => (c.y - shown.y) * ky));
+        const right = frameStepExpr(crops.map((c) => (c.x + c.width - shown.x) * kx));
+        const bottom = frameStepExpr(crops.map((c) => (c.y + c.height - shown.y) * ky));
+        const perspective = `perspective=x0=${left}:y0=${top}:x1=${right}:y1=${top}:x2=${left}:y2=${bottom}:x3=${right}:y3=${bottom}:interpolation=linear:sense=source:eval=frame`;
+        // the picture is U's shape, not the crop's: the blurred cover is told the crop's aspect
+        pushCell(`${head},${cropFilterOf(U)}${prescale},${perspective}`, first.crop, first.fit, w, h, aspect);
+        return layer;
+      }
+      // the fit changes during the chunk (E7 short of room at the frame edge): the column layer below, which handles it
     }
 
     // Column layer: per frame, the crop C(t) for the window width w(t) and its scale; crop the union U once, scale it
     // per frame (scale eval=frame emits variable-size frames, which overlay accepts) and place it so that C(t) lands
     // on the window [0, w(t)).
-    const ws = element.ws.slice(pf0 - f0, pf1 - f0);
+    const ws = element.varying ? element.ws.slice(pf0 - f0, pf1 - f0) : Array.from({ length: nf }, () => element.layerWidth);
     // a column appearing/disappearing (width → 0) keeps its full height, cropped by the window, instead of letterboxing
     // (a row, its full width)
     const collapsing = collapsingColumns.has(p.placement.column);
-    const per = ws.map((w0) => {
+    const per = ws.map((w0, n) => {
       const { w, h } = layerSize(Math.max(2, w0));
-      const { crop, fit } = cropFor(w / h);
+      const { crop, fit } = cropAt(n, w / h);
       if (fit === 'fill') return { crop, sx: w / crop.width, sy: h / crop.height, ox: 0, oy: 0, covers: true };
       // the window is longer along the main axis than the clip allows (columns: pillarbox; rows: letterbox)
       const mainTooLong = fit === (rows ? 'letterbox' : 'pillarbox');
@@ -329,14 +446,8 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, sourceFrames
       const s = fillCross === rows ? w / crop.width : h / crop.height;
       return { crop, sx: s, sy: s, ox: (w - crop.width * s) / 2, oy: (h - crop.height * s) / 2, covers: !mainTooLong && collapsing };
     });
-    const ux0 = Math.min(...per.map((q) => q.crop.x));
-    const uy0 = Math.min(...per.map((q) => q.crop.y));
-    const U: Rect = {
-      x: ux0,
-      y: uy0,
-      width: Math.max(...per.map((q) => q.crop.x + q.crop.width)) - ux0,
-      height: Math.max(...per.map((q) => q.crop.y + q.crop.height)) - uy0,
-    };
+    // (even crops of a clip that isn't animated: exactly their union)
+    const U = getEvenUnion(per.map((q) => q.crop), animated ? clipFrame : undefined);
     const sw = per.map((q) => Math.max(2, ceilEven(U.width * q.sx)));
     const sh = per.map((q) => Math.max(2, ceilEven(U.height * q.sy)));
     const ox = per.map((q) => roundEven(q.ox - (q.crop.x - U.x) * q.sx));
@@ -346,13 +457,13 @@ export function buildVideoGraph({ timeline: tl, clips, sourcePaths, sourceFrames
     const scale = `scale=w=${stepExpr(sw, fps)}:h=${stepExpr(sh, fps)}:eval=frame:flags=bicubic,setsar=1`;
     if (needsBg && settings.fill.mode === 'blur') {
       const [a, b] = [newLabel('s'), newLabel('s')];
-      const layer = layerSize(element.layerWidth);
-      filters.push(`${head},${cropFilterOf(U)},split[${a}][${b}]`, `[${b}]${blurCoverOf(layer.w, layer.h, U)}[${base}]`, `[${a}]${scale}[${sc}]`);
+      const size = layerSize(element.layerWidth);
+      filters.push(`${head},${cropFilterOf(U)},split[${a}][${b}]`, `[${b}]${blurCoverOf(size.w, size.h, U)}[${base}]`, `[${a}]${scale}[${sc}]`);
     } else {
       filters.push(`${head},${cropFilterOf(U)},${scale}[${sc}]`, `${colorLayer(needsBg ? fillColor : 'black', element.layerWidth, nf)}[${base}]`);
     }
     filters.push(`[${base}][${sc}]overlay=x=${stepExpr(ox, fps)}:y=${stepExpr(oy, fps)}:eval=frame:shortest=1[${out}]`);
-    return { label: out, start: pf0 - f0, end: pf1 - f0 };
+    return layer;
   };
 
   // Chain the segments of a column: xfade where they overlap (clip replacement, or a clip fading into fill at the end

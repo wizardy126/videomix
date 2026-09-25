@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
+import { getAnimatedCellCrop } from '../animatedCrop';
 import { getCropForAspect } from '../geometry';
 import { getRenderTimeline } from '../render/renderTimeline';
 import { testClips, testPlans, testSettings, toRowsPlan } from '../render/renderTestFixtures';
@@ -162,5 +163,45 @@ describe('turned clips (E9, T38d)', () => {
     // unturned: no rotation key at all
     const { ops: plain } = getPreviewDrawList(createPreviewDrawModel(tl, [{ ...t, rotation: undefined }], settings), 1);
     expect(plain.every((op) => !('rotation' in op))).toBe(true);
+  });
+});
+
+describe('animated framing (A9, T48)', () => {
+  const plan: MixPlan = {
+    width: 640,
+    height: 360,
+    duration: 3,
+    placements: [{ clipId: 'k', column: 0, startTime: 0, endTime: 3, transitionIn: 0 }],
+    layouts: [{ time: 0, transitionDuration: 0, columns: [{ column: 0, x: 0, width: 640 }], fills: [] }],
+    warnings: [],
+  };
+  const settings = testSettings({ gap: { width: 0, color: '#000000' } });
+  const tl = getRenderTimeline(plan, { fps: 30, gap: 0, transitionDuration: 0.5 });
+  const k = {
+    id: 'k',
+    sourceId: 'h1080',
+    start: 1,
+    maxRect: { x: 160, y: 90, width: 1600, height: 900 },
+    keyframes: [{ time: 1, centerX: 960, centerY: 540, scale: 1, interpolation: 'linear' as const }, { time: 3, centerX: 1100, centerY: 500, scale: 0.5 }],
+  };
+
+  test('the clip shows the render\'s crop at the source time of the frame (between frames too)', () => {
+    const m = createPreviewDrawModel(tl, [k], settings, [{ id: 'h1080', width: 1920, height: 1080 }]);
+    for (const time of [0, 0.5, 1.01, 1.99, 2.5]) {
+      const [op] = videos(getPreviewDrawList(m, time).ops);
+      expect(op!.src, String(time)).toEqual(getAnimatedCellCrop({ clip: k, aspect: 16 / 9, time: 1 + time, frame: { width: 1920, height: 1080 } }).crop);
+    }
+    // half way (source 2 s): centre 1030,520 and 1200 px wide
+    const [mid] = videos(getPreviewDrawList(m, 1).ops);
+    expect(mid!.src.x + mid!.src.width / 2).toBeCloseTo(1030);
+    expect(mid!.src.width).toBeCloseTo(1200);
+  });
+
+  test('kept inside the source frame when it is known', () => {
+    const out = { ...k, keyframes: [{ time: 0, centerX: 1900, centerY: 540, scale: 1 }] };
+    const [known] = videos(getPreviewDrawList(createPreviewDrawModel(tl, [out], settings, [{ id: 'h1080', width: 1920, height: 1080 }]), 1).ops);
+    expect(known!.src.x + known!.src.width).toBeCloseTo(1920);
+    const [unknown] = videos(getPreviewDrawList(createPreviewDrawModel(tl, [out], settings), 1).ops);
+    expect(unknown!.src.x + unknown!.src.width).toBeCloseTo(2700);
   });
 });

@@ -1,9 +1,12 @@
-import { getCellRect, getExtendedCropForAspect } from '../geometry';
+import { getAnimatedCellCrop } from '../animatedCrop';
+import { getClipFrame } from '../clipRotation';
+import { getCellRect } from '../geometry';
+import type { Size } from '../overlayMath';
 import { getPlanAxis } from '../planner/types';
 import { getGlobalFadeDuration } from '../render/buildAudioGraph';
 import { getColumnsAtFrame, getFillSpansAtFrame, getKeyframeIndexAtFrame } from '../render/renderTimeline';
 import type { ColumnGeometry, PlacementFrames, RenderTimeline } from '../render/renderTimeline';
-import type { MixClip, MixClipRotation, MixSettings, Rect } from '../types';
+import type { MixClip, MixClipRotation, MixSettings, MixSource, Rect } from '../types';
 import { getPreviewFrameIndex } from './previewSchedule';
 
 // Draw list of one frame of the live preview (A1, T32): what previewCanvas.ts paints on the canvas, computed with the
@@ -12,7 +15,8 @@ import { getPreviewFrameIndex } from './previewSchedule';
 // - every transition type is drawn as a crossfade (opacity), including the fade of a last clip into the fill;
 // - blurred fills are a blurred cover of the nearest column showing a clip at that frame (the render uses a column that
 //   plays during the whole chunk) and are only blurred approximately by the canvas;
-// - the re-layout geometry is evaluated at the real time (between frames), which only makes the animation smoother.
+// - the re-layout geometry is evaluated at the real time (between frames), which only makes the animation smoother;
+//   so is the framing of an animated clip (A9, T48: animatedCrop.getAnimatedCellCrop, the render's per-frame crop).
 // Pure: rects are in output px (floats), source rects in oriented source px (Chromium autorotates like ffmpeg).
 
 /** Fills narrower than this are a plain colour, as in the render (buildVideoGraph's MIN_BLUR_FILL_WIDTH). */
@@ -34,7 +38,8 @@ export interface PreviewFrameDraw {
   fadeAlpha: number,
 }
 
-export type PreviewDrawClip = Pick<MixClip, 'id' | 'maxRect' | 'minRect'> & Partial<Pick<MixClip, 'rotation'>>;
+export type PreviewDrawClip = Pick<MixClip, 'id' | 'maxRect' | 'minRect'> & Partial<Pick<MixClip, 'rotation' | 'keyframes' | 'start' | 'sourceId'>>;
+export type PreviewDrawSource = Pick<MixSource, 'id' | 'width' | 'height'>;
 export type PreviewDrawSettings = Pick<MixSettings, 'gap' | 'fill' | 'transition' | 'fadeInOut'>;
 
 /** Per plan: the timeline and its placements by column, so a frame only looks at its own columns. */
@@ -43,13 +48,21 @@ export interface PreviewDrawModel {
   clips: ReadonlyMap<string, PreviewDrawClip>,
   settings: PreviewDrawSettings,
   byColumn: Map<number, PlacementFrames[]>,
+  /** Per clip id: its (turned) frame, which an animated framing stays inside (A9); missing = unknown. */
+  frames: ReadonlyMap<string, Size>,
 }
 
-export function createPreviewDrawModel(tl: RenderTimeline, clips: readonly PreviewDrawClip[], settings: PreviewDrawSettings): PreviewDrawModel {
+/** `sources`: to keep the framing of animated clips (A9) inside their frame, as the render does. */
+export function createPreviewDrawModel(tl: RenderTimeline, clips: readonly PreviewDrawClip[], settings: PreviewDrawSettings, sources: readonly PreviewDrawSource[] = []): PreviewDrawModel {
   const byColumn = new Map<number, PlacementFrames[]>();
   for (const p of tl.placements) byColumn.set(p.placement.column, [...(byColumn.get(p.placement.column) ?? []), p]);
   for (const list of byColumn.values()) list.sort((a, b) => a.f0 - b.f0);
-  return { tl, clips: new Map(clips.map((c) => [c.id, c])), settings, byColumn };
+  const sourcesById = new Map(sources.map((s) => [s.id, s]));
+  const frames = new Map(clips.flatMap((c) => {
+    const frame = c.sourceId != null ? getClipFrame(c, sourcesById.get(c.sourceId)) : undefined;
+    return frame != null ? [[c.id, frame] as const] : [];
+  }));
+  return { tl, clips: new Map(clips.map((c) => [c.id, c])), settings, byColumn, frames };
 }
 
 /** E9: the clip's turn on its draw ops, only when it has one (so unturned ops stay as they were). */
@@ -92,17 +105,20 @@ export function getCoverSource(src: Rect, dest: Pick<Rect, 'width' | 'height'>):
  * clip's blurred cover, or the fill colour). A column growing from / shrinking to 0 keeps filling the cross axis and is
  * cut by its window instead of letterboxing.
  */
-export function getClipCellDraw({ clip, cell, rows, collapsing, extendedMaxRect }: {
-  clip: Pick<MixClip, 'maxRect' | 'minRect'>,
+export function getClipCellDraw({ clip, cell, rows, collapsing, extendedMaxRect, time = 0, frame }: {
+  clip: Pick<MixClip, 'maxRect' | 'minRect'> & Partial<Pick<MixClip, 'keyframes'>>,
   cell: Rect,
   rows: boolean,
   collapsing: boolean,
   /** E7 (T38b): the placement's `extendedMaxRect`, where the crop may grow beyond the max (as in the render). */
   extendedMaxRect?: Rect | undefined,
+  /** A9: source time (s) and clip frame for an animated framing. */
+  time?: number | undefined,
+  frame?: Size | undefined,
 }) {
   const w = Math.max(2, cell.width);
   const h = Math.max(2, cell.height);
-  const { crop, fit } = getExtendedCropForAspect(clip.maxRect, clip.minRect, extendedMaxRect, w / h);
+  const { crop, fit } = getAnimatedCellCrop({ clip, aspect: w / h, time, frame, extendedMaxRect });
   if (fit === 'fill') return { crop, draw: { src: crop, dest: cell }, background: false };
   // the window is longer along the main axis than the clip allows (columns: pillarbox; rows: letterbox)
   const mainTooLong = fit === (rows ? 'letterbox' : 'pillarbox');
@@ -138,7 +154,7 @@ export function getGlobalFadeAlpha(settings: Pick<MixSettings, 'fadeInOut' | 'tr
  * incoming one on top with a growing opacity; a column whose clip has ended shows fill), then the fill areas.
  */
 export function getPreviewDrawList(model: PreviewDrawModel, time: number): PreviewFrameDraw {
-  const { tl, clips, settings, byColumn } = model;
+  const { tl, clips, settings, byColumn, frames } = model;
   const { plan } = tl;
   const { fps } = tl.settings;
   const axis = getPlanAxis(plan);
@@ -148,6 +164,8 @@ export function getPreviewDrawList(model: PreviewDrawModel, time: number): Previ
   const columns = getColumnsAtFrame(tl, f);
   const collapsing = getCollapsingColumns(tl, f);
   const cellOf = (g: ColumnGeometry) => getCellRect(axis, { offset: g.x, length: g.width }, plan);
+  /** A9: what an animated clip's framing needs, at the source time of this frame. */
+  const framingOf = (p: PlacementFrames, clip: PreviewDrawClip) => ({ time: (clip.start ?? 0) + (f - p.f0) / fps, frame: frames.get(clip.id) });
 
   const ops: PreviewDrawOp[] = [{ kind: 'color', rect: { x: 0, y: 0, width: plan.width, height: plan.height }, color: settings.gap.color, alpha: 1 }];
 
@@ -162,7 +180,7 @@ export function getPreviewDrawList(model: PreviewDrawModel, time: number): Previ
     const top = active.at(-1);
     const clip = top != null ? clips.get(top.placement.clipId) : undefined;
     if (top == null || clip == null || geom.width < MIN_BLUR_FILL_WIDTH) return [];
-    return [{ column, geom, key: `p${top.index}`, clipId: clip.id, ...turnOf(clip), crop: getClipCellDraw({ clip, cell, rows, collapsing: collapsing.has(column), extendedMaxRect: top.placement.extendedMaxRect }).crop }];
+    return [{ column, geom, key: `p${top.index}`, clipId: clip.id, ...turnOf(clip), crop: getClipCellDraw({ clip, cell, rows, collapsing: collapsing.has(column), extendedMaxRect: top.placement.extendedMaxRect, ...framingOf(top, clip) }).crop }];
   });
   /** Fill of `rect` (at `geom` along the main axis); a column's own fill never takes its (ending) clip as source. */
   const fillOp = (rect: Rect, geom: ColumnGeometry, ownColumn?: number): PreviewDrawOp => {
@@ -199,7 +217,7 @@ export function getPreviewDrawList(model: PreviewDrawModel, time: number): Previ
         alpha *= clamp01((p.f1 - f) / p.fadeOutFrames);
       }
       const key = `p${p.index}`;
-      const { crop, draw, background } = getClipCellDraw({ clip, cell, rows, collapsing: collapsing.has(column), extendedMaxRect: p.placement.extendedMaxRect });
+      const { crop, draw, background } = getClipCellDraw({ clip, cell, rows, collapsing: collapsing.has(column), extendedMaxRect: p.placement.extendedMaxRect, ...framingOf(p, clip) });
       if (background) {
         ops.push(settings.fill.mode === 'blur' && geom.width >= MIN_BLUR_FILL_WIDTH
           ? { kind: 'blur', key, clipId: clip.id, src: getCoverSource(crop, cell), dest: cell, alpha, ...turnOf(clip) }

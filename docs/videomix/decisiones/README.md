@@ -11,3 +11,4 @@ Cada decisión que afecta a varias tareas se registra aquí como `ADR-XXX-titulo
 |---|---|---|
 | [ADR-001](ADR-001-render.md) | Estrategia de render con ffmpeg | T09 |
 | [ADR-002](ADR-002-clips-segmentos.md) | Sincronización clips ↔ segmentos | T07 |
+| [ADR-003](ADR-003-keyframes-render.md) | Recorte animado (keyframes) en el render | T48 |

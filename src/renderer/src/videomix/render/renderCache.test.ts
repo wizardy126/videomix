@@ -86,6 +86,20 @@ describe('render cache keys', () => {
     expect(cChanged.audio).toBe(before.audio);
   });
 
+  test('A9: the keyframes of a clip are part of the key of the chunks where its framing differs', async () => {
+    const before = await getRenderCacheKeys(job(), { fileIdentities });
+    // clip a (start 1) plays 0..3 s; it holds its base framing until source 2 s (plan 1 s), then zooms in until 3 s
+    const keyframes = [{ time: 2, centerX: 960, centerY: 540, scale: 1 }, { time: 3, centerX: 900, centerY: 500, scale: 0.8 }];
+    const animated = await getRenderCacheKeys(job({ clips: testClips.map((c) => (c.id === 'a' ? { ...c, keyframes } : c)) }), { fileIdentities });
+    const { chunks } = job();
+    const showing = (from: number, to: number) => chunks.flatMap((c, i) => (c.chunk.f0 < to * 30 && c.chunk.f1 > from * 30 ? [i] : []));
+    expect(changedChunks(before.chunks, animated.chunks)).toEqual(showing(1, 3));
+    expect(showing(0, 1).length).toBeGreaterThan(0);
+    // another curve for the same keyframes: a new key again
+    const linear = await getRenderCacheKeys(job({ clips: testClips.map((c) => (c.id === 'a' ? { ...c, keyframes: [{ ...keyframes[0]!, interpolation: 'linear' as const }, keyframes[1]!] } : c)) }), { fileIdentities });
+    expect(changedChunks(animated.chunks, linear.chunks).length).toBeGreaterThan(0);
+  });
+
   test('a source file replaced in place (other size or mtime) changes the chunks that read it', async () => {
     const before = await getRenderCacheKeys(job(), { fileIdentities });
     const after = await getRenderCacheKeys(job(), { fileIdentities: { ...fileIdentities, [sourcePaths['h720']!]: '2000:1' } });

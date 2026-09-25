@@ -84,7 +84,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T45 | v4: indicador de encaje, imán y "Ajustar a" (F1, F2) | M11 | Opus | T44 | hecha |
 | T46 | v4: copiar y pegar el encuadre (A5) | M11 | Sonnet | T44 | en curso |
 | T47 | v4: bandas negras (A7) | M11 | Sonnet | T44 | en curso |
-| T48 | v4: keyframes en render, previsualización y miniaturas (A9) | M11 | Opus | T44 | en curso |
+| T48 | v4: keyframes en render, previsualización y miniaturas (A9) | M11 | Opus | T44 | hecha |
 | T49 | v4: edición de keyframes (A9) | M11 | Opus | T44, T45, T48 | pendiente |
 | T50 | v4: i18n, manual, e2e y cierre | M11 | Sonnet | T44–T49 | pendiente |
 

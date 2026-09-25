@@ -4,13 +4,13 @@ import { getAspectRange } from '../geometry';
 import { planMix } from '../planner/planMix';
 import { createRandom } from '../planner/random';
 import type { MixPlan, PlannerClip } from '../planner/types';
-import { blurCover, buildVideoGraph, formatNumber, stepExpr, toFfmpegColor } from './buildVideoGraph';
+import { blurCover, buildVideoGraph, formatNumber, frameStepExpr, stepExpr, toFfmpegColor } from './buildVideoGraph';
 import type { RenderClip } from './buildVideoGraph';
 import { getBusyIntervals, getRenderChunks } from './renderChunks';
 import { testClips, testPlans, testSettings, testSourcePaths, testSources, toRowsPlan } from './renderTestFixtures';
 import type { TestSourceId } from './renderTestFixtures';
 import { getColumnsAtFrame, getFillSpansAtFrame, getRenderTimeline } from './renderTimeline';
-import { parseFilterGraph, verifyFilterGraph } from './verifyFilterGraph';
+import { parseFilterGraph, parseFilterOptions, verifyFilterGraph } from './verifyFilterGraph';
 
 describe('helpers', () => {
   test('stepExpr is a flat sum of steps at frame midpoints', () => {
@@ -393,5 +393,179 @@ describe('turned clips (E9, T38d)', () => {
     // turned (14, 48) 694x1232 = display (48, 12) 1232x694 → coded x 46..1206
     expect(graph.filterComplex).toContain('crop=1160:694:46:12,transpose=clock,scale=360:640');
     expect(verifyFilterGraph(graph, { sourceSizes: [{ width: 1280, height: 720 }] })).toEqual([]);
+  });
+});
+
+/** Value of a flat sum of steps over a variable (`v0+Δ*gte(in,m)…`) at `value`. */
+function evalSteps(expr: string, value: number) {
+  const text = expr.replaceAll("'", '');
+  const [first, ...rest] = text.split(/(?=[+-]\d[\d.]*\*gte\()/);
+  let sum = Number(first);
+  for (const term of rest) {
+    const m = /^([+-][\d.]+)\*gte\(\w+,(\d+)\)$/.exec(term);
+    if (m == null) throw new Error(`bad term ${term}`);
+    if (value >= Number(m[2])) sum += Number(m[1]);
+  }
+  return sum;
+}
+
+describe('animated framing (A9, T48)', () => {
+  const frames = { h1080: { width: 1920, height: 1080 } };
+  const source = { width: 1920, height: 1080 };
+  const settings = testSettings({ gap: { width: 0, color: '#000000' }, fill: { mode: 'blur', color: '#000000' }, fadeInOut: false });
+  const maxRect = { x: 160, y: 90, width: 1600, height: 900 };
+  const single = (width: number, height: number, extra: Partial<MixPlan> = {}): MixPlan => ({
+    width,
+    height,
+    duration: 2,
+    placements: [{ clipId: 'k', column: 0, startTime: 0, endTime: 2, transitionIn: 0 }],
+    layouts: [{ time: 0, transitionDuration: 0, columns: [{ column: 0, x: 0, width }], fills: [] }],
+    warnings: [],
+    ...extra,
+  });
+  const graphsOf = (p: MixPlan, clip: RenderClip, sourceFrames: Record<string, { width: number, height: number, sar?: { num: number, den: number } }> = frames) => {
+    const tl = getRenderTimeline(p, { fps: 30, gap: 0, transitionDuration: 0.5 });
+    return getRenderChunks(tl, { maxChunkSeconds: 5 }).map((chunk) => buildVideoGraph({ timeline: tl, clips: [clip], sourcePaths: testSourcePaths('/m'), sourceFrames, settings, chunk }));
+  };
+  // pan to the right and zoom in to half the size over the clip's 2nd second (source 1..2 s), from start 0.5
+  const keyframes = [
+    { time: 1, centerX: 960, centerY: 540, scale: 1, interpolation: 'linear' as const },
+    { time: 2, centerX: 1100, centerY: 500, scale: 0.5 },
+  ];
+  const clip: RenderClip = { id: 'k', sourceId: 'h1080', start: 0.5, maxRect, keyframes };
+
+  test('frameStepExpr: steps over the frame number (perspective counts from 1), rounded to 1/1000 px', () => {
+    expect(frameStepExpr([3, 3, 3])).toBe('3');
+    expect(frameStepExpr([0, 0.5, 0.5, 1.0004])).toBe("'0+0.5*gte(in,2)+0.5*gte(in,4)'");
+    expect(frameStepExpr([10, 9.25], 'n', 0)).toBe("'10-0.75*gte(n,1)'");
+  });
+
+  test('a static column: crop of the union, then perspective with the sub-pixel crop of every frame', () => {
+    const [graph] = graphsOf(single(640, 360), clip);
+    expect(verifyFilterGraph(graph!, { sourceSizes: [source] })).toEqual([]);
+    const chain = parseFilterGraph(graph!.filterComplex).find((c) => c.inputs[0] === '0:v')!;
+    // head, crop of the union of all the frames' crops, perspective, scale to the cell
+    const names = chain.filters.map((f) => f.split('=')[0]);
+    expect(names.slice(-4)).toEqual(['crop', 'perspective', 'scale', 'setsar']);
+    // the union: from the whole max (before the animation) to the zoomed crop, which lies inside it
+    expect(chain.filters.at(-4)).toBe('crop=1600:900:160:90');
+    expect(chain.filters.at(-2)).toBe('scale=640:360:flags=bicubic');
+    const persp = parseFilterOptions(chain.filters.at(-3)!);
+    expect(persp).toMatchObject({ interpolation: 'linear', sense: 'source', eval: 'frame' });
+    // top-left corner: 0 while holding the first keyframe (source < 1 s, the first 15 frames), then the linear move
+    // to the zoomed crop (centre 1100,500, 800x450): x0 = 700 − 160 = 540 at frame 45 (source 2 s)
+    const x0 = (n: number) => evalSteps(persp['x0']!, n + 1);
+    expect(x0(0)).toBe(0);
+    expect(x0(15)).toBe(0);
+    expect(x0(16)).toBeCloseTo(540 / 30, 3);
+    expect(x0(30)).toBeCloseTo(270, 3);
+    expect(x0(45)).toBeCloseTo(540, 3);
+    expect(x0(59)).toBeCloseTo(540, 3);
+    expect(evalSteps(persp['x1']!, 46) - x0(45)).toBeCloseTo(800, 3);
+    expect(evalSteps(persp['y2']!, 46) - evalSteps(persp['y0']!, 46)).toBeCloseTo(450, 3);
+    // same corners for x1/x3, y0/y1…
+    expect(persp['x3']).toBe(persp['x1']);
+    expect(persp['y1']).toBe(persp['y0']);
+    expect(persp['x2']).toBe(persp['x0']);
+    expect(graph!.filterComplex).toMatchSnapshot();
+  });
+
+  test('not moving during the chunk: a static crop (even px); at the base transform, exactly the unanimated graph', () => {
+    const plain = graphsOf(single(640, 360), { ...clip, keyframes: undefined });
+    // one keyframe at the base transform: nothing changes
+    expect(graphsOf(single(640, 360), { ...clip, keyframes: [{ time: 3, centerX: 960, centerY: 540, scale: 1 }] })).toEqual(plain);
+    // holding a keyframe (after the last one): that framing, rounded to even px around its centre
+    const [held] = graphsOf(single(640, 360), { ...clip, keyframes: [{ time: 0, centerX: 1101, centerY: 500, scale: 0.5 }] });
+    expect(held!.filterComplex).not.toContain('perspective');
+    expect(held!.filterComplex).toContain('crop=800:450:702:276,scale=640:360');
+  });
+
+  test('pillarbox: the blurred cover gets the crop\'s aspect (the perspective\'s picture has the union\'s)', () => {
+    const [graph] = graphsOf(single(640, 360), { ...clip, maxRect: { x: 400, y: 0, width: 608, height: 1080 }, keyframes: [{ time: 1, centerX: 704, centerY: 540, scale: 1 }, { time: 2, centerX: 900, centerY: 540, scale: 0.8 }] });
+    expect(verifyFilterGraph(graph!, { sourceSizes: [source] })).toEqual([]);
+    expect(graph!.filterComplex).toMatch(/perspective=[^[]+eval=frame,split\[/);
+    // cover of 608/1080 at 80x46: taller than wide → width 80, height ceil-even(80 / 0.563) = 142
+    expect(graph!.filterComplex).toContain(blurCover(640, 360, 608 / 1080));
+    expect(graph!.filterComplex).toContain('scale=202:360:flags=bicubic');
+  });
+
+  test('pre-scaled when the source has much more resolution than the cell needs', () => {
+    const [small] = graphsOf(single(160, 90), clip);
+    // the most zoomed crop is 800 px wide for a 160 px cell: the 1600 px union is reduced to 320 px first
+    expect(small!.filterComplex).toContain('crop=1600:900:160:90,scale=320:180:flags=bicubic,perspective=');
+    const persp = parseFilterOptions(parseFilterGraph(small!.filterComplex).flatMap((c) => c.filters).find((f) => f.startsWith('perspective='))!);
+    expect(evalSteps(persp['x0']!, 46)).toBeCloseTo(540 / 5, 3);
+    const [big] = graphsOf(single(640, 360), clip);
+    expect(big!.filterComplex).not.toMatch(/crop=1600:900:160:90,scale=/);
+  });
+
+  test('turned and anamorphic: the union in coded px of the unturned frame, the corners in the turned picture\'s px', () => {
+    // h720 at 679:640 (1358x720), turned 90°: the clip's frame is 720x1358
+    const ana = { h720: { width: 1358, height: 720, sar: { num: 679, den: 640 } } };
+    const turned: RenderClip = { id: 'k', sourceId: 'h720', start: 0, rotation: 90, maxRect: { x: 0, y: 0, width: 720, height: 1280 }, keyframes: [{ time: 0.5, centerX: 360, centerY: 640, scale: 1 }, { time: 1.5, centerX: 360, centerY: 700, scale: 0.5 }] };
+    const [graph] = graphsOf(single(360, 640), turned, ana);
+    expect(verifyFilterGraph(graph!, { sourceSizes: [{ width: 1280, height: 720 }] })).toEqual([]);
+    // turned y 0..1280 = display x 0..1280 → coded x 0..1206 (÷ 679/640)
+    expect(graph!.filterComplex).toContain('crop=1206:720:0:0,transpose=clock,perspective=');
+    const persp = parseFilterOptions(parseFilterGraph(graph!.filterComplex).flatMap((c) => c.filters).find((f) => f.startsWith('perspective='))!);
+    // the turned picture is 720x1206 coded px, 1279.47 display px (the coded crop's even edges): the zoomed crop (360x640
+    // display px, centred at 360,700) in its px
+    const k = 640 / 679;
+    expect(evalSteps(persp['y0']!, 60)).toBeCloseTo((700 - 320) * k, 2);
+    expect(evalSteps(persp['y2']!, 60)).toBeCloseTo((700 + 320) * k, 2);
+    expect(evalSteps(persp['x0']!, 60)).toBeCloseTo(180, 2);
+  });
+
+  test('re-layout: the column layer with the animated crops, inside the source', () => {
+    const p = single(640, 360, {
+      layouts: [
+        { time: 0, transitionDuration: 0, columns: [{ column: 0, x: 0, width: 360 }], fills: [{ x: 360, width: 280 }] },
+        { time: 1, transitionDuration: 0.5, columns: [{ column: 0, x: 0, width: 640 }], fills: [] },
+      ],
+    });
+    const graphs = graphsOf(p, { ...clip, minRect: { x: 660, y: 90, width: 600, height: 900 } });
+    const animated = graphs.find((g) => g.filterComplex.includes('overlay=x=\''))!;
+    expect(animated.filterComplex).toMatch(/scale=w='[^']+':h='[^']+':eval=frame/);
+    expect(animated.filterComplex).not.toContain('perspective');
+    graphs.forEach((g) => expect(verifyFilterGraph(g, { sourceSizes: g.inputs.map(() => source) })).toEqual([]));
+    // the chunks after the re-layout, where the column is static again, use the perspective
+    expect(graphs.some((g) => g.filterComplex.includes('perspective'))).toBe(true);
+  });
+
+  test.each([1, 2, 3, 4, 5, 6])('random keyframes, seed %i: every chunk graph is valid', (seed) => {
+    const random = createRandom(seed);
+    const sourceIds = ['h1080', 'h720', 'v1080', 'sq'] as const;
+    const clips: RenderClip[] = [];
+    const plannerClips: PlannerClip[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      const sourceId = sourceIds[Math.floor(random() * sourceIds.length)]!;
+      const { width, height } = testSources[sourceId];
+      const mw = 2 * Math.round((width * (0.5 + random() * 0.5)) / 2);
+      const mh = 2 * Math.round((height * (0.5 + random() * 0.5)) / 2);
+      const clipMax = { x: 2 * Math.round((width - mw) / 4), y: 2 * Math.round((height - mh) / 4), width: mw, height: mh };
+      const start = Math.round(random() * 20) / 10;
+      const kfs = Array.from({ length: 1 + Math.floor(random() * 3) }, (_v, k) => ({
+        time: start + k + random(),
+        centerX: random() * width,
+        centerY: random() * height,
+        scale: 0.3 + random(),
+        ...(random() < 0.3 && { interpolation: (['linear', 'hold'] as const)[Math.floor(random() * 2)]! }),
+      }));
+      clips.push({ id: `k${i}`, sourceId, start, maxRect: clipMax, keyframes: kfs, ...(random() < 0.3 && { rotation: 90 as const }) });
+      const rects = { maxRect: clips.at(-1)!.rotation === 90 ? { x: clipMax.y, y: clipMax.x, width: mh, height: mw } : clipMax };
+      clips.at(-1)!.maxRect = rects.maxRect;
+      plannerClips.push({ id: `k${i}`, duration: 1 + random() * 3, aspectRange: getAspectRange(rects.maxRect), rects });
+    }
+    const plan = planMix({ clips: plannerClips, settings: { width: 640, height: 360, maxColumns: 3, gap: 4, reorderWindow: 3, order: { mode: 'random', seed }, transitionDuration: 0.5 } });
+    const tl = getRenderTimeline(plan, { fps: 30, gap: 4, transitionDuration: 0.5 });
+    const sourceFrames = Object.fromEntries(Object.entries(testSources).map(([id, s]) => [id, { width: s.width, height: s.height }]));
+    let perspectives = 0;
+    for (const chunk of getRenderChunks(tl, { maxChunkSeconds: 2 })) {
+      const graph = buildVideoGraph({ timeline: tl, clips, sourcePaths: testSourcePaths('/m'), sourceFrames, settings: testSettings({ gap: { width: 4, color: '#101010' } }), chunk });
+      const sizes = graph.inputs.map((args) => Object.values(testSources).find((s) => args.at(-1) === `/m/${s.file}`));
+      expect(verifyFilterGraph(graph, { sourceSizes: sizes }), `chunk ${chunk.index}`).toEqual([]);
+      perspectives += graph.filterComplex.split('perspective=').length - 1;
+    }
+    expect(perspectives).toBeGreaterThan(0);
   });
 });
