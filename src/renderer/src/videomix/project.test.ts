@@ -41,7 +41,7 @@ const migratedSettings = (overrides: Partial<MixSettings> = {}): MixSettings => 
 describe('types', () => {
   test('createEmptyMixProject', () => {
     const project = createEmptyMixProject();
-    expect(project).toEqual({ version: 4, sources: [], clips: [], settings: defaultMixSettings, overlays: [] });
+    expect(project).toEqual({ version: 5, sources: [], clips: [], settings: defaultMixSettings, overlays: [] });
     // must not share nested objects with the defaults
     project.settings.gap.width = 10;
     project.settings.musicPlaylist.ducking.amountDb = 0;
@@ -129,7 +129,7 @@ describe('parseMixProject', () => {
     expect(overlays).toEqual([]);
     const v1 = { ...structuredClone(rest), version: 1, settings: { ...legacySettings, resolution: '2160p' }, loudnessCache: { k: { hasAudio: false } } };
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v1)));
-    expect(parsed).toEqual({ ...v1, version: 4, settings: migratedSettings({ output: { aspect: '16:9', resolution: '2160' } }), overlays: [] });
+    expect(parsed).toEqual({ ...v1, version: 5, settings: migratedSettings({ output: { aspect: '16:9', resolution: '2160' } }), overlays: [] });
   });
 
   test('migrates v2 to v3 without losing anything: 16:9, H.264, the music as a single track', () => {
@@ -144,7 +144,7 @@ describe('parseMixProject', () => {
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v2)));
     expect(parsed).toEqual({
       ...v2,
-      version: 4,
+      version: 5,
       settings: migratedSettings({
         output: { aspect: '16:9', resolution: '720' },
         musicPlaylist: { ...defaultMusicPlaylist, tracks: [{ id: MIGRATED_MUSIC_TRACK_ID, path: 'm.mp3', absolutePath: '/m.mp3', volumeDb: -6 }], loop: false },
@@ -167,8 +167,35 @@ describe('parseMixProject', () => {
     Reflect.deleteProperty(v3.settings, 'alwaysVisible');
     Reflect.deleteProperty(v3.settings, 'maxDuration');
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v3)));
-    expect(parsed).toEqual({ ...v3, version: 4, settings: { ...v3.settings, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible } });
+    expect(parsed).toEqual({ ...v3, version: 5, settings: { ...v3.settings, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible } });
     expect(parsed.settings.maxDuration).toBeUndefined();
+  });
+
+  test('migrates v4 to v5 additively: autoCropBlackBars on by default, no keyframes nor black bars', () => {
+    const v4 = { ...structuredClone(makeProject([makeClip(), makeClip({ id: 'c2' })])), version: 4 };
+    Reflect.deleteProperty(v4.settings, 'autoCropBlackBars');
+    const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v4)));
+    expect(parsed).toEqual({ ...v4, version: 5, settings: { ...v4.settings, autoCropBlackBars: true } });
+    expect(parsed.clips.every((clip) => clip.keyframes == null)).toBe(true);
+    expect(parsed.sources.every((source) => source.blackBars == null)).toBe(true);
+  });
+
+  test('round trip with keyframes and black bars (v5)', () => {
+    const project = makeProject([makeClip({
+      keyframes: [
+        { time: 1, centerX: 960, centerY: 540, scale: 1 },
+        { time: 3, centerX: 700, centerY: 400, scale: 0.5, interpolation: 'linear' },
+        { time: 4, centerX: 700, centerY: 400, scale: 0.5, interpolation: 'hold' },
+      ],
+    })]);
+    project.sources[0]!.blackBars = { rect: { x: 0, y: 140, width: 1920, height: 800 }, frame: { width: 1920, height: 1080 }, file: { size: 1234, mtimeMs: 1_700_000_000_000.5 } };
+    project.settings.autoCropBlackBars = false;
+    expect(parseMixProject(JSON5.parse(JSON5.stringify(project)))).toEqual(project);
+    // bad values are schema errors
+    const bad = structuredClone(project);
+    bad.clips[0]!.keyframes![0]!.scale = 0;
+    expect(() => parseMixProject(bad)).toThrow(ZodError);
+    expect(() => parseMixProject({ ...structuredClone(project), clips: [{ ...makeClip(), keyframes: [{ time: 1, centerX: 0, centerY: 0, scale: 1, interpolation: 'bounce' }] }] })).toThrow(ZodError);
   });
 
   test('opens a v1 file saved by an older build', () => {
@@ -182,7 +209,7 @@ describe('parseMixProject', () => {
     const json = JSON5.parse(text);
     const { resolution, ...settings } = json.settings;
     expect(resolution).toBe('720p');
-    expect(parseMixProject(json)).toEqual({ ...json, version: 4, settings: { ...settings, output: { aspect: '16:9', resolution: '720' }, encoder: defaultMixSettings.encoder, musicPlaylist: defaultMusicPlaylist, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible }, overlays: [] });
+    expect(parseMixProject(json)).toEqual({ ...json, version: 5, settings: { ...settings, output: { aspect: '16:9', resolution: '720' }, encoder: defaultMixSettings.encoder, musicPlaylist: defaultMusicPlaylist, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible, autoCropBlackBars: true }, overlays: [] });
   });
 
   test('fills missing settings from defaults', () => {
@@ -210,7 +237,7 @@ describe('parseMixProject', () => {
     expect(() => parseMixProject({ sources: [] })).toThrow('missing version');
     expect(() => parseMixProject({ version: '1' })).toThrow('missing version');
     expect(() => parseMixProject({ version: 0 })).toThrow('missing version');
-    expect(() => parseMixProject({ ...createEmptyMixProject(), version: 5 })).toThrow('newer than supported');
+    expect(() => parseMixProject({ ...createEmptyMixProject(), version: 6 })).toThrow('newer than supported');
   });
 
   // Each case returns a copy of a valid project with one thing broken.
@@ -407,6 +434,14 @@ describe('validateMixProject', () => {
     expect(codes(makeProject([makeClip({ sourceId: 's2', maxRect: { x: 0, y: 0, width: 5000, height: 5000 } })]))).toEqual([]);
     expect(codes(makeProject([makeClip({ minRect: { x: 1800, y: 0, width: 200, height: 200 } })]))).toEqual(['min-rect-outside-max']);
     expect(codes(makeProject([makeClip({ minRect: { x: 0, y: 0, width: 1920, height: 1080 } })]))).toEqual([]);
+  });
+
+  test('keyframes (v5): must be finite and sorted by time', () => {
+    const kf = (time: number, scale = 1) => ({ time, centerX: 960, centerY: 540, scale });
+    expect(codes(makeProject([makeClip({ keyframes: [kf(1), kf(2, 0.5)] })]))).toEqual([]);
+    expect(codes(makeProject([makeClip({ keyframes: [kf(2), kf(1)] })]))).toEqual(['invalid-keyframes']);
+    expect(codes(makeProject([makeClip({ keyframes: [kf(1), kf(1)] })]))).toEqual(['invalid-keyframes']);
+    expect(codes(makeProject([makeClip({ keyframes: [kf(Number.NaN)] })]))).toEqual(['invalid-keyframes']);
   });
 
   test('odd gap', () => {

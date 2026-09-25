@@ -24,6 +24,21 @@ export const MIN_RECT_SIZE = 16;
 
 const hexColorSchema = z.string().regex(/^#[\da-f]{6}$/i);
 
+/**
+ * A7 (v5, T44): result of the black bars detection (`cropdetect`) of a whole source, cached in the project (like the
+ * loudness cache: recomputable, so it's no undo step and doesn't make the project dirty). See blackBars.ts.
+ */
+export const blackBarsDetectionSchema = z.object({
+  /** Part of the frame with picture, in display pixels of the source (B1: SAR and rotation metadata applied). The whole frame when there are no bars. */
+  rect: rectSchema,
+  /** Display size of the source the rect refers to: if the cached `MixSource` size differs, the detection is stale. */
+  frame: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }),
+  /** Identity of the file when it was analyzed (`fs.stat`, like the loudness cache key): a different one makes the detection stale. */
+  file: z.object({ size: z.number().nonnegative(), mtimeMs: z.number() }),
+});
+
+export type BlackBarsDetection = z.infer<typeof blackBarsDetectionSchema>;
+
 export const mixSourceSchema = z.object({
   id: z.string().min(1),
   /** Relative to the .vmx file (or absolute if the project is not saved yet). */
@@ -41,6 +56,8 @@ export const mixSourceSchema = z.object({
    * inverts it), see sampleAspect.ts. Missing = square pixels. Needed to convert rects to coded pixels for ffmpeg.
    */
   sar: z.object({ num: z.number().int().positive(), den: z.number().int().positive() }).optional(),
+  /** A7 (v5, T44): cached black bars detection of the whole file, see `isBlackBarsDetectionValid`. Missing = not detected yet. */
+  blackBars: blackBarsDetectionSchema.optional(),
 });
 
 export type MixSource = z.infer<typeof mixSourceSchema>;
@@ -51,6 +68,31 @@ export const mixClipLinkTypes = ['break', 'force'] as const;
 export const mixClipRotations = [0, 90, 180, 270] as const;
 
 export type MixClipRotation = typeof mixClipRotations[number];
+
+/** A9 (v5, T44): how a keyframe moves on to the next one, see clipKeyframes.ts. */
+export const mixKeyframeInterpolations = ['smooth', 'linear', 'hold'] as const;
+
+export type MixKeyframeInterpolation = typeof mixKeyframeInterpolations[number];
+
+/**
+ * A9 (v5, T44): a keyframe of a clip's framing (pan and zoom). The max rect (and the min with it) keeps the *size
+ * proportion* of the clip's `maxRect`, only moved and scaled:
+ * - animated max = `maxRect` size × `scale`, centred on (`centerX`, `centerY`);
+ * - animated min = `minRect` scaled by `scale` around the max, keeping its relative position inside it.
+ * Coordinates are px of the clip's (turned, E9) frame, like the rects. See clipKeyframes.ts.
+ */
+export const mixClipKeyframeSchema = z.object({
+  /** Seconds of the *source* (like `start`/`end`), so keyframes follow the content when the clip's start moves. */
+  time: z.number(),
+  centerX: z.number(),
+  centerY: z.number(),
+  /** Size relative to `maxRect` (1 = the same size; < 1 zooms in). */
+  scale: z.number().positive(),
+  /** Towards the next keyframe. Missing = `'smooth'` (only another value is stored). */
+  interpolation: z.enum(mixKeyframeInterpolations).optional(),
+});
+
+export type MixClipKeyframe = z.infer<typeof mixClipKeyframeSchema>;
 
 export const mixClipSchema = z.object({
   /** Also used as segId in the timeline. */
@@ -89,6 +131,11 @@ export const mixClipSchema = z.object({
    * Its rects are in the turned frame (see clipRotation.ts). Missing = 0 (only a turn is stored).
    */
   rotation: z.literal(mixClipRotations).optional(),
+  /**
+   * A9 (v5, T44): pan and zoom of the framing, sorted by `time` (see clipKeyframes.ts). Missing = not animated (an
+   * empty list isn't stored). `maxRect`/`minRect` keep setting the proportions (aspect range) the planner uses.
+   */
+  keyframes: mixClipKeyframeSchema.array().optional(),
 });
 
 export type MixClip = z.infer<typeof mixClipSchema>;
@@ -227,6 +274,8 @@ export const mixSettingsSchema = z.object({
   /** How to fill space that no clip can cover. */
   fill: z.object({ mode: z.enum(['blur', 'color']), color: hexColorSchema }),
   musicPlaylist: mixMusicPlaylistSchema,
+  /** A7 (v5, T44): new clips of a source start without its black bars (detected once per source, in the background). */
+  autoCropBlackBars: z.boolean(),
 });
 
 export type MixSettings = z.infer<typeof mixSettingsSchema>;
@@ -382,11 +431,12 @@ export type MixOverlay = z.infer<typeof mixOverlaySchema>;
 export type MixOverlayType = MixOverlay['type'];
 
 /**
- * v4 (T36). v1 → v2 (T19): overlays; v2 → v3 (T24): output, encoder, music playlist, text overlays, pinned and
- * grouped clips; v3 → v4: automatic clip links, `MixClip.link`, `settings.maxDuration`, `settings.alwaysVisible`.
+ * v5 (T44). v1 → v2 (T19): overlays; v2 → v3 (T24): output, encoder, music playlist, text overlays, pinned and
+ * grouped clips; v3 → v4 (T36): automatic clip links, `MixClip.link`, `settings.maxDuration`, `settings.alwaysVisible`;
+ * v4 → v5 (T44): `MixClip.keyframes`, `MixSource.blackBars`, `settings.autoCropBlackBars`.
  */
 export const mixProjectSchema = z.object({
-  version: z.literal(4),
+  version: z.literal(5),
   sources: mixSourceSchema.array(),
   /** Array order is the list order. */
   clips: mixClipSchema.array(),
@@ -399,7 +449,7 @@ export const mixProjectSchema = z.object({
 
 export type MixProject = z.infer<typeof mixProjectSchema>;
 
-export const MIX_PROJECT_VERSION = 4;
+export const MIX_PROJECT_VERSION = 5;
 
 export const defaultMixSettings: MixSettings = {
   output: { aspect: '16:9', resolution: '1080' },
@@ -417,6 +467,7 @@ export const defaultMixSettings: MixSettings = {
   alwaysVisible: defaultAlwaysVisible,
   fill: { mode: 'blur', color: '#000000' },
   musicPlaylist: defaultMusicPlaylist,
+  autoCropBlackBars: true,
 };
 
 export function createEmptyMixProject(): MixProject {

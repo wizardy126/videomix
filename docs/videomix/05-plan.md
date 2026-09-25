@@ -79,7 +79,8 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T41 | Modal de progreso del render | M10 | Opus | — | hecha |
 | T42 | Vídeos convertidos en la carpeta de caché del proyecto | M10 | Opus | — | hecha |
 | T43 | Diálogos tapados por la previsualización en vivo; conservar conversiones al borrar caché | M10 | Opus | T41, T42 | hecha |
-| T44 | v4: modelo v5 y lógica pura (encaje, keyframes, bandas negras) | M11 | Opus | — | en curso |
+| T44 | v4: modelo v5 y lógica pura (encaje, keyframes, bandas negras) | M11 | Opus | — | hecha |
+| T44b | v4: tolerancia de encaje del 1% sin deformar | M11 | Opus | T44 | en curso |
 | T45 | v4: indicador de encaje, imán y "Ajustar a" (F1, F2) | M11 | Opus | T44 | pendiente |
 | T46 | v4: copiar y pegar el encuadre (A5) | M11 | Sonnet | T44 | pendiente |
 | T47 | v4: bandas negras (A7) | M11 | Sonnet | T44 | pendiente |
@@ -142,6 +143,7 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 ## Oleadas de M11
 
 1. T44.
+1b. T44b.
 2. T45 ∥ T48.
 3. T46 ∥ T47.
 4. T49.

@@ -6,7 +6,7 @@ import i18n from 'i18next';
 import { showOpenDialog } from '../../dialogs';
 import { readFileFfprobeMeta } from '../../ffmpeg';
 import { createEmptyMixProject } from '../types';
-import type { ImageOverlay, LoudnessMeasurement, MixClip, MixOverlay, MixProject, MixSettings } from '../types';
+import type { BlackBarsDetection, ImageOverlay, LoudnessMeasurement, MixClip, MixOverlay, MixProject, MixSettings } from '../types';
 import type { Size } from '../overlayMath';
 import { createMixSource, mixProjectReducer } from '../projectReducer';
 import type { MixClipPatch, MixMusicPlaylistPatch, MixMusicTrackPatch, MixOverlayPatch, MixProjectAction, MixSourceRelink, OverlayLayerMove, ResolvedOverlayTimesForRemoval } from '../projectReducer';
@@ -225,6 +225,16 @@ export default function useMixProject() {
     setSavedProject(update(savedProjectRef.current));
   }, [setHistory, setSavedProject]);
 
+  /**
+   * A7 (T44): cache (or clear, `undefined`) the black bars detection of a source. Like the loudness cache: not an undo
+   * step and doesn't make the project dirty.
+   */
+  const setSourceBlackBars = useCallback((sourceId: string, blackBars: BlackBarsDetection | undefined) => {
+    const update = history.memoizeByRef((p: MixProject) => mixProjectReducer(p, { type: 'setSourceBlackBars', sourceId, blackBars }));
+    setHistory((h) => history.applyToAll(h, update));
+    setSavedProject(update(savedProjectRef.current));
+  }, [setHistory, setSavedProject]);
+
   // Recovery autosave: one file per session, written while dirty, removed when clean.
   // Operations are chained so a slow write can't land after a later delete.
   const recoveryDir = useMemo(() => getRecoveryDir(nodeDeps, remote.app.getPath('userData')), []);
@@ -388,6 +398,7 @@ export default function useMixProject() {
     relinkOverlayFile,
     setLoudnessCache,
     setSourceMeta,
+    setSourceBlackBars,
     userNewProject,
     userOpenProject,
     userSaveProject,

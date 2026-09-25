@@ -31,6 +31,8 @@ interface MixSource {
   name: string,            // basename para mostrar
   // cache informativa (se refresca al abrir)
   width?: number | undefined, height?: number | undefined, duration?: number | undefined,
+  sar?: { num: number, den: number } | undefined,  // v3 (B1): SAR del fotograma orientado; sin definir = píxeles cuadrados
+  blackBars?: BlackBarsDetection | undefined,       // v5 (A7, T44): caché de la detección de bandas negras, ver §10.5
 }
 
 interface MixClip {
@@ -48,6 +50,7 @@ interface MixClip {
   groupId?: string | undefined,  // v3 (A4): los clips con el mismo id empiezan juntos (≥ 2 clips)
   extendBeyondMax?: boolean | undefined,  // v4 (E7, T38b): ampliar más allá del máx. si hace falta; sin definir = true
   rotation?: 90 | 180 | 270 | undefined,  // v4 (E9, T38d): giro horario de la imagen; sin definir = 0 (solo se guarda un giro)
+  keyframes?: MixClipKeyframe[] | undefined,  // v5 (A9, T44): paneo y zoom del encuadre, ordenados por tiempo; ver §10.3
 }
 
 type TransitionType = 'fade' | 'dissolve' | 'fadeblack' | 'wipeleft' | 'wiperight' | 'wipeup' | 'wipedown'
@@ -72,10 +75,11 @@ interface MixSettings {
     loop: boolean,                                          // true
     ducking: { enabled: boolean, amountDb: number },        // false, −10 dB
   },
+  autoCropBlackBars: boolean,               // v5 (A7, T44): true; los clips nuevos nacen sin bandas negras
 }
 
 interface MixProject {
-  version: 3,              // v1 (sin overlays) y v2 se migran al abrir, ver §8.1 y §9
+  version: 5,              // v1…v4 se migran al abrir (v4 → v5 es aditiva, T44), ver §8.1, §9 y §10
   sources: MixSource[],
   clips: MixClip[],        // el orden del array es el orden de la lista
   settings: MixSettings,
@@ -709,3 +713,62 @@ Detalle en las notas de [T26](execution/T26-v2-textos-presets.md).
   - *typewriter*: un `drawtext` por paso con su `enable`, sin `if()`. Un prefijo se dibuja como `prefijo\nlínea entera` con `line_spacing` enorme, de modo que la línea entera queda fuera del fotograma pero `text_w` es el de la línea entera: el prefijo aparece ya en su sitio final con cualquier alineación.
 - **Mini vista**: misma disposición (CSS con `line-height = 1 + lineSpacing`), *fades*, desplazamiento del *slide* y prefijo del *typewriter* en ese instante; la fuente es la del sistema.
 - **Presets (B2)**: `Config.overlayStylePresets: OverlayStylePreset[]` (por defecto `[]`; al arrancar se descartan las entradas no válidas). El renderer los lee y escribe con `configStore` (`hooks/useOverlayStylePresets.ts`); lógica pura en `overlayStylePresets.ts`. Aplicar un preset sustituye todo el estilo (también quita fuente o sombra) y, en un texto, reajusta la caja. Exportar/importar: JSON `{ format: 'videomix-overlay-styles', version: 1, presets }`; al importar, los ids repetidos se renuevan y las entradas no válidas se ignoran.
+
+## 10. Mejoras v4 (T44–T50)
+
+Requisitos: [01-requisitos §12](01-requisitos.md). Modelo y lógica pura en T44 (detalle, contratos y decisiones en las notas de [T44](execution/T44-v4-modelo.md)); UI y render en T45–T49.
+
+### 10.1 Modelo v5 (T44)
+
+Migración v4 → v5 **aditiva** (solo cambia `version`); `settings.autoCropBlackBars` se rellena con el valor por defecto (`true`) como el resto de ajustes que faltan.
+
+```ts
+type MixKeyframeInterpolation = 'smooth' | 'linear' | 'hold';
+
+interface MixClipKeyframe {
+  time: number,        // segundos de la fuente (como start/end)
+  centerX: number,     // centro del máx. animado, px del fotograma (girado) del clip
+  centerY: number,
+  scale: number,       // tamaño relativo al maxRect base (> 0; 1 = mismo tamaño, < 1 = zoom de acercamiento)
+  interpolation?: MixKeyframeInterpolation | undefined,  // hacia el siguiente; sin definir = 'smooth'
+}
+
+interface BlackBarsDetection {
+  rect: Rect,                                   // zona con imagen, px de visualización de la fuente (todo el fotograma si no hay bandas)
+  frame: { width: number, height: number },     // tamaño de visualización al que se refiere
+  file: { size: number, mtimeMs: number },      // identidad del fichero (fs.stat) al analizarlo
+}
+```
+
+- `MixClip.keyframes?` (ordenados; lista vacía = no se guarda), `MixSource.blackBars?` y `MixSettings.autoCropBlackBars`.
+- Reducer: `updateClip` normaliza `keyframes` (orden y vacía → sin definir); `rotateClip` gira los keyframes con los rectángulos; `relinkSource` (B2) los reescala; `setSourceBlackBars` guarda la detección. `useMixProject().setSourceBlackBars` la aplica **sin historial ni `dirty`**, como `setSourceMeta`.
+- Validación: `invalid-keyframes` (error) si hay valores no finitos o tiempos desordenados o repetidos.
+
+### 10.2 Encaje en fracciones, imán y "Ajustar a" (F1, F2; `fitFractions.ts`)
+
+- **Celda de una fracción** `k/n` (1/3, 1/2, 2/3, completo) en el eje principal: `L = k·Tₙ/n + (k − 1)·gap`, con `Tₙ = floorEven(principal − (n − 1)·gap)`, el ancho útil que `distributeWidths` reparte entre n columnas. 2/3 son dos tercios más una separación. En filas (9:16, o 1:1 en filas) es un alto: todo se calcula traspuesto.
+- **Estado**: con los rectángulos normalizados a pares y `getWidthRange(getMainAspectRange(...), transversal)` = `[wmin, wmax]`:
+  - `fits` si `wmin ≤ L ≤ wmax` (para 1/n equivale exactamente a que `distributeWidths` de n clips iguales no deje relleno: test);
+  - `extends` si `L > wmax`, E7 activo y `L ≤ floorEven((principalMáx + margen)·transversal / transversalMín)` (el `maxLength` de `extendPlan`);
+  - `no`, con `missing` (el máx. debe crecer en el eje principal) o `excess` (el mín., o el máx. sin mín., debe encoger): el menor número **par** de px de la fuente que cumple la condición con el redondeo de `getWidthRange`.
+- **Imán** (`snapRectEdge`): el borde arrastrado del máx. o del mín. se engancha a la **proporción exacta de la celda** (ancho = alto × proporción al arrastrar izquierda/derecha; alto = ancho / proporción al arrastrar arriba/abajo), redondeado a par, si la diferencia es ≤ umbral (px de fuente) y no se sale de los límites.
+- **"Ajustar a"** (`fitMaxRectToFraction`): máx. con la proporción de la celda; conserva su longitud transversal si puede (si no, la más cercana que contiene al mín. y cabe en el fotograma), centrado en el mín. (o en el máx. actual) y desplazado dentro del fotograma conteniendo al mín.; bordes pares. Con mín., el resultado siempre encaja (ajuste de ±2 px por el redondeo) o falla con `min-too-large`.
+- **Limitación**: un clip rígido (sin mín.) solo encaja si `L` es un número par de px de salida (p. ej. 1/3 de 1280 = 426,67 no lo es): el planificador tampoco puede colocar tres iguales sin relleno.
+
+### 10.3 Keyframes del encuadre (A9; `clipKeyframes.ts`)
+
+- **Representación**: cada keyframe es una transformación del `maxRect` base: centro (`centerX`, `centerY`) y escala uniforme `scale`. Máx. animado = tamaño del base × `scale`, centrado en el centro; el mín. se escala igual y conserva su posición relativa dentro del máx. **La proporción no cambia nunca**, así que el intervalo de proporciones, el encaje y el planificador siguen usando los rectángulos base.
+- **Curvas**: entre dos keyframes todos los bordes se mueven con el mismo peso `w = ease(u)`, `u = (t − t₀)/(t₁ − t₀)`, según la interpolación del primero: `smooth` = `u²·(3 − 2u)` (smoothstep), `linear` = `u`, `hold` = 0 hasta el siguiente. `centro = c₀ + w·(c₁ − c₀)`, `escala = s₀ + w·(s₁ − s₀)`. Antes del primero y después del último se mantienen los extremos (los que quedan fuera del tramo del clip se conservan).
+- **Dentro del fotograma**: `clampTransform` limita primero la escala (el máx. cabe) y luego el centro. `getClipRectsAt(clip, t, fotograma)` devuelve los rectángulos pares y dentro del fotograma; sin keyframes, exactamente los guardados.
+- **Transformaciones**: `rotateKeyframes` (E9), `rescaleKeyframes` (B2, A5), `shiftKeyframes` (A5).
+
+### 10.4 Copiar y pegar el encuadre (A5; `clipFraming.ts`)
+
+- `copyClipFraming` guarda máx., mín., giro, keyframes, el fotograma (girado) del clip y su inicio. `getPasteFramingAction` genera un `batch` de `updateClip` (un paso de historial): el destino toma el giro; si su fotograma girado es de otro tamaño, rectángulos como B2 (`rescaleClipRects`) y centros de keyframes con el mismo mapeo; los keyframes conservan su desfase respecto al inicio del clip. Devuelve los clips con otra proporción (aviso) y los omitidos (tamaño de fuente desconocido). No se copian E7 ni el audio.
+
+### 10.5 Bandas negras (A7; `blackBars.ts`, `common/videomix/cropDetect.ts`)
+
+- `parseCropDetectOutput`: unión de los límites crudos (`x1…y2`) de todas las líneas de `cropdetect` (varias muestras), ignorando las vacías (fotogramas negros).
+- `cropDetectToDisplayRect`: píxeles codificados (tras el autorotate de ffmpeg) → visualización: eje estirado × SAR, redondeo hacia fuera, dentro del fotograma; `turn` opcional si se analizó sin autorotate.
+- `getPictureRect`: ignora bandas < 4 px (`BLACK_BARS_MIN_SIZE`), bordes pares hacia dentro. `getNewClipMaxRect`: máx. inicial de un clip nuevo (con `autoCropBlackBars` y detección válida para el tamaño). `removeBlackBarsFromRects`: botón "Quitar bandas negras" (recorta el máx., nunca lo agranda, y el mín. con él).
+- Caché por fuente en `MixSource.blackBars`; `isBlackBarsDetectionValid` la invalida si cambia el tamaño de visualización o la identidad del fichero (tamaño, mtime).

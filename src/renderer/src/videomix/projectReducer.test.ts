@@ -311,6 +311,58 @@ describe('mixProjectReducer', () => {
     expect('shadow' in next.overlays[0]!).toBe(false);
   });
 
+  describe('v5 (T44): keyframes and black bars', () => {
+    const kf = (time: number, centerX: number, centerY: number, scale = 1) => ({ time, centerX, centerY, scale });
+    const withSize = () => {
+      const project = makeProject();
+      project.sources[0] = { ...project.sources[0]!, width: 1920, height: 1080 };
+      project.clips[0] = { ...project.clips[0]!, maxRect: { x: 480, y: 270, width: 960, height: 540 }, keyframes: [kf(1, 960, 540), kf(3, 600, 400, 0.5)] };
+      return project;
+    };
+
+    test('updateClip stores keyframes sorted, and an empty list as none', () => {
+      const project = makeProject();
+      const next = mixProjectReducer(project, { type: 'updateClip', clipId: 'c1', patch: { keyframes: [kf(3, 1, 1), kf(1, 2, 2)] } });
+      expect(next.clips[0]!.keyframes).toEqual([kf(1, 2, 2), kf(3, 1, 1)]);
+      const cleared = mixProjectReducer(next, { type: 'updateClip', clipId: 'c1', patch: { keyframes: [] } });
+      expect('keyframes' in cleared.clips[0]!).toBe(false);
+      expect(mixProjectReducer(project, { type: 'updateClip', clipId: 'c1', patch: { keyframes: [] } })).toBe(project);
+    });
+
+    test('duplicating a clip copies its keyframes', () => {
+      const next = mixProjectReducer(withSize(), { type: 'duplicateClip', clipId: 'c1', newId: 'copy' });
+      expect(next.clips[1]!.keyframes).toEqual(next.clips[0]!.keyframes);
+      expect(next.clips[1]!.keyframes).not.toBe(next.clips[0]!.keyframes);
+    });
+
+    test('rotateClip turns the keyframes with the rects', () => {
+      const next = mixProjectReducer(withSize(), { type: 'rotateClip', clipId: 'c1', rotation: 90 });
+      expect(next.clips[0]).toMatchObject({ rotation: 90, maxRect: { x: 270, y: 480, width: 540, height: 960 } });
+      // centre (x, y) of a 1920×1080 frame → (1080 − y, x)
+      expect(next.clips[0]!.keyframes).toEqual([kf(1, 540, 960), kf(3, 680, 600, 0.5)]);
+      // and back
+      expect(mixProjectReducer(next, { type: 'rotateClip', clipId: 'c1', rotation: 0 }).clips[0]).toEqual(withSize().clips[0]);
+    });
+
+    test('relinkSource to another resolution rescales the keyframes (B2)', () => {
+      const next = mixProjectReducer(withSize(), { type: 'relinkSource', sourceId: 's1', source: { path: '/v/a2.mp4', absolutePath: '/v/a2.mp4', width: 1280, height: 720 } });
+      expect(next.clips[0]!.maxRect).toEqual({ x: 320, y: 180, width: 640, height: 360 });
+      expect(next.clips[0]!.keyframes).toEqual([kf(1, 640, 360), kf(3, 400, (400 * 720) / 1080, 0.5)]);
+    });
+
+    test('setSourceBlackBars caches or clears the detection', () => {
+      const project = makeProject();
+      const blackBars = { rect: { x: 0, y: 140, width: 1920, height: 800 }, frame: { width: 1920, height: 1080 }, file: { size: 1, mtimeMs: 2 } };
+      const next = mixProjectReducer(project, { type: 'setSourceBlackBars', sourceId: 's1', blackBars });
+      expect(next.sources[0]!.blackBars).toEqual(blackBars);
+      expect(mixProjectReducer(next, { type: 'setSourceBlackBars', sourceId: 's1', blackBars: structuredClone(blackBars) })).toBe(next);
+      expect('blackBars' in mixProjectReducer(next, { type: 'setSourceBlackBars', sourceId: 's1', blackBars: undefined }).sources[0]!).toBe(false);
+      expect(mixProjectReducer(project, { type: 'setSourceBlackBars', sourceId: 'nope', blackBars })).toBe(project);
+      // relinking keeps it (validity is checked against the file identity, isBlackBarsDetectionValid)
+      expect(mixProjectReducer(next, { type: 'relinkSource', sourceId: 's1', source: { path: '/x.mp4', absolutePath: '/x.mp4' } }).sources[0]!.blackBars).toEqual(blackBars);
+    });
+  });
+
   test('setLoudnessCache', () => {
     const project = makeProject();
     const loudnessCache = { k: { hasAudio: false as const } };

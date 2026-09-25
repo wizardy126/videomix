@@ -18,6 +18,13 @@ export interface SourceFrameChange {
   aspectChanged: boolean,
 }
 
+/** A5 (T44): the change between two frame sizes (undefined if they're equal), as {@link getSourceFrameChange} gives it. */
+export function getFrameChange(from: Size, to: Size): SourceFrameChange | undefined {
+  if (from.width === to.width && from.height === to.height) return undefined;
+  const aspectChanged = Math.abs((to.width / to.height) / (from.width / from.height) - 1) > ASPECT_TOLERANCE;
+  return { from, to, aspectChanged };
+}
+
 /**
  * How the frame of `source` changes with the new cached meta `next`, or undefined if the clip rects stay as they are:
  * - the size doesn't change, or isn't known on either side (the first probe of a source never scales anything);
@@ -37,9 +44,9 @@ export function getSourceFrameChange(
     const coded = getCodedSize(to, next.sar);
     if (coded.width === from.width && coded.height === from.height) return undefined;
   }
-  const aspectChanged = Math.abs((to.width / to.height) / (from.width / from.height) - 1) > ASPECT_TOLERANCE;
-  return { from, to, aspectChanged };
+  return getFrameChange(from, to);
 }
+
 
 /** E9 (T38d): the change of a clip's turned frame, whose rects live in it (a quarter turn swaps the axes). */
 export const rotateFrameChange = (change: SourceFrameChange, rotation: MixClipRotation): SourceFrameChange => (

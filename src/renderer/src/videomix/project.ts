@@ -35,6 +35,8 @@ const migrations: Record<number, (json: Record<string, unknown>) => Record<strin
   2: ({ settings, ...json }) => ({ ...json, version: 3, settings: isObject(settings) ? migrateSettingsV2ToV3(settings) : settings }),
   // v4 (T36): everything is additive (settings.links/maxDuration/alwaysVisible, MixClip.link), filled by parseMixProject's default merge
   3: (json) => ({ ...json, version: 4 }),
+  // v5 (T44): additive too (MixClip.keyframes, MixSource.blackBars, settings.autoCropBlackBars from the defaults: on)
+  4: (json) => ({ ...json, version: 5 }),
 };
 
 /**
@@ -95,7 +97,9 @@ export type MixProjectIssueCode =
   | 'max-duration-out-of-range'
   | 'always-visible-unknown-clip'
   | 'duplicate-always-visible-id'
-  | 'clip-in-sequence-and-group';
+  | 'clip-in-sequence-and-group'
+  // v5 (T44)
+  | 'invalid-keyframes';
 
 /** A problem found by {@link validateMixProject}. `message` is English for logs; the UI should map `code` to a translated text. */
 export interface MixProjectIssue {
@@ -376,6 +380,13 @@ export function validateMixProject(project: MixProject, { sourceDurations = {}, 
 
     if (clip.minRect != null && !rectContains(clip.maxRect, clip.minRect)) {
       error('min-rect-outside-max', `Clip ${clipId} min rect is not inside its max rect`);
+    }
+
+    // A9: the reducer keeps them sorted and finite (normalizeKeyframes); only a hand-edited file breaks this
+    const keyframes = clip.keyframes ?? [];
+    const finite = keyframes.every((k) => [k.time, k.centerX, k.centerY, k.scale].every((v) => Number.isFinite(v)));
+    if (!finite || keyframes.some((k, i) => i > 0 && !(k.time > keyframes[i - 1]!.time))) {
+      error('invalid-keyframes', `Clip ${clipId} has keyframes that are not finite or not sorted by time`);
     }
   });
 
