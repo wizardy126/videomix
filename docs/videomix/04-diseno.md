@@ -771,6 +771,11 @@ interface BlackBarsDetection {
 - **Imán** (`snapRectEdge`): el borde arrastrado del máx. o del mín. se engancha a la **proporción exacta de la celda** (ancho = alto × proporción al arrastrar izquierda/derecha; alto = ancho / proporción al arrastrar arriba/abajo), redondeado a par, si la diferencia es ≤ umbral (px de fuente) y no se sale de los límites.
 - **"Ajustar a"** (`fitMaxRectToFraction`): máx. con la proporción de la celda; conserva su longitud transversal si puede (si no, la más cercana que contiene al mín. y cabe en el fotograma), centrado en el mín. (o en el máx. actual) y desplazado dentro del fotograma conteniendo al mín.; bordes pares. Con mín., apunta al encaje exacto (ajuste de ±2 px por el redondeo); si solo lo alcanza con la tolerancia también vale, y si ni así, falla con `min-too-large`.
 - **Clips rígidos** (sin mín.): exactamente solo encajan si `L` es un número par de px de salida (p. ej. 1/3 de 1280 = 426,67 no lo es). Desde T44b encajan con la tolerancia: el planificador coloca tres iguales sin relleno, recortando < 1 % de alto (o de ancho) a alguno (§2.7).
+- **UI (T45)**, detalle en las notas de [T45](execution/T45-v4-encaje-ui.md):
+  - **Eje**: el de la salida; en 1:1, el del último plan calculado (la vista Mix), o columnas si aún no hay ninguno (`useFitLayout`).
+  - **Chips** (`FitChips`) sobre el recorte, con los rectángulos de cada paso del arrastre: debajo del máx. (fuera de sus tiradores) o, si no hay sitio, dentro de él justo encima de los tiradores de abajo; sin eventos de puntero. **Lista de clips**: las fracciones con ✓ (verde) o ↔ (ámbar), ✗ si ninguna; el detalle en el tooltip.
+  - **Imán** (`snapRectDrag`): toggle de la barra, preferencia de la app `fitMagnet` (desactivado por defecto); Alt durante el arrastre lo invierte (también al pulsarlo o soltarlo sin mover el ratón). Umbral de 8 px de pantalla; en una esquina engancha el borde del eje principal; no engancha si el máx. tiene la proporción bloqueada ni si el máx. enganchado dejaría fuera al mín.
+  - **"Ajustar a 1/3 / 1/2 / 2/3"**: un paso de historial (`updateClip` del máx.); quita el bloqueo de proporción; si falla (`min-too-large`), aviso.
 
 ### 10.3 Keyframes del encuadre (A9; `clipKeyframes.ts`)
 

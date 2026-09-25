@@ -1067,6 +1067,102 @@ test.describe('VideoMix (preview conversion of unsupported sources)', () => {
   });
 });
 
+test.describe('VideoMix (fit in fractions, magnet and "Fit to")', () => {
+  test('16. the fit chips follow a drag, the magnet snaps an edge and "Fit to 1/2" fits 1/2 (F1, F2, T45)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    try {
+      await mockOpenDialog(ctx.app, [media(sourceFiles[0]!)]); // 1920x1080, as the default output
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      await waitIdle(page);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(1);
+      const label = page.getByTestId('rect-label');
+      await expect(label).toContainText('Max 1920×1080');
+
+      // the whole frame fills the whole output; a rigid 16:9 is too wide for a half
+      const chip = (fraction: string) => page.getByTestId(`fit-chip-${fraction}`);
+      await expect(chip('full')).toHaveAttribute('data-status', 'fits');
+      await expect(chip('1-2')).toHaveAttribute('data-status', 'no');
+      await expect(chip('1-2')).toContainText('px over');
+      // the clip list shows the same, compactly
+      const rowFit = (fraction: string) => clipRows(page).first().getByTestId(`clip-fit-${fraction}`);
+      await expect(rowFit('full')).toHaveAttribute('data-status', 'fits');
+      await expect(rowFit('1-2')).toHaveCount(0);
+      await screenshot(page, '16a-fit-chips');
+
+      // screen x of a source x (the max is the whole frame)
+      const eastBox = (await page.getByTestId('rect-handle-max-e').boundingBox())!;
+      const westBox = (await page.getByTestId('rect-handle-max-w').boundingBox())!;
+      const frameLeft = westBox.x + westBox.width / 2;
+      const scale = (eastBox.x + eastBox.width / 2 - frameLeft) / 1920;
+      const screenX = (sourceX: number) => frameLeft + sourceX * scale;
+      const y = eastBox.y + eastBox.height / 2;
+      /** Drags the right edge of the max from `from` to `to` (source px); `during` runs before releasing it. */
+      const dragRightEdge = async (from: number, to: number, during?: () => Promise<void>) => {
+        // the right edge of the frame is the edge of the player area: grab the half of the handle inside it
+        await page.mouse.move(screenX(from) - (from === 1920 ? eastBox.width / 4 : 0), y);
+        await page.mouse.down();
+        await page.mouse.move(screenX((from + to) / 2), y, { steps: 5 });
+        await page.mouse.move(screenX(to), y, { steps: 5 });
+        await during?.();
+        await page.mouse.up();
+      };
+
+      // magnet off (the default): the chips change during the drag, the edge stays where it's dropped
+      const magnet = page.getByTestId('fit-magnet-toggle');
+      await expect(magnet).toHaveAttribute('aria-pressed', 'false');
+      // (the whole output only by showing more of the source than the max: E7 is on by default)
+      await dragRightEdge(1920, 1100, async () => {
+        await expect(chip('full')).toHaveAttribute('data-status', 'extends');
+      });
+      await expect(label).toContainText(/Max 1(0[89]\d|1[01]\d)×1080/);
+      await expect(rowFit('full')).toHaveAttribute('data-status', 'extends');
+      // without E7 it doesn't fit: the chip says by how much
+      await clipRows(page).first().getByTestId('clip-extend-toggle').click();
+      await expect(chip('full')).toHaveAttribute('data-status', 'no');
+      await expect(chip('full')).toContainText('px short');
+      await expect(rowFit('full')).toHaveCount(0);
+
+      // magnet on: dropped 6 px (a few screen px) off a third, the edge snaps to exactly 640 px (1/3 of 1920×1080)
+      await magnet.click();
+      await expect(magnet).toHaveAttribute('aria-pressed', 'true');
+      const maxWidth = async () => Number(/Max (\d+)×/.exec((await label.textContent()) ?? '')?.[1]);
+      await dragRightEdge(await maxWidth(), 646, async () => {
+        await expect(chip('1-3')).toHaveAttribute('data-status', 'fits');
+      });
+      await expect(label).toContainText('Max 640×1080');
+      await expect(chip('1-3')).toHaveAttribute('data-status', 'fits');
+      await expect(rowFit('1-3')).toHaveAttribute('data-status', 'fits');
+      await screenshot(page, '16b-magnet');
+      // …and holding Alt turns it off for that drag
+      await dragRightEdge(640, 800);
+      await page.keyboard.down('Alt');
+      await dragRightEdge(await maxWidth(), 648);
+      await page.keyboard.up('Alt');
+      expect(await maxWidth()).not.toBe(640);
+      expect(Math.abs(await maxWidth() - 648)).toBeLessThan(6);
+      // the toggle is an app preference, saved at once
+      expect(JSON.parse(readFileSync(join(ctx.configDir, 'config.json'), 'utf8'))).toMatchObject({ fitMagnet: true });
+
+      // "Fit to 1/2": exactly half the output, one undo step
+      const before = await maxWidth();
+      await page.getByTestId('fit-to-1-2').click();
+      await expect(label).toContainText('Max 960×1080');
+      await expect(chip('1-2')).toHaveAttribute('data-status', 'fits');
+      await expect(rowFit('1-2')).toHaveAttribute('data-status', 'fits');
+      await screenshot(page, '16c-fit-to-half');
+      await pressShortcut(page, 'Control+z');
+      await expect(label).toContainText(`Max ${before}×1080`);
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
 test.describe('VideoMix (Spanish UI)', () => {
   test('10. the UI is in Spanish', async () => {
     const ctx = await launchApp({ language: 'es' });

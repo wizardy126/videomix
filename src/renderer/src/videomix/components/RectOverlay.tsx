@@ -6,8 +6,15 @@ import type { Rect } from '../types';
 import { getOrientation } from '../geometry';
 import type { Box, ClipRects, DragHandle, RectTarget, Size } from '../overlayMath';
 import { applyRectDrag, formatAspect, getVideoContentBox, resizeHandles, toScreenCoords } from '../overlayMath';
+import { snapRectDrag } from '../fitFractions';
+import type { FitFraction, FitLayout, FractionFit } from '../fitFractions';
+import FitChips from './FitChips';
 
 const HANDLE_SIZE = 10;
+// F2 (T45): how close (screen px) a dragged edge must get to a fraction's size to snap to it
+const SNAP_THRESHOLD = 8;
+// room (screen px) the fit chips take below the max rect: one row of chips, plus a margin
+const CHIPS_HEIGHT = 22;
 const ARROW_STEP = 2;
 const ARROW_STEP_SHIFT = 10;
 
@@ -41,6 +48,8 @@ interface DragState {
   startClient: { x: number, y: number },
   start: ClipRects,
   last: ClipRects,
+  /** The pointer's last position, to redo the step when Alt (the magnet's inverter) is pressed or released. */
+  lastClient: { x: number, y: number },
 }
 
 /**
@@ -53,7 +62,7 @@ interface DragState {
  * Only the rects and handles take pointer events, so clicks elsewhere reach the video and the wheel bubbles to the
  * container (seek/zoom).
  */
-function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', aspectLock, cssRotation, clipRotation, onChange, onCommit }: {
+function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', aspectLock, cssRotation, clipRotation, fits, fitLayout, magnet = false, onChange, onCommit }: {
   maxRect: Rect,
   minRect?: Rect | undefined,
   videoSize: Size,
@@ -68,6 +77,11 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
    * the overlay itself isn't turned, it draws on the turned picture.
    */
   clipRotation?: number | undefined,
+  /** F1 (T45): the fit of the current rects in the fractions, shown as chips next to the max rect. */
+  fits?: FractionFit[] | undefined,
+  /** F2 (T45): the output layout the magnet snaps to; `magnet` is its toggle (Alt while dragging inverts it). */
+  fitLayout?: FitLayout | undefined,
+  magnet?: boolean | undefined,
   onChange: (rects: ClipRects) => void,
   /** `keyboard`: an arrow key nudge, the parent may merge repeated nudges into one undo step. */
   onCommit: (rects: ClipRects, info?: { keyboard: boolean }) => void,
@@ -78,6 +92,7 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
   const [containerSize, setContainerSize] = useState<Size>({ width: 0, height: 0 });
   const [active, setActive] = useState<RectTarget>('max');
   const [focused, setFocused] = useState(false);
+  const [snapped, setSnapped] = useState<FitFraction>();
 
   useEffect(() => {
     const svg = svgRef.current;
@@ -105,31 +120,54 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
     e.currentTarget.setPointerCapture(e.pointerId);
     svgRef.current?.focus();
     setActive(target);
-    dragRef.current = { pointerId: e.pointerId, target, handle, startClient: { x: e.clientX, y: e.clientY }, start: rects, last: rects };
+    dragRef.current = { pointerId: e.pointerId, target, handle, startClient: { x: e.clientX, y: e.clientY }, start: rects, last: rects, lastClient: { x: e.clientX, y: e.clientY } };
   }, [rects]);
+
+  /** One step of the drag, to the pointer at `client`; `altKey` inverts the magnet (F2). */
+  const dragTo = useCallback((drag: DragState, client: { x: number, y: number }, altKey: boolean) => {
+    if (box == null) return;
+    // eslint-disable-next-line no-param-reassign
+    drag.lastClient = client;
+    let next = applyRectDrag({
+      start: drag.start,
+      target: drag.target,
+      handle: drag.handle,
+      dx: ((client.x - drag.startClient.x) * videoSize.width) / box.width,
+      dy: ((client.y - drag.startClient.y) * videoSize.height) / box.height,
+      videoSize,
+      aspect: drag.target === 'max' ? aspectLock : undefined,
+    });
+    // a locked aspect ratio wins over the magnet (snapping one edge would break it)
+    const snap = magnet !== altKey && fitLayout != null && !(drag.target === 'max' && aspectLock != null)
+      ? snapRectDrag({
+        rects: next,
+        target: drag.target,
+        handle: drag.handle,
+        threshold: { x: (SNAP_THRESHOLD * videoSize.width) / box.width, y: (SNAP_THRESHOLD * videoSize.height) / box.height },
+        layout: fitLayout,
+        videoSize,
+      })
+      : undefined;
+    if (snap != null) next = snap.rects;
+    setSnapped(snap?.fraction);
+    if (sameRects(next, drag.last)) return;
+    // eslint-disable-next-line no-param-reassign
+    drag.last = next;
+    onChange(next);
+  }, [aspectLock, box, fitLayout, magnet, onChange, videoSize]);
 
   // Events of the captured handle bubble up to the svg, even though the svg itself has pointer-events: none.
   const handlePointerMove = useCallback((e: PointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
-    if (drag == null || drag.pointerId !== e.pointerId || box == null) return;
-    const next = applyRectDrag({
-      start: drag.start,
-      target: drag.target,
-      handle: drag.handle,
-      dx: ((e.clientX - drag.startClient.x) * videoSize.width) / box.width,
-      dy: ((e.clientY - drag.startClient.y) * videoSize.height) / box.height,
-      videoSize,
-      aspect: drag.target === 'max' ? aspectLock : undefined,
-    });
-    if (sameRects(next, drag.last)) return;
-    drag.last = next;
-    onChange(next);
-  }, [aspectLock, box, onChange, videoSize]);
+    if (drag == null || drag.pointerId !== e.pointerId) return;
+    dragTo(drag, { x: e.clientX, y: e.clientY }, e.altKey);
+  }, [dragTo]);
 
   const handlePointerUp = useCallback((e: PointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
     if (drag == null || drag.pointerId !== e.pointerId) return;
     dragRef.current = undefined;
+    setSnapped(undefined);
     if (!sameRects(drag.last, drag.start)) onCommit(drag.last);
   }, [onCommit]);
 
@@ -137,10 +175,25 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
     const drag = dragRef.current;
     if (drag == null || drag.pointerId !== e.pointerId) return;
     dragRef.current = undefined;
+    setSnapped(undefined);
     onChange(drag.start);
   }, [onChange]);
 
+  // F2: pressing or releasing Alt during a drag inverts the magnet at once, without waiting for the pointer to move.
+  // Keeping the default also keeps Alt from focusing the window menu.
+  const handleAltKey = useCallback((e: KeyboardEvent<SVGSVGElement>) => {
+    const drag = dragRef.current;
+    if (e.key !== 'Alt' || drag == null) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    dragTo(drag, drag.lastClient, e.type === 'keydown');
+    return true;
+  }, [dragTo]);
+
+  const handleKeyUp = useCallback((e: KeyboardEvent<SVGSVGElement>) => { handleAltKey(e); }, [handleAltKey]);
+
   const handleKeyDown = useCallback((e: KeyboardEvent<SVGSVGElement>) => {
+    if (handleAltKey(e)) return;
     if (e.key === 'Escape') {
       svgRef.current?.blur();
       return;
@@ -154,7 +207,7 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
     const step = e.shiftKey ? ARROW_STEP_SHIFT : ARROW_STEP;
     const next = applyRectDrag({ start: rects, target: activeTarget, handle: 'move', dx: delta[0] * step, dy: delta[1] * step, videoSize });
     if (!sameRects(next, rects)) onCommit(next, { keyboard: true });
-  }, [activeTarget, onCommit, rects, videoSize]);
+  }, [activeTarget, handleAltKey, onCommit, rects, videoSize]);
 
   const handleFocus = useCallback(() => setFocused(true), []);
   const handleBlur = useCallback(() => setFocused(false), []);
@@ -191,36 +244,53 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
   const labelAbove = maxBox.y - box.y > 2 * labelFontSize + 8;
   const labelY = labelAbove ? maxBox.y - labelFontSize - 10 : maxBox.y + labelFontSize + 6;
 
+  // F1 (T45): the chips go below the max rect, clear of its handles (or, without room there, inside it just above its
+  // bottom handles), on the side of the frame the max is on, so they don't run out of the player
+  const maxBottom = maxBox.y + maxBox.height;
+  const chipsGap = HANDLE_SIZE / 2 + 4;
+  const chipsBelow = maxBottom + chipsGap + CHIPS_HEIGHT <= containerSize.height;
+  const chipsOnLeft = maxBox.x + maxBox.width / 2 <= containerSize.width / 2;
+  const chipsLeft = Math.max(0, maxBox.x + HANDLE_SIZE);
+  const chipsRight = Math.max(0, containerSize.width - (maxBox.x + maxBox.width) + HANDLE_SIZE);
+  const chipsStyle: CSSProperties = {
+    position: 'absolute',
+    ...(chipsBelow ? { top: maxBottom + chipsGap } : { bottom: containerSize.height - (maxBottom - chipsGap) }),
+    ...(chipsOnLeft ? { left: chipsLeft } : { right: chipsRight, justifyContent: 'flex-end' }),
+    maxWidth: Math.max(0, containerSize.width - (chipsOnLeft ? chipsLeft : chipsRight) - 4),
+  };
+
   return (
-    <svg
-      ref={svgRef}
-      data-testid="rect-overlay"
-      style={svgStyle}
+    <>
+      <svg
+        ref={svgRef}
+        data-testid="rect-overlay"
+        style={svgStyle}
       // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-      tabIndex={-1}
-      onKeyDown={handleKeyDown}
-      onFocus={handleFocus}
-      onBlur={handleBlur}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerCancel}
-    >
-      {/* darken the frame outside max */}
-      <path
-        d={`M${box.x},${box.y}h${box.width}v${box.height}h${-box.width}Z M${maxBox.x},${maxBox.y}h${maxBox.width}v${maxBox.height}h${-maxBox.width}Z`}
-        style={{ fill: 'rgba(0,0,0,0.5)', fillRule: 'evenodd', pointerEvents: 'none' }}
-      />
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
+        onKeyUp={handleKeyUp}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+      >
+        {/* darken the frame outside max */}
+        <path
+          d={`M${box.x},${box.y}h${box.width}v${box.height}h${-box.width}Z M${maxBox.x},${maxBox.y}h${maxBox.width}v${maxBox.height}h${-maxBox.width}Z`}
+          style={{ fill: 'rgba(0,0,0,0.5)', fillRule: 'evenodd', pointerEvents: 'none' }}
+        />
 
-      <rect
-        x={maxBox.x}
-        y={maxBox.y}
-        width={maxBox.width}
-        height={maxBox.height}
-        style={{ fill: 'transparent', stroke: color, strokeWidth: activeTarget === 'max' && focused ? 3 : 2, cursor: 'move', pointerEvents: 'all' }}
-        onPointerDown={(e) => handlePointerDown(e, 'max', 'move')}
-      />
+        <rect
+          x={maxBox.x}
+          y={maxBox.y}
+          width={maxBox.width}
+          height={maxBox.height}
+          style={{ fill: 'transparent', stroke: color, strokeWidth: activeTarget === 'max' && focused ? 3 : 2, cursor: 'move', pointerEvents: 'all' }}
+          onPointerDown={(e) => handlePointerDown(e, 'max', 'move')}
+        />
 
-      {minBox != null && (
+        {minBox != null && (
         <rect
           x={minBox.x}
           y={minBox.y}
@@ -229,28 +299,31 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
           style={{ fill: 'transparent', stroke: color, strokeWidth: activeTarget === 'min' && focused ? 3 : 2, strokeDasharray: '6 4', cursor: 'move', pointerEvents: 'all' }}
           onPointerDown={(e) => handlePointerDown(e, 'min', 'move')}
         />
-      )}
+        )}
 
-      {/* the active rect's handles go last, so they win where they overlap */}
-      <g>{renderHandles(inactiveTarget, boxOf(inactiveTarget))}</g>
-      <g>{renderHandles(activeTarget, boxOf(activeTarget))}</g>
+        {/* the active rect's handles go last, so they win where they overlap */}
+        <g>{renderHandles(inactiveTarget, boxOf(inactiveTarget))}</g>
+        <g>{renderHandles(activeTarget, boxOf(activeTarget))}</g>
 
-      <text
-        data-testid="rect-label"
-        x={maxBox.x}
-        y={labelY}
-        style={{ fill: 'white', stroke: 'black', strokeWidth: 3, paintOrder: 'stroke', fontSize: labelFontSize, pointerEvents: 'none', userSelect: 'none' }}
-      >
-        <tspan x={maxBox.x + (labelAbove ? 0 : 6)}>
-          {`${t('Max')} ${maxRect.width}×${maxRect.height} · ${formatAspect(maxRect.width, maxRect.height)} · ${getOrientation(maxRect) === 'horizontal' ? t('Horizontal') : t('Vertical')}`}
-        </tspan>
-        {minRect != null && (
+        <text
+          data-testid="rect-label"
+          x={maxBox.x}
+          y={labelY}
+          style={{ fill: 'white', stroke: 'black', strokeWidth: 3, paintOrder: 'stroke', fontSize: labelFontSize, pointerEvents: 'none', userSelect: 'none' }}
+        >
+          <tspan x={maxBox.x + (labelAbove ? 0 : 6)}>
+            {`${t('Max')} ${maxRect.width}×${maxRect.height} · ${formatAspect(maxRect.width, maxRect.height)} · ${getOrientation(maxRect) === 'horizontal' ? t('Horizontal') : t('Vertical')}`}
+          </tspan>
+          {minRect != null && (
           <tspan x={maxBox.x + (labelAbove ? 0 : 6)} dy={labelFontSize + 3}>
             {`${t('Min')} ${minRect.width}×${minRect.height} · ${formatAspect(minRect.width, minRect.height)}`}
           </tspan>
-        )}
-      </text>
-    </svg>
+          )}
+        </text>
+      </svg>
+
+      {fits != null && <FitChips fits={fits} snapped={snapped} style={chipsStyle} />}
+    </>
   );
 }
 

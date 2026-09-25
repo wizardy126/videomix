@@ -51,6 +51,7 @@ import RenderProgressDialog from './videomix/components/RenderProgressDialog';
 import useClipThumbnails from './videomix/hooks/useClipThumbnails';
 import useMixVideoSize from './videomix/hooks/useMixVideoSize';
 import useMixPlayerTurn from './videomix/hooks/useMixPlayerTurn';
+import useFitLayout from './videomix/hooks/useFitLayout';
 import usePreviewConversion from './videomix/hooks/usePreviewConversion';
 import { getClipRotation } from './videomix/clipRotation';
 import { getMixProjectTitle, videoMixMode } from './videomix/workspace';
@@ -1641,6 +1642,8 @@ function App() {
 
   // VideoMix: "≈ m:ss" estimated duration (E3), visible in both tabs; reuses mixOverlays.fullPlan when the Mix tab has one
   const mixDuration = useMixDuration({ clips: mixProject.project.clips, settings: mixProject.project.settings, mixPlan: mixOverlays.fullPlan });
+  // F1/F2 (T45): the fractions of the fit chips, the magnet and "Fit to" (in 1:1, the axis of the last plan)
+  const mixFitLayout = useFitLayout({ settings: mixProject.project.settings, plan: mixOverlays.fullPlan });
 
   // VideoMix: approximate live preview of the mix in the player area while the Mix tab is shown (A1, T32). Its time
   // follows the Mix view cursor, and the play/pause keys drive it instead of the source player (see mainActions)
@@ -2757,6 +2760,7 @@ function App() {
                           clip={mixClips.selectedClip}
                           color={segColorsContext.getSegColor({ segColorIndex: mixClips.selectedClip.color }).hex()}
                           aspectLock={mixClips.aspectLock}
+                          fitLayout={mixFitLayout}
                           onAspectLockChange={mixClips.setAspectLock}
                           onChange={mixClips.handleRectsChange}
                           onCommit={mixClips.handleRectsCommit}
@@ -2838,6 +2842,7 @@ function App() {
                       sources={mixProject.project.sources}
                       thumbnailUrls={mixThumbnails.thumbnailUrls}
                       settings={mixProject.project.settings}
+                      fitLayout={mixFitLayout}
                       selectedClipId={mixClips.selectedClipId}
                       clipPins={mixClipPins}
                       onSelect={mixClipPins.userSelectClip}

@@ -25,6 +25,10 @@ import { getOrientation } from '../geometry';
 import { clipGainValues, getClipWarnings } from '../clips';
 import { getClipSelectModifiers } from '../hooks/useMixClipPins';
 import { canExtendBeyondMax } from '../planner/plannerInput';
+import { getClipFrame } from '../clipRotation';
+import { getFractionFits } from '../fitFractions';
+import type { FitLayout, FractionFit } from '../fitFractions';
+import { fitStatusSymbols, getFitDescription, getFractionName } from './FitChips';
 import type { ClipSelectModifiers, UseMixClipPins } from '../hooks/useMixClipPins';
 import type { ClipLinkInfo } from '../clipLinks';
 
@@ -41,8 +45,27 @@ const stopPropagation: MouseEventHandler = (e) => e.stopPropagation();
 
 const thumbnailStyle: CSSProperties = { width: 30, height: 30, flexShrink: 0, objectFit: 'cover', borderRadius: 3 };
 
+const fitLabelColors = { fits: 'var(--grass-11)', extends: 'var(--amber-11)' };
+
+/** F1 (T45): the fractions the clip fits in (✓, or ↔ by extending beyond its max), with the detail in the tooltip. */
 // eslint-disable-next-line react/display-name
-const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, groupColor, linkInfo, sequenceIndex, getClipMenu, onSetLink, dragging, settings, onSelect, onUpdate, onDuplicate, onRemove, onGoToSource }: {
+const ClipFitLabel = memo(({ fits }: { fits: FractionFit[] }) => {
+  const { t } = useTranslation();
+  const fitting = fits.filter((fit) => fit.status !== 'no');
+  const title = [t('Fit in the fractions of the output:'), ...fits.map((fit) => getFitDescription(fit, t))].join('\n');
+  return (
+    <span data-testid="clip-fit-label" title={title} style={{ display: 'flex', alignItems: 'center', gap: '.3em', whiteSpace: 'nowrap', flexShrink: 0 }}>
+      {fitting.length > 0 ? fitting.map((fit) => (
+        <span key={fit.fraction} data-testid={`clip-fit-${fit.fraction.replace('/', '-')}`} data-status={fit.status} style={{ color: fitLabelColors[fit.status === 'fits' ? 'fits' : 'extends'] }}>
+          {`${getFractionName(fit.fraction, t)}${fitStatusSymbols[fit.status]}`}
+        </span>
+      )) : <span style={{ color: 'var(--red-11)' }}>{fitStatusSymbols.no}</span>}
+    </span>
+  );
+});
+
+// eslint-disable-next-line react/display-name
+const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, groupColor, linkInfo, sequenceIndex, getClipMenu, onSetLink, dragging, settings, fitLayout, onSelect, onUpdate, onDuplicate, onRemove, onGoToSource }: {
   clip: MixClip,
   index: number,
   source: MixSource | undefined,
@@ -60,6 +83,8 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
   onSetLink: UseMixClipPins['userSetClipLink'],
   dragging?: boolean | undefined,
   settings: Pick<MixSettings, 'transition'>,
+  /** F1 (T45): the output layout of the fit label. */
+  fitLayout: FitLayout,
   onSelect: (id: string, modifiers?: ClipSelectModifiers) => void,
   onUpdate: (id: string, patch: MixClipPatch) => void,
   onDuplicate: (id: string) => void,
@@ -96,6 +121,11 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
   const duration = getClipDuration(clip);
   const warnings = useMemo(() => getClipWarnings(clip, settings), [clip, settings]);
   const orientation = getOrientation(clip.maxRect);
+  // F1 (T45): unknown until the source's size is (its frame bounds the extension beyond the max)
+  const fits = useMemo(() => {
+    const frame = getClipFrame(clip, source);
+    return frame != null ? getFractionFits({ maxRect: clip.maxRect, minRect: clip.minRect, frame, extendBeyondMax: canExtendBeyondMax(clip), layout: fitLayout }) : undefined;
+  }, [clip, fitLayout, source]);
 
   const style = useMemo<CSSProperties>(() => ({
     visibility: sortable.isDragging ? 'hidden' : undefined,
@@ -233,7 +263,8 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
       </div>
 
       {/* T34: moved down from the first row (with the drag handle, thumbnail, color badge and name) so the name field has the whole row's width */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '.5em', fontSize: '.8em', opacity: 0.8, marginTop: '.15em', paddingLeft: '1.1em' }}>
+      {/* T45: wraps, so the indicators at the end (fit label, orientation, warnings) aren't cut off in the narrow panel */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '.1em .5em', fontSize: '.8em', opacity: 0.8, marginTop: '.15em', paddingLeft: '1.1em' }}>
         <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 1, minWidth: 0 }} title={source?.path}>{source?.name ?? '?'}</span>
         <span style={{ whiteSpace: 'nowrap' }}>{formatTime(clip.start)} – {formatTime(clip.end)}</span>
         <span style={{ whiteSpace: 'nowrap', fontWeight: 'bold' }}>{formatDuration({ seconds: duration, shorten: true })}</span>
@@ -260,6 +291,7 @@ const ClipRow = memo(({ clip, index, source, thumbnailUrl, isSelected, pinTime, 
             {`${clip.rotation}°`}
           </span>
         )}
+        {fits != null && <ClipFitLabel fits={fits} />}
         <OrientationIcon style={iconStyle} title={`${orientation === 'horizontal' ? t('Horizontal') : t('Vertical')} ${clip.maxRect.width}×${clip.maxRect.height}`} />
         {warnings.noMin && <FaInfoCircle style={{ ...iconStyle, opacity: 0.6 }} title={t('No min rectangle: the clip can only be shown with its max rectangle, it will not be cropped any further')} />}
         {warnings.tooShort && <FaExclamationTriangle style={{ ...iconStyle, color: warningColor }} title={t('The clip is not longer than two transitions ({{duration}} s), its transitions will be shortened', { duration: 2 * settings.transition.duration })} />}
@@ -403,13 +435,15 @@ const SequenceSection = memo(({ clips, thumbnailUrls, selectedClipIds, dropActiv
 });
 
 /** Right panel: all the clips of the project, of any source, in list (= mix) order. Replaces SegmentList in VideoMix. */
-function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClipId, clipPins, onSelect, onUpdate, onReorder, onAdd, onDuplicate, onRemove, onGoToSource }: {
+function ClipList({ width, clips, sources, thumbnailUrls, settings, fitLayout, selectedClipId, clipPins, onSelect, onUpdate, onReorder, onAdd, onDuplicate, onRemove, onGoToSource }: {
   width: number,
   clips: MixClip[],
   sources: MixSource[],
   /** From `useClipThumbnails` (A2, T31), shared with `MixPlanView`. */
   thumbnailUrls: ReadonlyMap<string, string>,
   settings: Pick<MixSettings, 'transition'>,
+  /** F1 (T45): the output layout of the rows' fit labels (useFitLayout). */
+  fitLayout: FitLayout,
   selectedClipId: string | undefined,
   /** Multi-selection, pins and groups (A4, T30); chains and the always-visible sequence (T39). */
   clipPins: Pick<UseMixClipPins, 'selectedClipIds' | 'pinTimes' | 'groupColors' | 'getClipMenu' | 'linkInfos' | 'userSetClipLink' | 'sequence' | 'sequenceIndexes' | 'userAddToSequence' | 'userRemoveFromSequence' | 'userReorderSequence'>,
@@ -511,6 +545,7 @@ function ClipList({ width, clips, sources, thumbnailUrls, settings, selectedClip
       onSetLink={clipPins.userSetClipLink}
       dragging={dragging}
       settings={settings}
+      fitLayout={fitLayout}
       onSelect={onSelect}
       onUpdate={onUpdate}
       onDuplicate={onDuplicate}

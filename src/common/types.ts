@@ -126,6 +126,8 @@ export interface Config {
   overlayStylePresets: OverlayStylePreset[],
   /** VideoMix: maximum size in bytes of a project's render cache (D1, T28); 0 disables the cache. */
   renderCacheMaxBytes: number,
+  /** VideoMix: the rect editor's magnet (F2, T45), off by default; Alt while dragging inverts it. */
+  fitMagnet: boolean,
 }
 
 export interface ApiActionRequest {

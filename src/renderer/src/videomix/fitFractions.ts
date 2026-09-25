@@ -1,10 +1,11 @@
-import { getAspectRange, getAxisLengths, getExtensionRoom, getTolerantWidthRange, getWidthRange, normalizeClipRects, normalizeRectEven, transposeRect } from './geometry';
+import { getAspectRange, getAxisLengths, getExtensionRoom, getTolerantWidthRange, getWidthRange, normalizeClipRects, normalizeRectEven, rectContains, transposeRect } from './geometry';
 import type { LayoutAxis } from './geometry';
-import type { Size } from './overlayMath';
+import { getFrameRect } from './overlayMath';
+import type { ClipRects, DragHandle, RectTarget, Size } from './overlayMath';
 import { getClipFrame } from './clipRotation';
 import { canExtendBeyondMax } from './planner/plannerInput';
 import { getDefaultAxis } from './planner/types';
-import { getOutputSize } from './types';
+import { getOutputSize, MIN_RECT_SIZE } from './types';
 import type { MixClip, MixSettings, MixSource, Rect } from './types';
 
 // F1/F2 (v4, T44): in which fractions of the output's main axis a clip fits (1/3, 1/2, 2/3, full), the magnet that
@@ -334,4 +335,52 @@ export function fitMaxRectToFraction({ maxRect, minRect, frame, fraction, layout
     height,
   };
   return { ok: true, maxRect: toMainSpace(axis, rect) };
+}
+
+/**
+ * F2 magnet (T45): the edge of the dragged rect that snaps. An edge handle drags its edge; a corner drags two, and the
+ * one along the output's main axis snaps (left/right in columns, top/bottom in rows), which is the one that decides
+ * the fit. Moving doesn't snap.
+ */
+export function getSnapEdge(handle: DragHandle, axis: LayoutAxis): RectEdge | undefined {
+  if (handle === 'move') return undefined;
+  let horizontal: RectEdge | undefined;
+  if (handle.includes('e')) horizontal = 'right';
+  else if (handle.includes('w')) horizontal = 'left';
+  let vertical: RectEdge | undefined;
+  if (handle.includes('s')) vertical = 'bottom';
+  else if (handle.includes('n')) vertical = 'top';
+  if (horizontal != null && vertical != null) return axis === 'columns' ? horizontal : vertical;
+  return horizontal ?? vertical;
+}
+
+/**
+ * F2 magnet (T45): `rects` (the result of {@link applyRectDrag} for `target`/`handle`) with the dragged edge snapped to
+ * the exact proportion of the closest fraction's cell (`snapRectEdge`), if it's within `threshold` source px (per
+ * axis: the caller converts its screen threshold). The snapped max stays inside the frame and still contains the min;
+ * the snapped min stays inside the max. Undefined when nothing snaps (the drag goes on as is).
+ */
+export function snapRectDrag({ rects, target, handle, threshold, layout, videoSize }: {
+  rects: ClipRects,
+  target: RectTarget,
+  handle: DragHandle,
+  threshold: { x: number, y: number },
+  layout: FitLayout,
+  videoSize: Size,
+}): { rects: ClipRects, fraction: FitFraction } | undefined {
+  const edge = getSnapEdge(handle, layout.axis);
+  if (edge == null) return undefined;
+  const edgeThreshold = edge === 'left' || edge === 'right' ? threshold.x : threshold.y;
+  const bigEnough = (rect: Rect) => rect.width >= MIN_RECT_SIZE && rect.height >= MIN_RECT_SIZE;
+
+  if (target === 'max') {
+    const snapped = snapRectEdge({ rect: rects.maxRect, edge, threshold: edgeThreshold, layout, bounds: getFrameRect(videoSize) });
+    if (snapped == null || !bigEnough(snapped.rect) || (rects.minRect != null && !rectContains(snapped.rect, rects.minRect))) return undefined;
+    return { rects: { ...rects, maxRect: snapped.rect }, fraction: snapped.fraction };
+  }
+
+  if (rects.minRect == null) return undefined;
+  const snapped = snapRectEdge({ rect: rects.minRect, edge, threshold: edgeThreshold, layout, bounds: normalizeRectEven(rects.maxRect, 'shrink') });
+  if (snapped == null || !bigEnough(snapped.rect)) return undefined;
+  return { rects: { ...rects, minRect: snapped.rect }, fraction: snapped.fraction };
 }

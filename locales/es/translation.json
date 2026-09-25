@@ -1360,5 +1360,18 @@
   "Starts a chain of {{length}} linked clips of its source: they play one after the other in the same slot": "Empieza una cadena de {{length}} clips enlazados de su fuente: se reproducen uno tras otro en el mismo hueco",
   "The mix is longer than its maximum duration: it is cut at {{time}} with the fade-out, {{seconds}} s are left out": "El montaje dura más que su duración máxima: se corta en {{time}} con el fundido de salida y quedan fuera {{seconds}} s",
   "The transition of the mix": "La transición del montaje",
-  "Two clips of the same source are linked when the second one starts at most this long after the first one ends (clips that overlap are not): they play one after the other in the same slot. 0 turns it off. A link can be broken or made by hand from the clip list.": "Dos clips de la misma fuente se enlazan si el segundo empieza como mucho este tiempo después de que acabe el primero (los que se solapan, no): se reproducen uno tras otro en el mismo hueco. 0 lo desactiva. Un enlace se puede romper o crear a mano desde la lista de clips."
+  "Two clips of the same source are linked when the second one starts at most this long after the first one ends (clips that overlap are not): they play one after the other in the same slot. 0 turns it off. A link can be broken or made by hand from the clip list.": "Dos clips de la misma fuente se enlazan si el segundo empieza como mucho este tiempo después de que acabe el primero (los que se solapan, no): se reproducen uno tras otro en el mismo hueco. 0 lo desactiva. Un enlace se puede romper o crear a mano desde la lista de clips.",
+  "{{fraction}}: doesn't fit": "{{fraction}}: no encaja",
+  "{{fraction}}: doesn't fit ({{amount}})": "{{fraction}}: no encaja ({{amount}})",
+  "{{fraction}}: fits": "{{fraction}}: encaja",
+  "{{fraction}}: fits by showing more of the source than the max": "{{fraction}}: encaja mostrando más de la fuente que el máx.",
+  "{{pixels}} px over": "sobran {{pixels}} px",
+  "{{pixels}} px short": "faltan {{pixels}} px",
+  "Cannot fit the max to {{fraction}}: the min rectangle does not fit in a rectangle of that proportion inside the frame. Make the min smaller": "No se puede ajustar el máx. a {{fraction}}: el rectángulo mín. no cabe en un rectángulo de esa proporción dentro del fotograma. Reduce el mín.",
+  "Fit in the fractions of the output:": "Encaje en las fracciones de la salida:",
+  "Fit to": "Ajustar a",
+  "Full": "Completo",
+  "Magnet: off. Turn it on to snap dragged edges to the exact size of 1/3, 1/2 or 2/3 of the output. Hold Alt while dragging to turn it on for that drag": "Imán: desactivado. Actívalo para que los bordes que arrastras se enganchen al tamaño exacto de 1/3, 1/2 o 2/3 de la salida. Mantén Alt mientras arrastras para activarlo en ese arrastre",
+  "Magnet: on. Dragged edges snap to the exact size of 1/3, 1/2 or 2/3 of the output. Hold Alt while dragging to turn it off for that drag": "Imán: activado. Los bordes que arrastras se enganchan al tamaño exacto de 1/3, 1/2 o 2/3 de la salida. Mantén Alt mientras arrastras para desactivarlo en ese arrastre",
+  "Resize the max to exactly {{fraction}} of the output, centered on the min (or on the current max)": "Ajusta el máx. exactamente a {{fraction}} de la salida, centrado en el mín. (o en el máx. actual)"
 }

@@ -213,6 +213,7 @@ const defaults: Config = {
   overlayStylePresets: [],
   // 5 GB (DEFAULT_RENDER_CACHE_MAX_BYTES in the renderer's render/renderCache.ts)
   renderCacheMaxBytes: 5 * 1024 ** 3,
+  fitMagnet: false,
 };
 
 const configFileName = 'config.json'; // note: this is also hard-coded inside electron-store

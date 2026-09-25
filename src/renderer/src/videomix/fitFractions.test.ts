@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 
 import {
-  fitFractions, fitMaxRectToFraction, getClipFractionFits, getFitAxes, getFitLayout, getFractionCellAspect, getFractionFits, getFractionLength, snapRectEdge,
+  fitFractions, fitMaxRectToFraction, getClipFractionFits, getFitAxes, getFitLayout, getFractionCellAspect, getFractionFits, getFractionLength, getSnapEdge, snapRectDrag, snapRectEdge,
 } from './fitFractions';
 import type { FitFraction, FitLayout } from './fitFractions';
 import { distributeWidths, getAspectRange, getMainAspectRange, normalizeRectEven, rectContains } from './geometry';
@@ -208,6 +208,45 @@ describe('snapRectEdge (F2 magnet)', () => {
     const rows = layout(1080, 1920);
     // a 1/2 row is 1080×960: a max 1920 px wide snaps to 1706 px tall
     expect(snapRectEdge({ rect: { x: 0, y: 0, width: 1920, height: 1700 }, edge: 'bottom', threshold: 10, layout: rows })).toEqual({ rect: { x: 0, y: 0, width: 1920, height: 1706 }, fraction: '1/2' });
+  });
+});
+
+describe('snapRectDrag (F2 magnet while dragging, T45)', () => {
+  test('edges snap themselves; corners the edge along the main axis; moving does not snap', () => {
+    expect(getSnapEdge('e', 'columns')).toBe('right');
+    expect(getSnapEdge('n', 'columns')).toBe('top');
+    expect(getSnapEdge('se', 'columns')).toBe('right');
+    expect(getSnapEdge('nw', 'rows')).toBe('top');
+    expect(getSnapEdge('sw', 'rows')).toBe('bottom');
+    expect(getSnapEdge('move', 'columns')).toBeUndefined();
+  });
+
+  test('the max snaps inside the frame, keeping the min', () => {
+    const rects = { maxRect: { x: 0, y: 0, width: 950, height: 1080 }, minRect: { x: 100, y: 100, width: 400, height: 400 } };
+    const snapped = snapRectDrag({ rects, target: 'max', handle: 'e', threshold: { x: 16, y: 16 }, layout: L1080, videoSize: frame });
+    expect(snapped).toEqual({ rects: { ...rects, maxRect: { x: 0, y: 0, width: 960, height: 1080 } }, fraction: '1/2' });
+    // the snapped max would cut the min: no snap
+    expect(snapRectDrag({ rects: { maxRect: { x: 0, y: 0, width: 970, height: 1080 }, minRect: { x: 520, y: 100, width: 450, height: 400 } }, target: 'max', handle: 'e', threshold: { x: 16, y: 16 }, layout: L1080, videoSize: frame })).toBeUndefined();
+    // too far
+    expect(snapRectDrag({ rects, target: 'max', handle: 'e', threshold: { x: 4, y: 4 }, layout: L1080, videoSize: frame })).toBeUndefined();
+    // the threshold of the dragged axis counts
+    expect(snapRectDrag({ rects, target: 'max', handle: 'e', threshold: { x: 4, y: 100 }, layout: L1080, videoSize: frame })).toBeUndefined();
+    expect(snapRectDrag({ rects, target: 'max', handle: 'move', threshold: { x: 100, y: 100 }, layout: L1080, videoSize: frame })).toBeUndefined();
+  });
+
+  test('the min snaps inside the max; no min, no snap', () => {
+    const rects = { maxRect: { x: 0, y: 0, width: 1920, height: 1080 }, minRect: { x: 100, y: 100, width: 330, height: 540 } };
+    // a 1/3 cell is 640×1080: a min 540 px tall snaps to 320 px wide
+    expect(snapRectDrag({ rects, target: 'min', handle: 'w', threshold: { x: 12, y: 12 }, layout: L1080, videoSize: frame }))
+      .toEqual({ rects: { ...rects, minRect: { x: 110, y: 100, width: 320, height: 540 } }, fraction: '1/3' });
+    expect(snapRectDrag({ rects: { maxRect: rects.maxRect }, target: 'min', handle: 'w', threshold: { x: 12, y: 12 }, layout: L1080, videoSize: frame })).toBeUndefined();
+  });
+
+  test('a snapped max fits its fraction', () => {
+    const snapped = snapRectDrag({ rects: { maxRect: { x: 0, y: 0, width: 1290, height: 1080 } }, target: 'max', handle: 'se', threshold: { x: 20, y: 20 }, layout: L1080, videoSize: frame });
+    expect(snapped?.fraction).toBe('2/3');
+    const fits = getFractionFits({ maxRect: snapped!.rects.maxRect, layout: L1080, fractions: ['2/3'] });
+    expect(fits[0]!.status).toBe('fits');
   });
 });
 
