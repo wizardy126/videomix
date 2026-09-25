@@ -133,6 +133,15 @@ describe('extension beyond the max (E7, T38b)', () => {
   });
 });
 
+describe('aspect tolerance (T44b)', () => {
+  test('a clip without min 0.25 % off its cell is cut like the render (crop=1078:1920:2:0) and fills the cell', () => {
+    // removal plan: the rigid 9:16 clip e (1080x1920) in a 202x360 column (0.5611 against 0.5625)
+    const e = videos(getPreviewDrawList(model(testPlans.removal), 1).ops).find((op) => op.clipId === 'e')!;
+    expect(getCropForAspect(clip('e').maxRect, undefined, 202 / 360)).toMatchObject({ fit: 'fill', strategy: 'crop' });
+    expect(e).toMatchObject({ src: { x: 2, y: 0, width: 1078, height: 1920 }, dest: { x: 210, y: 0, width: 202, height: 360 } });
+  });
+});
+
 describe('turned clips (E9, T38d)', () => {
   test('the ops of a turned clip carry its turn (the canvas turns the picture); src stays in the turned frame', () => {
     const t = { id: 't', sourceId: 'h1080', start: 0, maxRect: { x: 0, y: 420, width: 1080, height: 1080 }, rotation: 90 as const };

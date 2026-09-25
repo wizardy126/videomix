@@ -12,6 +12,7 @@ import type { ColumnPlacement, LayoutKeyframe, MixPlan, PlannerClip } from './ty
 // 2. every placement whose cells are longer than its max allows (pillarbox in columns, letterbox in rows: its own
 //    in-place fill, or a column just made longer) gets `extendedMaxRect`, the max extended as much as those cells need
 //    (centred on the max, asymmetric at the frame edge). Render and preview crop with it (getExtendedCropForAspect).
+//    T44b: also the cells within the aspect tolerance that a clip with min would otherwise stretch (a few px).
 // The end of the video is untouched: columns whose clips have ended become fill as before (no keyframe is added), and
 // without extendable clips the plan is the same object.
 
@@ -91,14 +92,17 @@ function relayoutKeyframe(layout: LayoutKeyframe, widths: number[], main: number
 
 /**
  * Source px (even, at most the room) the clip's max must grow along the main axis to fill a cell `length` px long;
- * 0 if the cell isn't longer than the clip allows. Decided with getCropForAspect on the real cell, like the render.
+ * 0 if the cell isn't longer than the clip allows. Decided with getCropForAspect on the real cell, like the render:
+ * pillarbox/letterbox along the main axis, or (T44b) a cell within the aspect tolerance that the crop could only
+ * stretch (a clip with min; one without is cut inside its max instead, which comes first).
  */
 function getNeededExtension(e: Extendable, axis: LayoutAxis, length: number, frame: { width: number, height: number }) {
   const cell = getCellRect(axis, { offset: 0, length }, frame);
-  const { fit } = getCropForAspect(e.maxRect, e.minRect, cell.width / cell.height);
-  if (fit !== (axis === 'columns' ? 'pillarbox' : 'letterbox')) return 0;
+  const { fit, strategy } = getCropForAspect(e.maxRect, e.minRect, cell.width / cell.height);
   const crossLength = axis === 'columns' ? cell.height : cell.width;
   const needed = (length * e.crossMin) / crossLength - e.mainMax;
+  // a stretch across the main axis (the cell too short along it) isn't something an extension can help
+  if (fit !== (axis === 'columns' ? 'pillarbox' : 'letterbox') && !(strategy === 'stretch' && needed > 0)) return 0;
   return Math.min(e.room, Math.max(0, ceilEven(needed)));
 }
 

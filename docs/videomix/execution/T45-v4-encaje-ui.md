@@ -1,6 +1,6 @@
 # T45 · v4: indicador de encaje, imán y "Ajustar a" (F1, F2)
 
-- **Hito**: M11 · **Modelo**: Opus · **Depende de**: T44 · **Estado**: pendiente
+- **Hito**: M11 · **Modelo**: Opus · **Depende de**: T44, T44b · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 

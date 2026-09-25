@@ -3,7 +3,7 @@ import { describe, test, expect } from 'vitest';
 import {
   ASPECT_TOLERANCE, clampRect, distributeWidths, extendMaxRect, getAspectRange, getAxisLengths, getCellRect, getCropForAspect,
   getExtendedCropForAspect, getExtensionRoom, getMainAspectRange,
-  getOrientation, getScaleFactor, getWidthRange, normalizeClipRects, normalizeRectEven, rectAspect, rectContains,
+  getOrientation, getScaleFactor, getTolerantWidthRange, getWidthRange, normalizeClipRects, normalizeRectEven, rectAspect, rectContains,
   transposeAspectRange, transposeRect,
 } from './geometry';
 import type { AspectRange } from './geometry';
@@ -26,6 +26,7 @@ const clampNum = (v: number, min: number, max: number) => Math.min(max, Math.max
 const frame: Rect = { x: 0, y: 0, width: 1920, height: 1080 };
 
 const isEven = (n: number) => n % 2 === 0;
+const floorEven = (v: number) => 2 * Math.floor(v / 2);
 const isEvenRect = (r: Rect) => isEven(r.x) && isEven(r.y) && isEven(r.width) && isEven(r.height);
 
 function intersect(a: Rect, b: Rect): Rect {
@@ -115,21 +116,21 @@ describe('getCropForAspect', () => {
   const centerMin = { x: 760, y: 340, width: 400, height: 400 };
 
   test('min == max', () => {
-    expect(getCropForAspect(frame, undefined, 16 / 9)).toEqual({ crop: frame, fit: 'fill' });
-    expect(getCropForAspect(frame, undefined, 32 / 9)).toEqual({ crop: frame, fit: 'pillarbox' });
-    expect(getCropForAspect(frame, undefined, 8 / 9)).toEqual({ crop: frame, fit: 'letterbox' });
+    expect(getCropForAspect(frame, undefined, 16 / 9)).toEqual({ crop: frame, fit: 'fill', strategy: 'none' });
+    expect(getCropForAspect(frame, undefined, 32 / 9)).toEqual({ crop: frame, fit: 'pillarbox', strategy: 'none' });
+    expect(getCropForAspect(frame, undefined, 8 / 9)).toEqual({ crop: frame, fit: 'letterbox', strategy: 'none' });
   });
 
   test('preferred aspect shows the whole max', () => {
-    expect(getCropForAspect(frame, centerMin, 16 / 9)).toEqual({ crop: frame, fit: 'fill' });
+    expect(getCropForAspect(frame, centerMin, 16 / 9)).toEqual({ crop: frame, fit: 'fill', strategy: 'none' });
   });
 
   test('square crop centered on min', () => {
-    expect(getCropForAspect(frame, centerMin, 1)).toEqual({ crop: { x: 420, y: 0, width: 1080, height: 1080 }, fit: 'fill' });
+    expect(getCropForAspect(frame, centerMin, 1)).toEqual({ crop: { x: 420, y: 0, width: 1080, height: 1080 }, fit: 'fill', strategy: 'none' });
   });
 
   test('wide crop is width-limited', () => {
-    expect(getCropForAspect(frame, centerMin, 3)).toEqual({ crop: { x: 0, y: 220, width: 1920, height: 640 }, fit: 'fill' });
+    expect(getCropForAspect(frame, centerMin, 3)).toEqual({ crop: { x: 0, y: 220, width: 1920, height: 640 }, fit: 'fill', strategy: 'none' });
   });
 
   test('min at the edges of max', () => {
@@ -139,8 +140,8 @@ describe('getCropForAspect', () => {
   });
 
   test('extreme aspects', () => {
-    expect(getCropForAspect(frame, centerMin, 10)).toEqual({ crop: { x: 0, y: 340, width: 1920, height: 400 }, fit: 'pillarbox' });
-    expect(getCropForAspect(frame, centerMin, 0.05)).toEqual({ crop: { x: 760, y: 0, width: 400, height: 1080 }, fit: 'letterbox' });
+    expect(getCropForAspect(frame, centerMin, 10)).toEqual({ crop: { x: 0, y: 340, width: 1920, height: 400 }, fit: 'pillarbox', strategy: 'none' });
+    expect(getCropForAspect(frame, centerMin, 0.05)).toEqual({ crop: { x: 760, y: 0, width: 400, height: 1080 }, fit: 'letterbox', strategy: 'none' });
   });
 
   test('tolerance around the range limits', () => {
@@ -149,6 +150,30 @@ describe('getCropForAspect', () => {
     expect(getCropForAspect(frame, centerMin, range.max * (1 + ASPECT_TOLERANCE * 2)).fit).toBe('pillarbox');
     expect(getCropForAspect(frame, centerMin, range.min * (1 - ASPECT_TOLERANCE / 2)).fit).toBe('fill');
     expect(getCropForAspect(frame, centerMin, range.min * (1 - ASPECT_TOLERANCE * 2)).fit).toBe('letterbox');
+  });
+
+  test('T44b: within the tolerance a clip without min is cut inside its max, centred, and scaled uniformly', () => {
+    const third: Rect = { x: 100, y: 0, width: 426, height: 720 };
+    // a 428x720 cell (0.5944 against 0.5917): 4 px less height, 2 px at the top and 2 at the bottom
+    expect(getCropForAspect(third, undefined, 428 / 720)).toEqual({ crop: { x: 100, y: 2, width: 426, height: 716 }, fit: 'fill', strategy: 'crop' });
+    // a narrower 424x720 cell: less width (the even centring takes 2 px from one side)
+    expect(getCropForAspect(third, undefined, 424 / 720)).toEqual({ crop: { x: 102, y: 0, width: 424, height: 720 }, fit: 'fill', strategy: 'crop' });
+    // a mismatch below the even rounding of the crop changes nothing
+    expect(getCropForAspect(third, undefined, 426.5 / 720)).toEqual({ crop: third, fit: 'fill', strategy: 'none' });
+    // beyond the tolerance: pillarbox with the whole max, as before
+    expect(getCropForAspect(third, undefined, 432 / 720)).toEqual({ crop: third, fit: 'pillarbox', strategy: 'none' });
+  });
+
+  test('T44b: within the tolerance a clip with min keeps the crop at the range limit, stretched', () => {
+    const max: Rect = { x: 0, y: 0, width: 1920, height: 1080 };
+    const min: Rect = { x: 760, y: 140, width: 400, height: 800 };
+    // range [400/1080, 1920/800 = 2.4]
+    expect(getCropForAspect(max, min, 2.4 * 1.005)).toEqual({ crop: { x: 0, y: 140, width: 1920, height: 800 }, fit: 'fill', strategy: 'stretch' });
+    expect(getCropForAspect(max, min, (400 / 1080) * 0.995)).toEqual({ crop: { x: 760, y: 0, width: 400, height: 1080 }, fit: 'fill', strategy: 'stretch' });
+    // at the limit itself, nothing to absorb
+    expect(getCropForAspect(max, min, 2.4).strategy).toBe('none');
+    // a min touching the max's edges is the same (the explicit min is a hard limit)
+    expect(getCropForAspect(max, max, (16 / 9) * 1.005)).toEqual({ crop: max, fit: 'fill', strategy: 'stretch' });
   });
 
   test('odd rects give even crops inside max', () => {
@@ -170,19 +195,34 @@ describe('getCropForAspect', () => {
       // log-uniform aspects well beyond both limits
       const aspect = Math.exp(Math.log(range.min / 3) + rnd() * (Math.log(range.max * 3) - Math.log(range.min / 3)));
 
-      const { crop, fit } = getCropForAspect(max, min, aspect);
+      const { crop, fit, strategy } = getCropForAspect(max, min, aspect);
       const normalized = normalizeClipRects(max, min);
-      const ctx = { i, max, min, aspect, crop, fit };
+      const ctx = { i, max, min, aspect, crop, fit, strategy };
 
       expect(isEvenRect(crop), JSON.stringify(ctx)).toBe(true);
       expect(rectContains(max, crop), JSON.stringify(ctx)).toBe(true);
       expect(rectContains(sourceFrame, crop), JSON.stringify(ctx)).toBe(true);
-      expect(rectContains(crop, normalized.min), JSON.stringify(ctx)).toBe(true);
-      // with even inputs the min is fully contained; with odd ones, all of min that lies in the even max
-      expect(rectContains(crop, evenInputs ? (min ?? max) : intersect(min ?? max, normalized.max)), JSON.stringify(ctx)).toBe(true);
+      if (strategy === 'crop') {
+        // T44b: only a clip without min, cut by at most the tolerance (+ the even rounding) across the mismatch, centred
+        expect(min, JSON.stringify(ctx)).toBeUndefined();
+        const m = normalized.max;
+        const cutWidth = crop.width < m.width;
+        expect(cutWidth ? crop.height : crop.width, JSON.stringify(ctx)).toBe(cutWidth ? m.height : m.width);
+        const [size, full] = cutWidth ? [crop.width, m.width] : [crop.height, m.height];
+        expect(size, JSON.stringify(ctx)).toBeGreaterThanOrEqual(full * (1 - ASPECT_TOLERANCE) - 2);
+        const start = cutWidth ? crop.x - m.x : crop.y - m.y;
+        expect(Math.abs(start - (full - size - start)), JSON.stringify(ctx)).toBeLessThanOrEqual(2);
+        // closer to the requested aspect than the whole max
+        expect(Math.abs(Math.log(rectAspect(crop) / aspect)), JSON.stringify(ctx)).toBeLessThan(Math.abs(Math.log(rectAspect(m) / aspect)));
+      } else {
+        expect(rectContains(crop, normalized.min), JSON.stringify(ctx)).toBe(true);
+        // with even inputs the min is fully contained; with odd ones, all of min that lies in the even max
+        expect(rectContains(crop, evenInputs ? (min ?? max) : intersect(min ?? max, normalized.max)), JSON.stringify(ctx)).toBe(true);
+      }
 
       if (aspect >= range.min && aspect <= range.max) {
         expect(fit, JSON.stringify(ctx)).toBe('fill');
+        expect(strategy, JSON.stringify(ctx)).toBe('none');
         // requested aspect within 1 px on the dimension that was rounded
         const ok = Math.abs(crop.width - aspect * crop.height) <= 1 || Math.abs(crop.height - crop.width / aspect) <= 1;
         expect(ok, JSON.stringify(ctx)).toBe(true);
@@ -194,6 +234,15 @@ describe('getCropForAspect', () => {
         expect(rectAspect(crop)).toBeCloseTo(range.min, 9);
       } else {
         expect(fit, JSON.stringify(ctx)).toBe('fill');
+        // T44b: within the tolerance, a clip without min is cut, one with min stretched (unless the rounding covers it)
+        if (min == null) {
+          expect(strategy, JSON.stringify(ctx)).toBe(rectContains(crop, normalized.max) ? 'none' : 'crop');
+        } else {
+          // the crop at the range limit; stretched, unless the mismatch is below the even rounding of its size
+          expect(rectAspect(crop)).toBeCloseTo(aspect > range.max ? range.max : range.min, 9);
+          const mismatch = aspect > range.max ? aspect * crop.height - crop.width : crop.width / aspect - crop.height;
+          expect(strategy, JSON.stringify(ctx)).toBe(mismatch >= 1 ? 'stretch' : 'none');
+        }
       }
     }
   });
@@ -259,6 +308,7 @@ describe('distributeWidths', () => {
     let feasible = 0;
     let withFill = 0;
     let infeasible = 0;
+    let tolerated = 0;
     for (let i = 0; i < 3000; i += 1) {
       const height = heights[randInt(rnd, 0, heights.length - 1)]!;
       const width = (height * 16) / 9;
@@ -275,38 +325,90 @@ describe('distributeWidths', () => {
       const clips: AspectRange[] = rects.map(({ max, min }) => getAspectRange(max, min));
       const result = distributeWidths({ clips, width, height, gap });
       const bounds = clips.map((c) => getWidthRange(c, height));
+      const tolerant = clips.map((c) => getTolerantWidthRange(c, height));
       const usable = width - (n - 1) * gap;
       const ctx = JSON.stringify({ i, height, gap, clips, result });
 
       if (result == null) {
         infeasible += 1;
-        expect(bounds.reduce((acc, bound) => acc + bound.min, 0), ctx).toBeGreaterThan(usable);
+        // T44b: not even within the tolerance
+        expect(tolerant.reduce((acc, bound) => acc + bound.min, 0), ctx).toBeGreaterThan(usable);
       } else {
         const sum = result.widths.reduce((acc, w) => acc + w, 0);
         expect(sum + (n - 1) * gap + result.fill, ctx).toBe(width);
         expect(result.fill, ctx).toBeGreaterThanOrEqual(0);
+        const exact = result.widths.every((w, j) => w >= bounds[j]!.min && w <= bounds[j]!.max);
         result.widths.forEach((w, j) => {
           expect(isEven(w), ctx).toBe(true);
-          expect(w, ctx).toBeGreaterThanOrEqual(bounds[j]!.min);
-          expect(w, ctx).toBeLessThanOrEqual(bounds[j]!.max);
+          expect(w, ctx).toBeGreaterThanOrEqual(tolerant[j]!.min);
+          expect(w, ctx).toBeLessThanOrEqual(tolerant[j]!.max);
           // every column can be filled by a crop of its clip (a rigid clip whose exact width isn't even is off by
           // 1 px, which the tolerance absorbs unless the column is very narrow)
-          if (bounds[j]!.min < bounds[j]!.max || w >= 2 / ASPECT_TOLERANCE) {
+          if (bounds[j]!.min < bounds[j]!.max || w >= 2 / ASPECT_TOLERANCE || w !== bounds[j]!.min) {
             expect(getCropForAspect(rects[j]!.max, rects[j]!.min, w / height).fit, ctx).toBe('fill');
           }
         });
         if (result.fill > 1) {
           withFill += 1;
+          // the tolerance is only used when it removes all the fill
           expect(result.widths, ctx).toEqual(bounds.map((b) => b.max));
-        } else {
+        } else if (exact) {
           feasible += 1;
+        } else {
+          // T44b: only when the exact widths would leave fill or not fit, all of them on the same side of their range
+          tolerated += 1;
+          const sumExact = (key: 'min' | 'max') => bounds.reduce((acc, b) => acc + b[key], 0);
+          expect(sumExact('max') < floorEven(usable) || sumExact('min') > floorEven(usable), ctx).toBe(true);
+          const wider = result.widths.every((w, j) => w >= bounds[j]!.max);
+          const narrower = result.widths.every((w, j) => w <= bounds[j]!.min);
+          expect(wider || narrower, ctx).toBe(true);
         }
       }
     }
-    // make sure the generator covers all three cases
+    // make sure the generator covers all the cases
     expect(feasible).toBeGreaterThan(100);
     expect(withFill).toBeGreaterThan(100);
     expect(infeasible).toBeGreaterThan(100);
+    expect(tolerated).toBeGreaterThan(5);
+  });
+
+  test('T44b: tolerant widths are those getCropForAspect fills, around the exact ones', () => {
+    // rigid 1/3 of 1280x720 ("Fit to 1/3" of a 16:9 source: 426x720): exactly 426.67 px would be needed
+    const third = getAspectRange({ x: 0, y: 0, width: 426, height: 720 });
+    expect(getWidthRange(third, 720)).toEqual({ min: 426, max: 426, preferred: 426 });
+    expect(getTolerantWidthRange(third, 720)).toEqual({ min: 422, max: 430 });
+    // the collapsed width of a range too narrow for an even width is always inside
+    const nine16 = getAspectRange({ x: 0, y: 0, width: 1080, height: 1920 });
+    expect(getTolerantWidthRange(nine16, 1080)).toEqual({ min: 602, max: 612 });
+    for (const w of [422, 424, 428, 430]) expect(getCropForAspect({ x: 0, y: 0, width: 426, height: 720 }, undefined, w / 720).fit).toBe('fill');
+    for (const w of [420, 432]) expect(getCropForAspect({ x: 0, y: 0, width: 426, height: 720 }, undefined, w / 720).fit).not.toBe('fill');
+  });
+
+  test('T44b: three rigid clips fitted to 1/3 leave no fill, with and without gap', () => {
+    // 16:9 sources, "Fit to 1/3" at 1280x720: 426x720 (426.67 rounded); before T44b, 2 px of fill
+    const third = getAspectRange({ x: 0, y: 0, width: 426, height: 720 });
+    expect(distributeWidths({ clips: [third, third, third], width: 1280, height: 720, gap: 0 })).toEqual({ widths: [428, 426, 426], fill: 0 });
+    // with a 10 px gap: 420 px each exactly (the rigid clips are 1260/3 = 420 px only with a 420x720 max)
+    const gapThird = getAspectRange({ x: 0, y: 0, width: 420, height: 720 });
+    expect(distributeWidths({ clips: [gapThird, gapThird, gapThird], width: 1280, height: 720, gap: 10 })).toEqual({ widths: [420, 420, 420], fill: 0 });
+    // a 9:16 source (720x1280) fitted to 1/3: 720x1214, 427.02 px, rounded to 428: before T44b the row didn't fit
+    const fitted = getAspectRange({ x: 0, y: 34, width: 720, height: 1214 });
+    expect(getWidthRange(fitted, 720)).toEqual({ min: 428, max: 428, preferred: 428 });
+    expect(distributeWidths({ clips: [fitted, fitted, fitted], width: 1280, height: 720, gap: 0 })).toEqual({ widths: [428, 426, 426], fill: 0 });
+    // 1920x1080 with a 6 px gap: 636 px each; a 1080x1920 source fitted to 1/3 (1080x1834, 636.00 px) and a 16:9 one
+    // (636x1080) fit exactly; with an 8 px gap (634.67 px) they need the tolerance
+    const v1080 = getAspectRange({ x: 0, y: 0, width: 1080, height: 1834 });
+    expect(distributeWidths({ clips: [v1080, v1080, v1080], width: 1920, height: 1080, gap: 6 })).toEqual({ widths: [636, 636, 636], fill: 0 });
+    const h1080 = getAspectRange({ x: 0, y: 0, width: 634, height: 1080 });
+    expect(distributeWidths({ clips: [h1080, h1080, h1080], width: 1920, height: 1080, gap: 8 })).toEqual({ widths: [636, 634, 634], fill: 0 });
+  });
+
+  test('T44b: the tolerance is not used when fill would remain anyway, nor when the exact widths suffice', () => {
+    const vertical916 = getAspectRange({ x: 0, y: 0, width: 1080, height: 1920 });
+    // three real 9:16 clips at 1280x720: 405 px each, 5 % short of a third: fill stays (E7 may extend them)
+    expect(distributeWidths({ clips: [vertical916, vertical916, vertical916], width: 1280, height: 720, gap: 0 })).toEqual({ widths: [406, 406, 406], fill: 62 });
+    const flexible = getAspectRange({ x: 0, y: 0, width: 1080, height: 1920 }, { x: 270, y: 160, width: 540, height: 1600 });
+    expect(distributeWidths({ clips: [flexible, flexible, flexible], width: 1920, height: 1080, gap: 0 })).toEqual({ widths: [640, 640, 640], fill: 0 });
   });
 
   test('is deterministic', () => {
@@ -426,16 +528,16 @@ describe('extension beyond the max (E7, T38b)', () => {
 
   test('extended crop: centred on the max, shifted at the edge, pillarbox for what the extension lacks', () => {
     const all = frameRect(source);
-    expect(getExtendedCropForAspect(middle, undefined, all, 16 / 9)).toEqual({ crop: all, fit: 'fill' });
-    expect(getExtendedCropForAspect(middle, undefined, all, 1)).toEqual({ crop: { x: 420, y: 0, width: 1080, height: 1080 }, fit: 'fill' });
-    expect(getExtendedCropForAspect(nearLeft, undefined, all, 1)).toEqual({ crop: { x: 0, y: 0, width: 1080, height: 1080 }, fit: 'fill' });
+    expect(getExtendedCropForAspect(middle, undefined, all, 16 / 9)).toEqual({ crop: all, fit: 'fill', strategy: 'extend' });
+    expect(getExtendedCropForAspect(middle, undefined, all, 1)).toEqual({ crop: { x: 420, y: 0, width: 1080, height: 1080 }, fit: 'fill', strategy: 'extend' });
+    expect(getExtendedCropForAspect(nearLeft, undefined, all, 1)).toEqual({ crop: { x: 0, y: 0, width: 1080, height: 1080 }, fit: 'fill', strategy: 'extend' });
     // limited extension: all of it, and the rest is pillarbox
     const partial = extendMaxRect(middle, source, 'horizontal', 400);
-    expect(getExtendedCropForAspect(middle, undefined, partial, 16 / 9)).toEqual({ crop: partial, fit: 'pillarbox' });
+    expect(getExtendedCropForAspect(middle, undefined, partial, 16 / 9)).toEqual({ crop: partial, fit: 'pillarbox', strategy: 'extend' });
     // with a min: the crop keeps the height (and position) of the min, as the crop at the range limit
     const min: Rect = { x: 656, y: 140, width: 608, height: 800 };
-    expect(getCropForAspect(middle, min, 16 / 9)).toEqual({ crop: min, fit: 'pillarbox' });
-    expect(getExtendedCropForAspect(middle, min, all, 16 / 9)).toEqual({ crop: { x: 250, y: 140, width: 1422, height: 800 }, fit: 'fill' });
+    expect(getCropForAspect(middle, min, 16 / 9)).toEqual({ crop: min, fit: 'pillarbox', strategy: 'none' });
+    expect(getExtendedCropForAspect(middle, min, all, 16 / 9)).toEqual({ crop: { x: 250, y: 140, width: 1422, height: 800 }, fit: 'fill', strategy: 'extend' });
   });
 
   test('extended crop: vertical (rows) is the transpose', () => {
@@ -443,10 +545,25 @@ describe('extension beyond the max (E7, T38b)', () => {
     const ext = extendMaxRect(wide, source, 'vertical', 280);
     expect(ext).toEqual(frameRect(source));
     // a 1080x1000 row: 1920x1778 would be needed, the source has 1080
-    expect(getExtendedCropForAspect(wide, undefined, ext, 1080 / 1000)).toEqual({ crop: ext, fit: 'letterbox' });
-    expect(getExtendedCropForAspect(wide, undefined, ext, 1920 / 1000)).toEqual({ crop: { x: 0, y: 40, width: 1920, height: 1000 }, fit: 'fill' });
+    expect(getExtendedCropForAspect(wide, undefined, ext, 1080 / 1000)).toEqual({ crop: ext, fit: 'letterbox', strategy: 'extend' });
+    expect(getExtendedCropForAspect(wide, undefined, ext, 1920 / 1000)).toEqual({ crop: { x: 0, y: 40, width: 1920, height: 1000 }, fit: 'fill', strategy: 'extend' });
     const t = getExtendedCropForAspect(transposeRect(wide), undefined, transposeRect(ext), 1000 / 1920);
-    expect(t).toEqual({ crop: transposeRect({ x: 0, y: 40, width: 1920, height: 1000 }), fit: 'fill' });
+    expect(t).toEqual({ crop: transposeRect({ x: 0, y: 40, width: 1920, height: 1000 }), fit: 'fill', strategy: 'extend' });
+  });
+
+  test('T44b: extended crop: within the tolerance a clip with min shows a few px beyond the max instead of stretching', () => {
+    const min: Rect = { x: 656, y: 140, width: 608, height: 800 };
+    const wide = (608 / 800) * 1.008; // 0.8 % wider than the range allows
+    expect(getCropForAspect(middle, min, wide)).toEqual({ crop: { x: 656, y: 140, width: 608, height: 800 }, fit: 'fill', strategy: 'stretch' });
+    const ext = extendMaxRect(middle, source, 'horizontal', 6);
+    expect(getExtendedCropForAspect(middle, min, ext, wide)).toEqual({ crop: { x: 654, y: 140, width: 612, height: 800 }, fit: 'fill', strategy: 'extend' });
+    // a clip without min is cut inside its max first: the extension isn't used
+    expect(getExtendedCropForAspect(middle, undefined, ext, (608 / 1080) * 1.008).strategy).toBe('crop');
+    // narrower cells can't use a horizontal extension: still stretched
+    expect(getExtendedCropForAspect(middle, min, ext, (608 / 1080) * 0.995).strategy).toBe('stretch');
+    // rows: the transpose
+    const t = getExtendedCropForAspect(transposeRect(middle), transposeRect(min), transposeRect(ext), 1 / wide);
+    expect(t).toEqual({ crop: transposeRect({ x: 654, y: 140, width: 612, height: 800 }), fit: 'fill', strategy: 'extend' });
   });
 
   test('extended crop properties: even, inside the extended rect, contains the min, fills when the extension allows it', () => {

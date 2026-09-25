@@ -18,10 +18,36 @@ export interface AspectRange {
 export type CropFit = 'fill' | 'pillarbox' | 'letterbox';
 
 /**
- * Relative aspect mismatch that we absorb by stretching instead of pillarbox/letterbox.
- * Even-pixel rounding can't hit an aspect exactly, and a 1% stretch is invisible, while a 1-2 px fill sliver is not.
+ * Relative aspect mismatch (1 %) that a crop absorbs instead of leaving pillarbox/letterbox bars (01-requisitos §12 F1,
+ * T44b). Even-pixel sizes can't hit an aspect exactly (e.g. a third of 1280 px is 426.67 px), and a few pixels of fill
+ * are much more visible than a 1 % difference. The planner accepts widths this far outside a clip's aspect range
+ * ({@link getTolerantWidthRange}), only when the exact range would leave fill or not fit; the crop absorbs the
+ * mismatch as {@link CropStrategy} says.
  */
 export const ASPECT_TOLERANCE = 0.01;
+
+/**
+ * How a crop absorbs a cell aspect within {@link ASPECT_TOLERANCE} outside the clip's aspect range (T44b), in this order
+ * of preference:
+ * - `crop`: cut up to 1 % more of the max across the mismatch (a wider cell: less height, taken evenly from the top and
+ *   the bottom; a narrower one: less width), and scale the picture uniformly. Only for a clip without min (min = max is
+ *   the "whole picture", not a hard limit): with a min, the crop at the range limit already spans the min in that
+ *   direction, so it can't be cut. Nothing outside the max is shown.
+ * - `extend`: show a few px beyond the max (E7): only {@link getExtendedCropForAspect}, when the planner extended the
+ *   max (`ColumnPlacement.extendedMaxRect`) along the main axis because the clip allows it and the source has material.
+ * - `stretch`: the crop at the range limit, stretched to the cell (at most 1 %), when nothing of the above is possible.
+ *
+ * `none`: no tolerance used: the crop has the cell's aspect up to the even rounding of its size, or the cell is further
+ * than the tolerance outside the range (pillarbox/letterbox bars).
+ */
+export type CropStrategy = 'none' | 'crop' | 'extend' | 'stretch';
+
+/** A clip's crop for a cell: the source rect, how it sits in the cell and how a small mismatch is absorbed. */
+export interface CellCrop {
+  crop: Rect,
+  fit: CropFit,
+  strategy: CropStrategy,
+}
 
 // guards against float noise like 607.9999999 when converting to pixel bounds
 const EPSILON = 1e-6;
@@ -110,27 +136,49 @@ export function getAspectRange(maxRect: Rect, minRect?: Rect | undefined): Aspec
  *   stay inside max. `fit` is `fill`.
  * - Wider than the range (`> max`): crop at the max aspect; the caller scales it to the cell height and fills the
  *   sides (`pillarbox`). Narrower (`< min`): crop at the min aspect, scaled to the cell width (`letterbox`).
- * - Within {@link ASPECT_TOLERANCE} outside the range it's still `fill` (the crop at the range limit is stretched).
+ * - Within {@link ASPECT_TOLERANCE} outside the range it's still `fill` (T44b, {@link CropStrategy}): a clip without
+ *   min is cut up to 1 % more across the mismatch, centred in its max (`crop`); a clip with min keeps the crop at the
+ *   range limit, stretched (`stretch`; {@link getExtendedCropForAspect} may extend it instead). When the even rounding
+ *   of the crop's size already covers the mismatch, nothing changes (`none`).
  *
- * The crop always has even x/y/width/height, contains the normalized min and lies inside max.
+ * The crop always has even x/y/width/height and lies inside max; it contains the normalized min (a clip without min,
+ * min = max, loses at most 1 % of it with `crop`).
  */
-export function getCropForAspect(maxRect: Rect, minRect: Rect | undefined, aspect: number): { crop: Rect, fit: CropFit } {
+export function getCropForAspect(maxRect: Rect, minRect: Rect | undefined, aspect: number): CellCrop {
   invariant(aspect > 0 && Number.isFinite(aspect), 'Invalid aspect');
   const { max, min } = normalizeClipRects(maxRect, minRect);
   const range = { min: min.width / max.height, max: max.width / min.height, preferred: max.width / max.height };
+  // without a min the whole max is what the user wants to see, not a hard limit: the tolerance may cut into it
+  const rigid = minRect == null;
 
   let fit: CropFit = 'fill';
+  let strategy: CropStrategy = 'none';
   let width: number;
   let height: number;
   if (aspect >= range.max) {
     // widest possible crop, computed directly to stay exact
-    if (aspect > range.max * (1 + ASPECT_TOLERANCE)) fit = 'pillarbox';
     width = max.width;
     height = min.height;
+    if (aspect > range.max * (1 + ASPECT_TOLERANCE)) {
+      fit = 'pillarbox';
+    } else if (rigid) {
+      // (min = max) less height, at most 1 %
+      height = clamp(roundEven(width / aspect), 2, max.height);
+      if (height < max.height) strategy = 'crop';
+    } else if (roundEven(aspect * height) > width) {
+      strategy = 'stretch';
+    }
   } else if (aspect <= range.min) {
-    if (aspect < range.min * (1 - ASPECT_TOLERANCE)) fit = 'letterbox';
     width = min.width;
     height = max.height;
+    if (aspect < range.min * (1 - ASPECT_TOLERANCE)) {
+      fit = 'letterbox';
+    } else if (rigid) {
+      width = clamp(roundEven(aspect * height), 2, max.width);
+      if (width < max.width) strategy = 'crop';
+    } else if (roundEven(width / aspect) > height) {
+      strategy = 'stretch';
+    }
   } else if (aspect <= range.preferred) {
     // height-limited: use the full max height. The bounds are even, so rounding a value inside them stays inside.
     height = max.height;
@@ -141,7 +189,8 @@ export function getCropForAspect(maxRect: Rect, minRect: Rect | undefined, aspec
     height = clamp(roundEven(width / aspect), min.height, max.height);
   }
 
-  // Center on min, then shift into max. Both intervals have even ends, so the result stays even and contains min.
+  // Center on min, then shift into max. Both intervals have even ends, so the result stays even and contains min (for
+  // the tolerance cut of a clip without min, it's centred in the max).
   const place = (minStart: number, minSize: number, maxStart: number, maxSize: number, size: number) => (
     clamp(roundEven(minStart + (minSize - size) / 2), maxStart, maxStart + maxSize - size)
   );
@@ -154,6 +203,7 @@ export function getCropForAspect(maxRect: Rect, minRect: Rect | undefined, aspec
       height,
     },
     fit,
+    strategy,
   };
 }
 
@@ -215,38 +265,24 @@ export function getWidthRange(range: AspectRange, height: number) {
 }
 
 /**
- * Share the row width among `clips` (left to right), separated by `gap` px.
- *
- * - Feasible (Σ min widths ≤ usable width ≤ Σ max widths): starts at each preferred width and spreads the difference
- *   proportionally to each clip's margin towards its max (or min). This saturates all clips at the same time, so no
- *   iteration is needed. `fill` is 0, or 1 if the usable width is odd (odd gap; validateMixProject warns about it).
- * - Σ max widths below the usable width: every clip takes its max width and the rest is returned as `fill`; where to
- *   put it is up to the planner.
- * - Σ min widths above the usable width: infeasible, returns `undefined`.
- *
- * Widths are even and within {@link getWidthRange}; invariant: `Σ widths + (n − 1)·gap + fill = width`.
+ * T44b: the even widths a clip can fill within {@link ASPECT_TOLERANCE} outside its aspect range (the crop absorbs the
+ * mismatch, {@link CropStrategy}), exactly the widths `getCropForAspect` gives `fill` for. Always contains
+ * {@link getWidthRange} (also its collapsed single width).
  */
-export function distributeWidths({ clips, width, height, gap }: {
-  clips: AspectRange[],
-  width: number,
-  height: number,
-  gap: number,
-}): { widths: number[], fill: number } | undefined {
-  const n = clips.length;
-  if (n === 0) return { widths: [], fill: width };
+export function getTolerantWidthRange(range: AspectRange, height: number) {
+  const exact = getWidthRange(range, height);
+  return {
+    min: Math.min(exact.min, Math.max(2, ceilEven(range.min * (1 - ASPECT_TOLERANCE) * height))),
+    max: Math.max(exact.max, floorEven(range.max * (1 + ASPECT_TOLERANCE) * height)),
+  };
+}
 
-  const usable = width - (n - 1) * gap;
-  const bounds = clips.map((range) => getWidthRange(range, height));
-  const sumMin = bounds.reduce((acc, b) => acc + b.min, 0);
-  const sumMax = bounds.reduce((acc, b) => acc + b.max, 0);
-
-  const target = floorEven(usable);
-  if (sumMin > target) return undefined;
-  if (sumMax <= target) {
-    const widths = bounds.map((b) => b.max);
-    return { widths, fill: usable - sumMax };
-  }
-
+/**
+ * Spread `target` (even) px among clips with even bounds, starting from `preferred` (real) and moving each clip
+ * towards its max (or min) in proportion to its margin. This saturates all clips at the same time, so no iteration is
+ * needed. Rounded to even widths by largest remainder, respecting the bounds. Requires Σ min ≤ target ≤ Σ max.
+ */
+function spreadWidths(bounds: { min: number, max: number, preferred: number }[], target: number) {
   // Proportional spread in real numbers, then even rounding. Work in units of 2 px so it's plain integer rounding.
   const sumPreferred = bounds.reduce((acc, b) => acc + b.preferred, 0);
   const diff = target - sumPreferred;
@@ -272,8 +308,55 @@ export function distributeWidths({ clips, width, height, gap }: {
       remaining -= step;
     }
   }
+  return units.map((u) => u * 2);
+}
 
-  return { widths: units.map((u) => u * 2), fill: usable - target };
+/**
+ * Share the row width among `clips` (left to right), separated by `gap` px.
+ *
+ * - Feasible (Σ min widths ≤ usable width ≤ Σ max widths): starts at each preferred width and spreads the difference
+ *   proportionally to each clip's margin towards its max (or min). This saturates all clips at the same time, so no
+ *   iteration is needed. `fill` is 0, or 1 if the usable width is odd (odd gap; validateMixProject warns about it).
+ * - Σ max widths below the usable width: every clip takes its max width and the rest is returned as `fill`; where to
+ *   put it is up to the planner.
+ * - Σ min widths above the usable width: infeasible, returns `undefined`.
+ *
+ * T44b: only in the last two cases, and only if that removes the whole fill (or makes the row fit), the clips take
+ * widths within {@link ASPECT_TOLERANCE} outside their range ({@link getTolerantWidthRange}): from their max (or min)
+ * widths, just the px needed, spread in proportion to each clip's tolerance margin. So the tolerance is never used when
+ * the exact ranges suffice, nor when fill would remain anyway (then the result is the same as without it).
+ *
+ * Widths are even and within {@link getTolerantWidthRange}; invariant: `Σ widths + (n − 1)·gap + fill = width`.
+ */
+export function distributeWidths({ clips, width, height, gap }: {
+  clips: AspectRange[],
+  width: number,
+  height: number,
+  gap: number,
+}): { widths: number[], fill: number } | undefined {
+  const n = clips.length;
+  if (n === 0) return { widths: [], fill: width };
+
+  const usable = width - (n - 1) * gap;
+  const bounds = clips.map((range) => getWidthRange(range, height));
+  const sumMin = bounds.reduce((acc, b) => acc + b.min, 0);
+  const sumMax = bounds.reduce((acc, b) => acc + b.max, 0);
+
+  const target = floorEven(usable);
+  if (sumMin <= target && target <= sumMax) return { widths: spreadWidths(bounds, target), fill: usable - target };
+
+  const tolerant = clips.map((range) => getTolerantWidthRange(range, height));
+  if (sumMax < target) {
+    // too narrow: widen from the max widths, if the tolerance covers the whole fill (else the fill stays as it was:
+    // cutting the clips wouldn't remove it, and E7 may still turn it into material)
+    const sumTolerant = tolerant.reduce((acc, b) => acc + b.max, 0);
+    if (sumTolerant < target) return { widths: bounds.map((b) => b.max), fill: usable - sumMax };
+    return { widths: spreadWidths(bounds.map((b, i) => ({ min: b.max, max: tolerant[i]!.max, preferred: b.max })), target), fill: usable - target };
+  }
+  // too wide: narrow from the min widths, if the tolerance makes them fit
+  const sumTolerant = tolerant.reduce((acc, b) => acc + b.min, 0);
+  if (sumTolerant > target) return undefined;
+  return { widths: spreadWidths(bounds.map((b, i) => ({ min: tolerant[i]!.min, max: b.min, preferred: b.min })), target), fill: usable - target };
 }
 
 /**
@@ -316,32 +399,36 @@ export function extendMaxRect(maxRect: Rect, frame: FrameSize, direction: Extend
 /**
  * {@link getCropForAspect} for a clip whose max rect the planner extended to `extendedMaxRect` (E7, T38b,
  * `ColumnPlacement.extendedMaxRect`). Only when the cell is longer along the extension than the clip allows (pillarbox
- * for a horizontal extension, letterbox for a vertical one) the crop grows beyond the max: it keeps the cross size and
- * position of the crop at the range limit (the min's height, or width) and widens it to the cell's aspect, centred on
- * the max and shifted inside the extended rect when a side reaches its edge. If the extension isn't enough, the crop
- * takes all of it and the rest stays pillarbox/letterbox. In any other case (or without extension) it is exactly
- * getCropForAspect, so the extension changes nothing where the max is enough.
+ * for a horizontal extension, letterbox for a vertical one), or within the tolerance but only by stretching (T44b,
+ * `stretch`: the extension comes before it in {@link CropStrategy}), the crop grows beyond the max: it keeps the cross
+ * size and position of the crop at the range limit (the min's height, or width) and widens it to the cell's aspect,
+ * centred on the max and shifted inside the extended rect when a side reaches its edge (`extend`). If the extension
+ * isn't enough, the crop takes all of it and the rest stays pillarbox/letterbox (or is stretched, within the
+ * tolerance). In any other case (or without extension) it is exactly getCropForAspect, so the extension changes nothing
+ * where the max is enough.
  */
-export function getExtendedCropForAspect(maxRect: Rect, minRect: Rect | undefined, extendedMaxRect: Rect | undefined, aspect: number): { crop: Rect, fit: CropFit } {
+export function getExtendedCropForAspect(maxRect: Rect, minRect: Rect | undefined, extendedMaxRect: Rect | undefined, aspect: number): CellCrop {
   const normal = getCropForAspect(maxRect, minRect, aspect);
-  if (extendedMaxRect == null || normal.fit === 'fill') return normal;
+  if (extendedMaxRect == null || (normal.fit === 'fill' && normal.strategy !== 'stretch')) return normal;
   const max = normalizeRectEven(maxRect, 'shrink');
   const extended = normalizeRectEven(extendedMaxRect, 'shrink');
   if (!rectContains(extended, max)) return normal;
 
-  if (normal.fit === 'letterbox') {
+  const { crop } = normal;
+  // letterbox, or stretched because the cell is narrower than the crop: the transpose of the widening below
+  if (normal.fit === 'letterbox' || (normal.fit === 'fill' && aspect < rectAspect(crop))) {
     if (extended.height <= max.height) return normal;
     const res = getExtendedCropForAspect(transposeRect(maxRect), minRect && transposeRect(minRect), transposeRect(extendedMaxRect), 1 / aspect);
-    return { crop: transposeRect(res.crop), fit: res.fit === 'pillarbox' ? 'letterbox' : res.fit };
+    return { crop: transposeRect(res.crop), fit: res.fit === 'pillarbox' ? 'letterbox' : res.fit, strategy: res.strategy };
   }
   if (extended.width <= max.width) return normal;
-  // pillarbox: the crop at the range limit spans the max's width at the min's height; widen it
-  const { crop } = normal;
+  // pillarbox (or stretched wider): the crop at the range limit spans the max's width at the min's height; widen it
   const target = aspect * crop.height;
   const width = clamp(roundEven(target), crop.width, extended.width);
   const x = clamp(roundEven(crop.x + (crop.width - width) / 2), extended.x, extended.x + extended.width - width);
   return {
     crop: { x, y: crop.y, width, height: crop.height },
     fit: target > width * (1 + ASPECT_TOLERANCE) ? 'pillarbox' : 'fill',
+    strategy: width > crop.width ? 'extend' : normal.strategy,
   };
 }

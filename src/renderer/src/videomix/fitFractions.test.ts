@@ -68,7 +68,9 @@ describe('fraction cells', () => {
 describe('getFractionFits', () => {
   test('a whole 16:9 frame only fits full; a 1/3 crop only 1/3', () => {
     expect(statusOf(getFractionFits({ maxRect: full, layout: L1080 }))).toEqual({ '1/3': 'no', '1/2': 'no', '2/3': 'no', full: 'fits' });
-    expect(getFractionFits({ maxRect: full, layout: L1080 })[0]).toEqual({ fraction: '1/3', length: 640, status: 'no', excess: 1920 - 640 });
+    // T44b: 646 px of source (646 × 0.99 = 639.5 px of output) would do, with the 1 % tolerance; exactly, 640
+    expect(getFractionFits({ maxRect: full, layout: L1080 })[0]).toEqual({ fraction: '1/3', length: 640, status: 'no', excess: 1920 - 646 });
+    expect(getFractionFits({ maxRect: full, layout: L1080, exact: true })[0]).toEqual({ fraction: '1/3', length: 640, status: 'no', excess: 1920 - 640 });
     expect(statusOf(getFractionFits({ maxRect: { x: 640, y: 0, width: 640, height: 1080 }, layout: L1080 }))).toEqual({ '1/3': 'fits', '1/2': 'no', '2/3': 'no', full: 'no' });
   });
 
@@ -81,8 +83,10 @@ describe('getFractionFits', () => {
   test('missing: the max is too narrow; extends with E7 when the frame has material', () => {
     const maxRect = { x: 700, y: 0, width: 600, height: 1080 };
     const fits = getFractionFits({ maxRect, layout: L1080 });
-    expect(fits[0]).toEqual({ fraction: '1/3', length: 640, status: 'no', missing: 40 });
-    expect(fits[1]).toMatchObject({ status: 'no', missing: 360 });
+    // T44b: 634 px (× 1.01 = 640.3) with the tolerance, 640 exactly
+    expect(fits[0]).toEqual({ fraction: '1/3', length: 640, status: 'no', missing: 34 });
+    expect(getFractionFits({ maxRect, layout: L1080, exact: true })[0]).toMatchObject({ status: 'no', missing: 40 });
+    expect(fits[1]).toMatchObject({ status: 'no', missing: 352 });
     // E7: the frame has 1320 px more, enough for any fraction
     expect(statusOf(getFractionFits({ maxRect, frame, extendBeyondMax: true, layout: L1080 }))).toEqual({ '1/3': 'extends', '1/2': 'extends', '2/3': 'extends', full: 'extends' });
     // not without the flag or the frame
@@ -96,7 +100,9 @@ describe('getFractionFits', () => {
 
   test('excess: the min is too wide (or the whole max without min)', () => {
     const fits = getFractionFits({ maxRect: full, minRect: { x: 560, y: 0, width: 800, height: 1080 }, layout: L1080 });
-    expect(fits[0]).toEqual({ fraction: '1/3', length: 640, status: 'no', excess: 160 });
+    // T44b: a 646 px wide min (× 0.99 = 639.5) with the tolerance, 640 exactly
+    expect(fits[0]).toEqual({ fraction: '1/3', length: 640, status: 'no', excess: 154 });
+    expect(getFractionFits({ maxRect: full, minRect: { x: 560, y: 0, width: 800, height: 1080 }, layout: L1080, exact: true })[0]).toMatchObject({ excess: 160 });
     expect(statusOf(fits)).toEqual({ '1/3': 'no', '1/2': 'fits', '2/3': 'fits', full: 'fits' });
   });
 
@@ -104,8 +110,10 @@ describe('getFractionFits', () => {
     const rows = layout(1080, 1920);
     // whole 16:9 frame in a 1080 px wide row: 607.5 px tall, shorter than 1/3 (640)
     expect(statusOf(getFractionFits({ maxRect: full, layout: rows }))).toEqual({ '1/3': 'no', '1/2': 'no', '2/3': 'no', full: 'no' });
-    // 1136 px tall (in the source) would be 639 px, rounded to 640 like the planner's getWidthRange
-    expect(getFractionFits({ maxRect: full, layout: rows })[0]).toMatchObject({ status: 'no', missing: 56 });
+    // 1136 px tall (in the source) would be 639 px, rounded to 640 like the planner's getWidthRange; T44b: with the
+    // tolerance 1128 px (634.5 px, × 1.01 = 640.8) are enough
+    expect(getFractionFits({ maxRect: full, layout: rows, exact: true })[0]).toMatchObject({ status: 'no', missing: 56 });
+    expect(getFractionFits({ maxRect: full, layout: rows })[0]).toMatchObject({ status: 'no', missing: 48 });
     // a min narrower than 1080 × 1080/640 = 1822 px lets it crop to a third
     expect(statusOf(getFractionFits({ maxRect: full, minRect: { x: 100, y: 0, width: 1700, height: 1080 }, layout: rows }))['1/3']).toBe('fits');
   });
@@ -220,21 +228,61 @@ describe('fitMaxRectToFraction (F2 "Fit to")', () => {
     expect(fitMaxRectToFraction({ maxRect: full, minRect: { x: 0, y: 0, width: 1000, height: 1080 }, frame, fraction: '1/3', layout: L1080 })).toEqual({ ok: false, reason: 'min-too-large' });
   });
 
+  test('T44b: a clip without min fitted to 1/3 of 1280 px (426.67) fits with the tolerance, not exactly', () => {
+    const l720 = layout(1280, 720);
+    const f720 = { width: 1280, height: 720 };
+    const res = fitMaxRectToFraction({ maxRect: { x: 0, y: 0, width: 1280, height: 720 }, frame: f720, fraction: '1/3', layout: l720 });
+    expect(res).toEqual({ ok: true, maxRect: { x: 428, y: 0, width: 426, height: 720 } });
+    const maxRect = res.ok ? res.maxRect : full;
+    expect(getFractionFits({ maxRect, layout: l720 })[0]!.status).toBe('fits');
+    expect(getFractionFits({ maxRect, layout: l720, exact: true })[0]!.status).toBe('no');
+    // a 9:16 source (720x1280): the whole width, 1214 px tall
+    const vertical = fitMaxRectToFraction({ maxRect: { x: 0, y: 0, width: 720, height: 1280 }, frame: { width: 720, height: 1280 }, fraction: '1/3', layout: l720 });
+    expect(vertical).toEqual({ ok: true, maxRect: { x: 0, y: 34, width: 720, height: 1214 } });
+    expect(getFractionFits({ maxRect: vertical.ok ? vertical.maxRect : full, layout: l720 })[0]!.status).toBe('fits');
+  });
+
+  test('T44b: without min, the result fits within the tolerance (sizes where 1 px is well below 1 %)', () => {
+    const random = makeRandom(5);
+    let checked = 0;
+    for (let i = 0; i < 150; i += 1) {
+      const { maxRect } = randomClip(random, false);
+      for (const l of layouts) {
+        for (const fraction of ['1/3', '1/2', '2/3'] as const) {
+          const res = fitMaxRectToFraction({ maxRect, frame, fraction, layout: l });
+          const r = res.ok ? res.maxRect : undefined;
+          if (r != null && Math.min(r.width, r.height) >= 400) {
+            checked += 1;
+            expect(getFractionFits({ maxRect: r, layout: l, fractions: [fraction] })[0]!.status, JSON.stringify({ r, l, fraction })).toBe('fits');
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(200);
+  });
+
   test('the result fits the fraction, is even, inside the frame and contains the min (any layout)', () => {
     const random = makeRandom(3);
+    let tolerated = 0;
+    let total = 0;
     for (let i = 0; i < 150; i += 1) {
       const { maxRect, minRect } = randomClip(random, true);
-      layouts.forEach((l) => {
-        (['1/3', '1/2', '2/3'] as const).forEach((fraction) => {
+      for (const l of layouts) {
+        for (const fraction of ['1/3', '1/2', '2/3'] as const) {
           const res = fitMaxRectToFraction({ maxRect, minRect, frame, fraction, layout: l });
-          if (!res.ok) return;
-          const r = res.maxRect;
-          expect([r.x, r.y, r.width, r.height].every((v) => v % 2 === 0)).toBe(true);
-          expect(rectContains(full, r)).toBe(true);
-          expect(rectContains(r, minRect!)).toBe(true);
-          expect(getFractionFits({ maxRect: r, minRect, layout: l, fractions: [fraction] })[0]!.status).toBe('fits');
-        });
-      });
+          if (res.ok) {
+            const r = res.maxRect;
+            expect([r.x, r.y, r.width, r.height].every((v) => v % 2 === 0)).toBe(true);
+            expect(rectContains(full, r)).toBe(true);
+            expect(rectContains(r, minRect!)).toBe(true);
+            expect(getFractionFits({ maxRect: r, minRect, layout: l, fractions: [fraction] })[0]!.status).toBe('fits');
+            // aimed at the exact proportion: it only relies on the tolerance where the exact one can't be reached
+            if (getFractionFits({ maxRect: r, minRect, layout: l, fractions: [fraction], exact: true })[0]!.status !== 'fits') tolerated += 1;
+            total += 1;
+          }
+        }
+      }
     }
+    expect(tolerated).toBeLessThan(total * 0.02);
   });
 });

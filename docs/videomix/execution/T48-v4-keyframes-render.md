@@ -1,6 +1,6 @@
 # T48 · v4: keyframes en render, previsualización y miniaturas (A9)
 
-- **Hito**: M11 · **Modelo**: Opus · **Depende de**: T44 · **Estado**: pendiente
+- **Hito**: M11 · **Modelo**: Opus · **Depende de**: T44, T44b · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 

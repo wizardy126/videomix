@@ -9,7 +9,8 @@ const EPS = 1e-9;
 export const PIN_TOLERANCE = 1e-6;
 
 /**
- * How a clip sits in a column of `width`×`height` px: fill (within the aspect tolerance, as getCropForAspect),
+ * How a clip sits in a column of `width`×`height` px: fill (within the aspect tolerance, as getCropForAspect and
+ * getTolerantWidthRange),
  * pillarbox or letterbox. The planner calls it in main-axis units (transposed range, main length, cross length), where
  * `pillarbox` means "longer than the clip allows" along the main axis; with real sizes it is the real fit.
  */
@@ -74,7 +75,9 @@ export function getPlanWarnings(
       if (col == null) return;
       const { width, height } = cellSize(col.width);
       let fit: CropFit = getColumnFit(clip.aspectRange, width, height);
-      // only a cell longer than the max allows along the main axis is extended (pillarbox in columns, letterbox in rows)
+      // only a cell longer than the max allows along the main axis is extended (pillarbox in columns, letterbox in rows).
+      // T44b: the few px a cell within the aspect tolerance may show beyond the max aren't warned about (they stand in
+      // for a ≤ 1 % stretch), only real E7 extensions beyond the tolerance are
       if (extension != null && fit === (axis === 'columns' ? 'pillarbox' : 'letterbox')) {
         extension.from = Math.min(extension.from, Math.max(from, placement.startTime));
         extension.to = Math.max(extension.to, Math.min(to, placement.endTime));

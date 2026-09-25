@@ -345,10 +345,12 @@ describe('turned clips (E9, T38d)', () => {
   test('the crop is in the unturned frame and only the crop is turned, before the scale', () => {
     // a max of the turned frame: turned 90° clockwise, its y 200..1120 is the source's x 200..1120 (x 800..1720 at 270°)
     const maxRect = { x: 0, y: 200, width: 1080, height: 920 };
+    // T44b: the 360x306 cell (1.1765) is 0.2 % wider than the rigid 1080x920 max (1.1739): 2 px of its height are cut
+    // (turned y 202..1120) instead of stretching it
     const expected = {
-      90: 'crop=920:1080:200:0,transpose=clock,scale=360:306',
-      180: 'crop=1080:920:840:160,hflip,vflip,scale=360:306',
-      270: 'crop=920:1080:800:0,transpose=cclock,scale=360:306',
+      90: 'crop=918:1080:202:0,transpose=clock,scale=360:306',
+      180: 'crop=1080:918:840:160,hflip,vflip,scale=360:306',
+      270: 'crop=918:1080:800:0,transpose=cclock,scale=360:306',
     } as const;
     for (const [rotation, filters] of Object.entries(expected)) {
       const clip: RenderClip = { id: 't', sourceId: 'h1080', start: 0, maxRect: rotation === '180' ? { x: 0, y: 0, width: 1080, height: 920 } : maxRect, rotation: Number(rotation) as 90 | 180 | 270 };

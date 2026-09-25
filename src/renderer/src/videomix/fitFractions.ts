@@ -1,4 +1,4 @@
-import { getAspectRange, getAxisLengths, getExtensionRoom, getWidthRange, normalizeClipRects, normalizeRectEven, transposeRect } from './geometry';
+import { getAspectRange, getAxisLengths, getExtensionRoom, getTolerantWidthRange, getWidthRange, normalizeClipRects, normalizeRectEven, transposeRect } from './geometry';
 import type { LayoutAxis } from './geometry';
 import type { Size } from './overlayMath';
 import { getClipFrame } from './clipRotation';
@@ -12,8 +12,9 @@ import type { MixClip, MixSettings, MixSource, Rect } from './types';
 //
 // Everything works like the planner: the cell length of a fraction comes from the same usable length (the gaps taken
 // out, even-floored) that `distributeWidths` shares among n columns, and a clip fits a cell when its even width bounds
-// (`getWidthRange` of its main-axis aspect range, on the even-normalized rects) contain the cell length. Rows (9:16,
-// or 1:1 in rows) are the transpose of columns: lengths are heights and the clip's rects are transposed.
+// (`getTolerantWidthRange` of its main-axis aspect range, on the even-normalized rects: T44b, within the 1 % aspect
+// tolerance the crop absorbs) contain the cell length. Rows (9:16, or 1:1 in rows) are the transpose of columns:
+// lengths are heights and the clip's rects are transposed. The magnet and "Fit to" still aim at the exact proportion.
 
 export const fitFractions = ['1/3', '1/2', '2/3', 'full'] as const;
 
@@ -113,8 +114,14 @@ const toMainSize = (axis: LayoutAxis, { width, height }: Size): Size => (axis ==
 /** The output size in main-axis space (transposed for rows), to reuse the columns computations there. */
 const mainSpaceSize = (axis: LayoutAxis, size: Size): Size => toMainSize(axis, { width: size.width, height: size.height });
 
-/** Even width bounds (output px) of main-space rects in a cell `cross` px across, as the planner computes them. */
-const getMainBounds = (max: Rect, min: Rect | undefined, cross: number) => getWidthRange(getAspectRange(max, min), cross);
+/**
+ * Even width bounds (output px) of main-space rects in a cell `cross` px across, as the planner computes them: within
+ * the aspect tolerance (T44b), or `exact`.
+ */
+const getMainBounds = (max: Rect, min: Rect | undefined, cross: number, exact = false) => {
+  const range = getAspectRange(max, min);
+  return exact ? getWidthRange(range, cross) : getTolerantWidthRange(range, cross);
+};
 
 /**
  * Smallest even `n ≥ 2` for which `ok(n)` holds, starting the search near `estimate` (analytic, maybe off by the even
@@ -133,16 +140,21 @@ function findSmallestEven(estimate: number, ok: (n: number) => boolean) {
  * F1: in which fractions the clip fits. Its rects are the ones of its (turned, E9) frame; `frame` is that frame's size
  * (`getClipFrame`), needed for `extends` (material beyond the max); `extendBeyondMax` is the clip's E7 flag.
  * Missing/excess amounts are in (display) source px, even, and minimal: with the max grown (or the min shrunk) by that
- * much along the main axis, the fit condition holds (the rounding of `getWidthRange` included). A clip without min
+ * much along the main axis, the fit condition holds (the rounding of the width bounds included). A clip without min
  * (min = max) grows or shrinks as a whole.
+ *
+ * T44b: `fits` includes the cells within the 1 % aspect tolerance (the crop absorbs the mismatch: cut inside the max,
+ * a few px of E7 extension or, last, a ≤ 1 % stretch; `distributeWidths` uses it when the exact widths would leave
+ * fill), and `extends` is what needs E7 beyond that. `exact` leaves the tolerance out ("Fit to" aims at it).
  */
-export function getFractionFits({ maxRect, minRect, frame, extendBeyondMax = false, layout, fractions = fitFractions }: {
+export function getFractionFits({ maxRect, minRect, frame, extendBeyondMax = false, layout, fractions = fitFractions, exact = false }: {
   maxRect: Rect,
   minRect?: Rect | undefined,
   frame?: Size | undefined,
   extendBeyondMax?: boolean | undefined,
   layout: FitLayout,
   fractions?: readonly FitFraction[] | undefined,
+  exact?: boolean | undefined,
 }): FractionFit[] {
   const { axis } = layout;
   const { cross } = getAxisLengths(axis, layout);
@@ -150,7 +162,7 @@ export function getFractionFits({ maxRect, minRect, frame, extendBeyondMax = fal
   const max = toMainSpace(axis, normMax);
   const min = toMainSpace(axis, normMin);
   const rigid = minRect == null;
-  const bounds = getMainBounds(max, rigid ? undefined : min, cross);
+  const bounds = getMainBounds(max, rigid ? undefined : min, cross, exact);
   const room = extendBeyondMax && frame != null ? getExtensionRoom(maxRect, frame, axis === 'columns' ? 'horizontal' : 'vertical') : 0;
   // longest cell the clip fills with all the material of its frame (extendPlan's `maxLength`)
   const extendedLength = floorEven(((max.width + room) * cross) / min.height);
@@ -163,7 +175,7 @@ export function getFractionFits({ maxRect, minRect, frame, extendBeyondMax = fal
       // the max must grow along the main axis (and the min with it when there's none)
       const grown = (n: number) => {
         const m = { ...max, width: max.width + n };
-        return getMainBounds(m, rigid ? undefined : min, cross).max >= length - EPS;
+        return getMainBounds(m, rigid ? undefined : min, cross, exact).max >= length - EPS;
       };
       return { fraction, length, status: 'no', missing: findSmallestEven((length * min.height) / cross - max.width, grown) };
     }
@@ -171,10 +183,10 @@ export function getFractionFits({ maxRect, minRect, frame, extendBeyondMax = fal
     const shrunk = (n: number) => {
       if (rigid) {
         if (max.width - n < 2) return true;
-        return getMainBounds({ ...max, width: max.width - n }, undefined, cross).min <= length + EPS;
+        return getMainBounds({ ...max, width: max.width - n }, undefined, cross, exact).min <= length + EPS;
       }
       if (min.width - n < 2) return true;
-      return getMainBounds(max, { ...min, width: min.width - n }, cross).min <= length + EPS;
+      return getMainBounds(max, { ...min, width: min.width - n }, cross, exact).min <= length + EPS;
     };
     const estimate = (rigid ? max.width : min.width) - (length * max.height) / cross;
     return { fraction, length, status: 'no', excess: findSmallestEven(estimate, shrunk) };
@@ -250,10 +262,11 @@ export type FitToFractionResult = { ok: true, maxRect: Rect } | { ok: false, rea
  * its main length), keeping the current max's length across the main axis when possible (else the closest one that
  * fits the frame and contains the min), centred on the min if the clip has one (else on the current max), and shifted
  * just enough to stay inside `frame` (the clip's turned frame, even-floored) and to contain the (even-normalized) min.
- * Even edges. With a min, the result always fits the fraction (`getFractionFits` → `fits`; near the limits the size is
- * nudged by 2 px for the even rounding, and if it still can't fit, e.g. squeezed against the frame, it fails with
- * `min-too-large`). Without a min (min = max, a rigid clip) it fits only if the cell's length is a whole even number of
- * output px (e.g. not 1/3 of 1280, 426.67 px): the planner itself can't lay out such a rigid clip without fill.
+ * Even edges. With a min, the result fits the fraction exactly (`getFractionFits` with `exact` → `fits`; near the
+ * limits the size is nudged by 2 px for the even rounding), or else within the tolerance (T44b); if it can't even then,
+ * e.g. squeezed against the frame, it fails with `min-too-large`. Without a min (min = max, a rigid clip) it fits
+ * exactly only if the cell's length is a whole even number of output px (e.g. not 1/3 of 1280, 426.67 px), and always
+ * within the tolerance (T44b: the planner lays out such clips without fill, cutting ≤ 1 % of them).
  */
 export function fitMaxRectToFraction({ maxRect, minRect, frame, fraction, layout }: {
   maxRect: Rect,
@@ -281,11 +294,13 @@ export function fitMaxRectToFraction({ maxRect, minRect, frame, fraction, layout
   if (min != null) {
     // near the limits of the aspect range the even rounding of the width bounds can miss the cell by a step: nudge
     // the height (min too wide) or the width (max too narrow) by 2 px until the clip fits
-    const fitsNow = () => getFractionFits({
+    // aiming at the exact proportion (F2): the tolerance only decides whether the result is usable
+    const fitsNow = (exact = true) => getFractionFits({
       maxRect: { x: 0, y: 0, width, height },
       minRect: { x: 0, y: 0, width: min.width, height: min.height },
       layout: { ...layout, axis: 'columns', ...mainSpaceSize(axis, layout) },
       fractions: [fraction],
+      exact,
     })[0]!;
     for (let i = 0; i < 8; i += 1) {
       const fit = fitsNow();
@@ -299,7 +314,7 @@ export function fitMaxRectToFraction({ maxRect, minRect, frame, fraction, layout
       }
     }
     // squeezed between the min and the frame edge, a rounding step away from fitting
-    if (fitsNow().status !== 'fits') return { ok: false, reason: 'min-too-large' };
+    if (fitsNow(false).status !== 'fits') return { ok: false, reason: 'min-too-large' };
   }
 
   const center = min ?? max;

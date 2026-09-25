@@ -111,8 +111,10 @@ describe('edge cases', () => {
     const p = plan({ clips, settings: settings({ reorderWindow: 0 }) });
     const animated = relayouts(p).filter((l) => l.time > 9 && l.time < 11);
     expect(animated).toHaveLength(1);
-    // one column goes away and the other takes w0, in the same animation
-    expect(animated[0]!.columns.map((c) => c.width).sort()).toEqual([1296, 608].sort());
+    // one column goes away and the other takes w0, in the same animation. T44b: 1296 + 608 left 16 px of fill (0.8 %),
+    // which the 1 % tolerance absorbs (both rigid clips are cut < 1 % in height)
+    expect(animated[0]!.columns.map((c) => c.width).sort()).toEqual([1308, 612].sort());
+    expect(animated[0]!.fills).toEqual([]);
     expect(byClip(p, 'w0').startTime).toBeGreaterThanOrEqual(9.5);
   });
 

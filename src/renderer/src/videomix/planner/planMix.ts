@@ -1,6 +1,6 @@
 import invariant from 'tiny-invariant';
 
-import { distributeWidths, getAxisLengths, getMainAspectRange, getWidthRange, normalizeClipRects, transposeRect } from '../geometry';
+import { distributeWidths, getAxisLengths, getMainAspectRange, getTolerantWidthRange, getWidthRange, normalizeClipRects, transposeRect } from '../geometry';
 import type { AspectRange, LayoutAxis } from '../geometry';
 import { extendPlan } from './extendPlan';
 import { getColumnFit, getPlanWarnings } from './planWarnings';
@@ -137,6 +137,8 @@ interface Clip {
   duration: number,
   range: AspectRange,
   widths: { min: number, max: number, preferred: number },
+  /** T44b: the widths it fills within the aspect tolerance (`getTolerantWidthRange`), which `distributeWidths` may use. */
+  tolerantWidths: { min: number, max: number },
   /** Normalized rect sizes, for the upscale estimate. */
   size?: { maxWidth: number, maxHeight: number, minHeight: number } | undefined,
   /** The unit the clip starts with (itself, its group or its pinned unit). */
@@ -250,7 +252,7 @@ function toClip(clip: PlannerClip, unit: Unit, height: number, axis: LayoutAxis)
     size = { maxWidth: tMax.width, maxHeight: tMax.height, minHeight: tMin.height };
   }
   const single = isSingle(unit) && unit.pinTime == null;
-  return { id: clip.id, duration: clip.duration, range, widths: getWidthRange(range, height), size, unit, singleBase: single ? unit.singleBase : -1, unitBase: unit.pinTime == null ? unit.unitBase : -1, tail: 0 };
+  return { id: clip.id, duration: clip.duration, range, widths: getWidthRange(range, height), tolerantWidths: getTolerantWidthRange(range, height), size, unit, singleBase: single ? unit.singleBase : -1, unitBase: unit.pinTime == null ? unit.unitBase : -1, tail: 0 };
 }
 
 /**
@@ -516,13 +518,13 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
 
   /**
    * E8 (T38c): how well a unit fits the free space, lower is better: 0 if one of its clips can take one of the
-   * `filling` widths (its aspect range admits it: it removes the fill, alone or with the oldest clips), 1 if it can take
+   * `filling` widths (its aspect range admits it, T44b tolerance included: it removes the fill, alone or with the oldest clips), 1 if it can take
    * one of the `fitting` widths, else 2 + the smallest log ratio between a clip's width range and any of them.
    */
   function getFitKey(unit: Unit, { filling, fitting }: FitTargets) {
     const distance = (targets: number[]) => {
       let best = Infinity;
-      unit.clips.forEach(({ widths: { min, max } }) => targets.forEach((target) => {
+      unit.clips.forEach(({ tolerantWidths: { min, max } }) => targets.forEach((target) => {
         if (target >= 2) best = Math.min(best, target < min ? Math.log(min / target) : (target > max ? Math.log(target / max) : 0));
       }));
       return best;
@@ -943,7 +945,12 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     // E8: width sums of the clips that stay in the row, for the bounds below: the kept columns, and the other group
     // columns from the r-th on (the first r of them get a pick)
     const fillSeconds = rowFillSeconds(e1, kept);
-    const sumWidths = (clips: Clip[]) => clips.reduce((acc, clip) => ({ min: acc.min + clip.widths.min, max: acc.max + clip.widths.max }), { min: 0, max: 0 });
+    // (T44b: also within the aspect tolerance distributeWidths may use, so the bounds stay exact)
+    const sumWidths = (clips: Clip[]) => clips.reduce((acc, clip) => ({
+      min: acc.min + clip.tolerantWidths.min,
+      max: acc.max + clip.widths.max,
+      tolerantMax: acc.tolerantMax + clip.tolerantWidths.max,
+    }), { min: 0, max: 0, tolerantMax: 0 });
     const keptWidths = sumWidths(kept.map((id) => columns.get(id)!.clip));
     const groupWidths = range1(g).map((r) => sumWidths(group.slice(r).map((col) => col.clip)));
 
@@ -987,7 +994,9 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
       const rowWidths = sumWidths(picks);
       const usable = W - (rowLength - 1) * gap;
       if (!squeezed && rowLength > 1 && rowWidths.min + keptWidths.min + groupWidths[replaced]!.min > floorEven(usable)) return;
-      const minFill = Math.max(0, usable - rowWidths.max - keptWidths.max - groupWidths[replaced]!.max);
+      // (T44b: no fill if the tolerance covers it, else the fill of the exact widths)
+      const tolerantMax = rowWidths.tolerantMax + keptWidths.tolerantMax + groupWidths[replaced]!.tolerantMax;
+      const minFill = tolerantMax >= floorEven(usable) ? 0 : Math.max(0, usable - rowWidths.max - keptWidths.max - groupWidths[replaced]!.max);
       if (minFill > maxRelayoutFill) return;
       if (cannotBeat(orderCost + fillCost(minFill, fillSeconds) + (family === 'remove' || newColumns > 0 ? RELAYOUT_WEIGHT : 0) + columnCountCost(rowLength))) return;
 

@@ -81,8 +81,9 @@ async function expectRenderProgress(page: Page, title: string) {
   await expect(dialog.getByTestId('render-progress-percent')).toHaveText(/^\d+\.\d %$/);
   await expect(dialog.getByTestId('render-progress-elapsed')).toHaveText(/^\d+:\d\d$/);
   await expect(dialog.getByTestId('render-progress-remaining')).toHaveText(/^(Calculating…|≈ \d+:\d\d)$/);
-  // (the Working overlay the render used before was hidden behind the Mix view's live preview)
-  expect(await isOnTop(dialog)).toBe(true);
+  // (the Working overlay the render used before was hidden behind the Mix view's live preview). Polled: right after
+  // "Render anyway", the confirmation's fade-out (SweetAlert, `swal2-hide`) may still cover it for a moment.
+  await expect.poll(async () => isOnTop(dialog)).toBe(true);
 }
 
 /** Until the "working" overlay (loading a source, rendering…), which covers the whole window, is gone. */

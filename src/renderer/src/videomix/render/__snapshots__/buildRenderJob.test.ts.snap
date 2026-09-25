@@ -98,7 +98,7 @@ color=c=black:s=640x360:r=30:d=0.533333,format=yuva420p,fade=t=out:start_frame=0
 [cv15]format=yuv420p[vout]",
     "/work/chunk-0001.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1080:1080:0:0,split[s3][s4];
 [s4]scale=56:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=56:46,boxblur=luma_radius=6:luma_power=2,scale=440:360:flags=bilinear,setsar=1[base2];
-[s3]scale=w='360+2*gte(t,0.45)':h=360:eval=frame:flags=bicubic,setsar=1[sc1];
+[s3]scale=w='360+2*gte(t,0.45)':h='360+2*gte(t,0.45)':eval=frame:flags=bicubic,setsar=1[sc1];
 [base2][sc1]overlay=x='40-2*gte(t,0.05)-2*gte(t,0.083333)-4*gte(t,0.116667)-2*gte(t,0.15)-4*gte(t,0.183333)-4*gte(t,0.216667)-4*gte(t,0.25)-4*gte(t,0.283333)-4*gte(t,0.316667)-2*gte(t,0.35)-4*gte(t,0.383333)-2*gte(t,0.416667)-2*gte(t,0.45)':y=0:eval=frame:shortest=1[clip0];
 [1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=806:1080:558:0,scale=w=270:h=360:eval=frame:flags=bicubic,setsar=1[sc6];
 color=c=black:s=270x360:r=30:d=0.533333,trim=end_frame=15[base7];
@@ -231,7 +231,7 @@ exports[`buildRenderJob > removal plan: args and graphs 1`] = `
   "files": {
     "/work/audio.graph.txt": "[0:a]atrim=duration=4[aout]",
     "/work/chunk-0000.graph.txt": "[0:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=202:360:flags=bicubic,setsar=1[clip0];
-[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=202:360:flags=bicubic,setsar=1[clip1];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=1078:1920:2:0,scale=202:360:flags=bicubic,setsar=1[clip1];
 [2:v]fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=60,setpts=PTS-STARTPTS,crop=560:720:360:0,split[s5][s6];
 [s5]scale=220:282:flags=bicubic,setsar=1[fg3];
 [s6]scale=28:46:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=28:46,boxblur=luma_radius=6:luma_power=2,scale=220:360:flags=bilinear,setsar=1[bg4];
@@ -246,7 +246,7 @@ color=c=black:s=640x360:r=30:d=0.533333,format=yuva420p,fade=t=out:start_frame=0
     "/work/chunk-0001.graph.txt": "[0:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=w='202+2*gte(t,0.016667)+2*gte(t,0.05)+4*gte(t,0.083333)+6*gte(t,0.116667)+6*gte(t,0.15)+8*gte(t,0.183333)+6*gte(t,0.216667)+8*gte(t,0.25)+6*gte(t,0.283333)+8*gte(t,0.316667)+6*gte(t,0.35)+6*gte(t,0.383333)+4*gte(t,0.416667)+2*gte(t,0.45)':h='360+2*gte(t,0.016667)+4*gte(t,0.05)+8*gte(t,0.083333)+10*gte(t,0.116667)+10*gte(t,0.15)+12*gte(t,0.183333)+14*gte(t,0.216667)+12*gte(t,0.25)+14*gte(t,0.283333)+12*gte(t,0.316667)+10*gte(t,0.35)+10*gte(t,0.383333)+8*gte(t,0.416667)+4*gte(t,0.45)':eval=frame:flags=bicubic,setsar=1[sc1];
 color=c=black:s=276x360:r=30:d=0.533333,trim=end_frame=15[base2];
 [base2][sc1]overlay=x=0:y='0-2*gte(t,0.05)-4*gte(t,0.083333)-6*gte(t,0.116667)-4*gte(t,0.15)-6*gte(t,0.183333)-8*gte(t,0.216667)-6*gte(t,0.25)-6*gte(t,0.283333)-6*gte(t,0.316667)-6*gte(t,0.35)-4*gte(t,0.383333)-4*gte(t,0.416667)-2*gte(t,0.45)':eval=frame:shortest=1[clip0];
-[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=w='202+2*gte(t,0.016667)':h=360:eval=frame:flags=bicubic,setsar=1[sc4];
+[1:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=1080:1920:0:0,scale=w=204:h=360:eval=frame:flags=bicubic,setsar=1[sc4];
 color=c=black:s=202x360:r=30:d=0.533333,trim=end_frame=15[base5];
 [base5][sc4]overlay=x='0-2*gte(t,0.016667)-4*gte(t,0.05)-4*gte(t,0.083333)-8*gte(t,0.116667)-8*gte(t,0.15)-10*gte(t,0.183333)-10*gte(t,0.216667)-10*gte(t,0.25)-10*gte(t,0.283333)-10*gte(t,0.316667)-8*gte(t,0.35)-6*gte(t,0.383333)-6*gte(t,0.416667)-4*gte(t,0.45)':y=0:eval=frame:shortest=1[clip3];
 [2:v]setpts=PTS-0.1/TB,fps=30:start_time=0,tpad=stop_mode=clone:stop_duration=1,trim=end_frame=15,setpts=PTS-STARTPTS,crop=708:720:286:0,split[s9][s10];
