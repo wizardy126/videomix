@@ -1,6 +1,6 @@
 # T46 · v4: copiar y pegar el encuadre (A5)
 
-- **Hito**: M11 · **Modelo**: Sonnet · **Depende de**: T44 · **Estado**: pendiente
+- **Hito**: M11 · **Modelo**: Sonnet · **Depende de**: T44 · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 

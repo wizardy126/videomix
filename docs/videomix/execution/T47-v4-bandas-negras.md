@@ -1,6 +1,6 @@
 # T47 · v4: sugerencia de recorte, bandas negras (A7)
 
-- **Hito**: M11 · **Modelo**: Sonnet · **Depende de**: T44 · **Estado**: pendiente
+- **Hito**: M11 · **Modelo**: Sonnet · **Depende de**: T44 · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 

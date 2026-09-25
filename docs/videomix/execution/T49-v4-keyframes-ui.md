@@ -14,7 +14,8 @@
 3. **Marcas** de keyframes en la línea de tiempo del clip; **anterior / siguiente** (con atajos) y **borrar** el del instante actual.
 4. **Interpolación por keyframe**: suave (por defecto), lineal, mantener; selector en la barra cuando el cursor está sobre un keyframe.
 5. Compatibilidad: el indicador de encaje (T45) y el imán siguen funcionando (la proporción no cambia); copiar/pegar (T46) según la decisión de T44.
-6. i18n (en + es).
+6. **Barra del editor** (preexistente desde T06, empeorado al crecer en T45): cuando el máx. toca el borde superior del fotograma, la barra tapa la etiqueta de tamaño y los tiradores superiores (captura `13a-turned-clip-editor.png`). Recolocarla para que nunca tape tiradores ni etiquetas (p. ej. fuera del área de la imagen o en la parte libre), sin romper los e2e.
+7. i18n (en + es).
 
 ## Criterios de aceptación
 
