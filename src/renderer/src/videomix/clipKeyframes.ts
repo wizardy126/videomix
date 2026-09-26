@@ -267,6 +267,64 @@ export function getNextKeyframe(keyframes: readonly MixClipKeyframe[] | undefine
   return sortKeyframes(keyframes ?? []).find((k) => k.time > time + epsilon);
 }
 
+// T49: editing an animated clip in the rect overlay, which shows (and edits) its rects at the cursor.
+
+const sameRect = (a: Rect | undefined, b: Rect | undefined) => (
+  a === b || (a != null && b != null && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height)
+);
+
+/**
+ * T49 (auto-key): how an edit of the rects shown at `time` (`getClipRectsAt`) changes an animated clip. `clip` and
+ * `shown` are the clip and its shown rects when the gesture (a drag or an arrow key nudge) started, `edited` the rects
+ * after it:
+ * - the max moved or scaled (the overlay locks its proportion): the keyframe at `time` is added, or updated, with it;
+ * - only the min changed: the base min changes, so it changes in every keyframe (it's relative to the max): the edited
+ *   min taken back from the shown max to the base max;
+ * - nothing changed (e.g. a cancelled drag): the keyframes and min the clip had.
+ */
+export function getAnimatedRectsEdit({ clip, time, shown, edited, epsilon }: {
+  clip: Pick<MixClip, 'maxRect' | 'minRect' | 'keyframes'>,
+  time: number,
+  shown: ClipRects,
+  edited: ClipRects,
+  epsilon?: number | undefined,
+}): Pick<MixClip, 'keyframes' | 'minRect'> {
+  if (!sameRect(shown.maxRect, edited.maxRect)) {
+    return { keyframes: setKeyframe(clip.keyframes, time, getTransformFromMaxRect(clip.maxRect, edited.maxRect), { epsilon }), minRect: clip.minRect };
+  }
+  if (clip.minRect == null || edited.minRect == null || sameRect(shown.minRect, edited.minRect)) return { keyframes: clip.keyframes, minRect: clip.minRect };
+  // per axis: the shown max is the base one scaled up to the even rounding of each side
+  const base = clip.maxRect;
+  const scaleX = edited.maxRect.width / base.width;
+  const scaleY = edited.maxRect.height / base.height;
+  const min = {
+    x: base.x + (edited.minRect.x - edited.maxRect.x) / scaleX,
+    y: base.y + (edited.minRect.y - edited.maxRect.y) / scaleY,
+    width: edited.minRect.width / scaleX,
+    height: edited.minRect.height / scaleY,
+  };
+  return { keyframes: clip.keyframes, minRect: clampRect(normalizeRectEven(min, 'grow'), base) };
+}
+
+/**
+ * A7 on an animated clip (T49): every keyframe limited to `bounds` (the picture without black bars, in the clip's
+ * frame), like `clampTransform` limits them to the frame: the scale at most what fits the base max in it, then the
+ * centre moved just enough. As the edges move linearly between keyframes, the whole animation stays inside. Undefined
+ * if no keyframe changes.
+ */
+export function limitKeyframesToRect(maxRect: Rect, keyframes: readonly MixClipKeyframe[] | undefined, bounds: Rect): MixClipKeyframe[] | undefined {
+  let changed = false;
+  const limited = (keyframes ?? []).map((k) => {
+    const t = clampTransform(maxRect, { centerX: k.centerX - bounds.x, centerY: k.centerY - bounds.y, scale: k.scale }, bounds);
+    const centerX = t.centerX + bounds.x;
+    const centerY = t.centerY + bounds.y;
+    if (Math.abs(centerX - k.centerX) < 1e-9 && Math.abs(centerY - k.centerY) < 1e-9 && Math.abs(t.scale - k.scale) < 1e-12) return k;
+    changed = true;
+    return { ...k, centerX, centerY, scale: t.scale };
+  });
+  return changed ? limited : undefined;
+}
+
 // Transforms of the whole animation when the base rects move with the picture (keep them in sync with the base rects).
 
 const mapKeyframes = (keyframes: MixClipKeyframe[] | undefined, fn: (k: MixClipKeyframe) => MixClipKeyframe) => (keyframes == null ? undefined : keyframes.map((k) => fn(k)));

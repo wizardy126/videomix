@@ -1317,6 +1317,155 @@ test.describe('VideoMix (black bars)', () => {
   });
 });
 
+test.describe('VideoMix (framing keyframes)', () => {
+  test('19. "Animate" and auto-key pan the max between two instants: marks, interpolation, prev/next and the live preview (A9, T49)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    try {
+      // 1280×720 SMPTE colour bars: still, so the live preview only changes with the framing
+      await mockOpenDialog(ctx.app, [media(sourceFiles[1]!)]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      await waitIdle(page);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(1);
+      const label = page.getByTestId('rect-label');
+      await expect(label).toContainText('Max 1280×720');
+
+      // T49 item 6: the toolbar is in a strip above the picture, clear of the max's top handles and its label
+      const toolbarBox = (await page.getByTestId('rect-toolbar-slot').boundingBox())!;
+      expect(toolbarBox.height).toBeGreaterThan(10);
+      for (const handle of ['nw', 'n', 'ne']) {
+        expect((await page.getByTestId(`rect-handle-max-${handle}`).boundingBox())!.y).toBeGreaterThanOrEqual(toolbarBox.y + toolbarBox.height - 6);
+      }
+      expect((await label.boundingBox())!.y).toBeGreaterThanOrEqual(toolbarBox.y + toolbarBox.height);
+
+      // screen x of the frame's edges (the max is the whole frame)
+      const handleCenter = async (handle: string) => {
+        const box = (await page.getByTestId(`rect-handle-max-${handle}`).boundingBox())!;
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      };
+      const frameLeft = (await handleCenter('w')).x;
+      const scale = ((await handleCenter('e')).x - frameLeft) / 1280;
+      /** The max's left edge, in source px. */
+      const maxLeft = async () => ((await handleCenter('w')).x - frameLeft) / scale;
+      /** Drags the max (by its middle) `dx` screen px. */
+      const dragMax = async (dx: number) => {
+        const n = await handleCenter('n');
+        const s = await handleCenter('s');
+        const from = { x: n.x, y: (n.y + s.y) / 2 };
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        await page.mouse.move(from.x + dx / 2, from.y, { steps: 5 });
+        await page.mouse.move(from.x + dx, from.y, { steps: 5 });
+        await page.mouse.up();
+      };
+
+      // half the output (640×720 in the middle), then "Animate" at 1 s: the first keyframe, with that framing
+      await page.getByTestId('fit-to-1-2').click();
+      await expect(label).toContainText('Max 640×720');
+      await seekBy(page, 1);
+      const animate = page.getByTestId('animate-toggle');
+      await expect(animate).toHaveAttribute('aria-pressed', 'false');
+      await animate.click();
+      await expect(animate).toHaveAttribute('aria-pressed', 'true');
+      const marks = page.getByTestId('clip-keyframe-mark');
+      await expect(marks).toHaveCount(1);
+      await expect(page.getByTestId('keyframe-interpolation')).toHaveValue('smooth');
+
+      // at 1 s the max goes to the left edge (updates that keyframe), at 3 s to the right edge (a new one)
+      await dragMax(-1000);
+      await expect.poll(maxLeft).toBeCloseTo(0, -1);
+      await expect(marks).toHaveCount(1);
+      await seekBy(page, 2);
+      // after the last keyframe it holds
+      await expect.poll(maxLeft).toBeCloseTo(0, -1);
+      await expect(page.getByTestId('keyframe-add')).toBeVisible();
+      await dragMax(1000);
+      await expect.poll(maxLeft).toBeCloseTo(640, -1);
+      await expect(marks).toHaveCount(2);
+      // the proportion and the size don't change
+      await expect(label).toContainText('Max 640×720');
+      await screenshot(page, '19a-keyframes');
+
+      // one undo step per gesture
+      await pressShortcut(page, 'Control+z');
+      await expect(marks).toHaveCount(1);
+      await pressShortcut(page, 'Control+Shift+z');
+      await expect(marks).toHaveCount(2);
+
+      // the editor shows the interpolated framing at the cursor: half way at 2 s (smooth)…
+      await seekBy(page, -1);
+      await expect.poll(maxLeft).toBeCloseTo(320, -1);
+      // …or still at the first keyframe's with "hold" (going there with "previous keyframe" to change it)
+      await page.getByTestId('keyframe-prev').click();
+      await expect.poll(async () => playerTime(page)).toBeCloseTo(1, 1);
+      await page.getByTestId('keyframe-interpolation').selectOption('hold');
+      await seekBy(page, 1);
+      await expect.poll(maxLeft).toBeCloseTo(0, -1);
+      await page.getByTestId('keyframe-next').click();
+      await expect.poll(async () => playerTime(page)).toBeCloseTo(3, 1);
+      await expect.poll(maxLeft).toBeCloseTo(640, -1);
+
+      // the live preview uses the animated crop: the left bars (grey, yellow, cyan, green) at 2 s, the right ones
+      // (green, magenta, red, blue) at 3.5 s. Without E7 (on by default), which would show the whole frame here.
+      await clipRows(page).first().getByTestId('clip-extend-toggle').click();
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      const preview = page.getByTestId('mix-live-preview');
+      await expect(preview).toBeVisible();
+      const slider = preview.getByRole('slider');
+      await expect.poll(async () => Number(await slider.getAttribute('aria-valuemax'))).toBeGreaterThan(4);
+      const duration = Number(await slider.getAttribute('aria-valuemax'));
+      const sliderBox = (await slider.boundingBox())!;
+      /** The share of green in the canvas, once its frame is drawn (bright, and the same a moment later). */
+      const settledGreenShare = async () => {
+        const measure = async () => preview.locator('canvas').evaluate((el) => {
+          const canvas = el as HTMLCanvasElement;
+          const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+          const sum = [0, 0, 0];
+          for (let i = 0; i < data.length; i += 4) for (let c = 0; c < 3; c += 1) sum[c]! += data[i + c]!;
+          const total = sum[0]! + sum[1]! + sum[2]!;
+          return { green: sum[1]! / Math.max(1, total), brightness: total / (3 * (data.length / 4)) };
+        });
+        let share = 0;
+        await expect.poll(async () => {
+          const a = await measure();
+          await page.waitForTimeout(300);
+          const b = await measure();
+          share = b.green;
+          return b.brightness > 50 && Math.abs(a.green - b.green) < 0.005;
+        }).toBe(true);
+        return share;
+      };
+      const seekPreview = async (time: number) => {
+        await page.mouse.click(sliderBox.x + (sliderBox.width * time) / duration, sliderBox.y + sliderBox.height / 2);
+        await expect.poll(async () => Number(await slider.getAttribute('aria-valuenow'))).toBeCloseTo(time, 0);
+      };
+      await seekPreview(2);
+      const left = await settledGreenShare();
+      await screenshot(page, '19b-live-preview-left');
+      await seekPreview(3.5);
+      const right = await settledGreenShare();
+      await screenshot(page, '19c-live-preview-right');
+      console.log('Live preview green share (left, right):', left, right);
+      expect(left - right).toBeGreaterThan(0.1);
+
+      // back to the source: turning "Animate" off asks, removes the keyframes and keeps the framing at the cursor
+      await page.getByRole('button', { name: 'Source', exact: true }).click();
+      await expect(marks).toHaveCount(2);
+      await animate.click();
+      await page.getByRole('button', { name: 'Remove keyframes' }).click();
+      await expect(animate).toHaveAttribute('aria-pressed', 'false');
+      await expect(marks).toHaveCount(0);
+      await expect(label).toContainText('Max 640×720');
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
 test.describe('VideoMix (Spanish UI)', () => {
   test('10. the UI is in Spanish', async () => {
     const ctx = await launchApp({ language: 'es' });

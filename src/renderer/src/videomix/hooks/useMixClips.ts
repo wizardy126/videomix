@@ -8,7 +8,7 @@ import { segColorsCount } from '../../util/colors';
 import type { StateSegment } from '../../types';
 import type { UseMixProject } from './useMixProject';
 import type { MixClipPatch, MixProjectAction } from '../projectReducer';
-import type { ClipRects, Size } from '../overlayMath';
+import type { Size } from '../overlayMath';
 import { aspectPresets, getFrameRect, isQuarterTurn } from '../overlayMath';
 import { getSyncStep } from '../clipSegments';
 import { getRotateClipAction } from './useMixClipPins';
@@ -285,29 +285,28 @@ export default function useMixClips({ mixProject, currentSourceId, activateSourc
     if (lock != null && isQuarterTurn(delta)) setAspectLocks((existing) => new Map(existing).set(clip.id, getTurnedAspect(lock)));
   }, [aspectLocks, dispatchStep, project.clips, project.sources, selectedClipId]);
 
-  const getRectsAction = useCallback((clipId: string, rects: ClipRects): MixProjectAction => (
-    { type: 'updateClip', clipId, patch: { maxRect: rects.maxRect, minRect: rects.minRect } }
-  ), []);
+  // The overlay's edits: the rects, or (an animated clip, A9) its keyframes or base min. See ClipRectEditor.
+  const getRectsAction = useCallback((clipId: string, patch: MixClipPatch): MixProjectAction => ({ type: 'updateClip', clipId, patch }), []);
 
   /** Every step of a rect drag: transient, the drag's commit makes it one undo step. */
-  const handleRectsChange = useCallback((rects: ClipRects) => {
+  const handleRectsChange = useCallback((patch: MixClipPatch) => {
     if (selectedClipId == null) return;
     // don't merge the drag with pending keyboard nudges
     if (pendingTransientRef.current != null) flushTransient();
-    dispatch(getRectsAction(selectedClipId, rects), { transient: true });
+    dispatch(getRectsAction(selectedClipId, patch), { transient: true });
   }, [dispatch, flushTransient, getRectsAction, selectedClipId]);
 
-  const handleRectsCommit = useCallback((rects: ClipRects, info?: { keyboard: boolean }) => {
+  const handleRectsCommit = useCallback((patch: MixClipPatch, info?: { keyboard: boolean }) => {
     if (selectedClipId == null) return;
-    const action = getRectsAction(selectedClipId, rects);
+    const action = getRectsAction(selectedClipId, patch);
     // repeated arrow key nudges of the same clip become one undo step
     if (info?.keyboard) dispatchMerged(`rects:${selectedClipId}`, action, KEYBOARD_IDLE_COMMIT_MS);
     else dispatchStep(action);
   }, [dispatchMerged, dispatchStep, getRectsAction, selectedClipId]);
 
-  const handleRectsEdit = useCallback((rects: ClipRects) => {
+  const handleRectsEdit = useCallback((patch: MixClipPatch) => {
     if (selectedClipId == null) return;
-    dispatchStep(getRectsAction(selectedClipId, rects));
+    dispatchStep(getRectsAction(selectedClipId, patch));
   }, [dispatchStep, getRectsAction, selectedClipId]);
 
   return {

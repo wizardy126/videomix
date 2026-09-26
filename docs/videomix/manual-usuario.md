@@ -84,15 +84,18 @@ Con un clip seleccionado, sobre el vídeo aparece un overlay con su rectángulo:
 
 Arrastra los tiradores de las esquinas y los lados para redimensionar, o el interior para mover. Con el rectángulo seleccionado (haz clic sobre él), las flechas del teclado lo desplazan 2 px (10 px con Mayús).
 
-La barra de herramientas sobre el vídeo permite:
+La barra de herramientas, en una franja encima del vídeo (así nunca tapa los tiradores ni las etiquetas), permite:
 
 - fijar una **proporción** para el máx. (Libre, 9:16, 3:4, 1:1, 4:3, 16:9);
 - **Mín. = Máx.** (quita el mínimo) / **Añadir mín.**;
 - **Rellenar fotograma** (el máx. vuelve a ocupar todo el vídeo);
 - **Quitar bandas negras**: analiza el tramo de este clip y ajusta el máx. a la zona con imagen encontrada (el mín. se recorta para seguir dentro, sin llegar a quedar más pequeño que el mínimo permitido); si no encuentra bandas, avisa y no cambia nada. Funciona siempre, esté o no activado el ajuste automático de §5;
-- **girar el clip** −90°, +90° o 180° (ver abajo); si está girado, muestra el giro (p. ej. `90°`).
+- **girar el clip** −90°, +90° o 180° (ver abajo); si está girado, muestra el giro (p. ej. `90°`);
+- **Animar** (cronómetro): paneo y zoom del encuadre con keyframes (ver abajo).
 
 **Girar un clip**: cada clip puede girarse +90°, −90° o 180° (por ejemplo, un vídeo grabado de lado) con los botones de giro de esta barra, con su menú contextual (lista de clips y pestaña **Montaje**) o con `R` (+90°), `Mayús+R` (−90°) y `Alt+R` (180°). Con el clip seleccionado, el reproductor muestra la imagen ya girada y los rectángulos se editan sobre ella; al girar, los rectángulos giran con la imagen, así que el encuadre se conserva. Todo lo demás usa la imagen girada: la orientación del clip (un vídeo horizontal girado 90° es vertical), el montaje, la previsualización en vivo, las miniaturas y el render. El giro se suma a la rotación que ya indique el propio fichero. Su fila de la lista muestra el giro junto a la orientación.
+
+**Animar el encuadre (paneo y zoom)**: el botón **Animar** crea el primer keyframe del clip en el cursor con el encuadre actual y, desde entonces, el overlay muestra el encuadre que tiene el clip en el instante del cursor (interpolado entre keyframes). Mover o escalar el máx. en un instante crea el keyframe de ese instante o actualiza el que ya haya (auto-key; un paso de deshacer por gesto). Mientras está animado, el máx. conserva siempre su proporción (los tiradores escalan sin deformar y el imán no actúa sobre él), así que el encaje en fracciones y el montaje no cambian; el mín. se mueve y escala con el máx., y editarlo cambia su posición dentro del máx. en todos los keyframes. Los keyframes se ven como rombos en la línea de tiempo; en la barra están **keyframe anterior / siguiente** (`Mayús+,` / `Mayús+.`), **añadir** un keyframe con el encuadre que se ve (útil para que se quede quieto hasta ahí) o **borrar** el del cursor (`Mayús+Retroceso`) y, con el cursor sobre un keyframe, su **interpolación** hasta el siguiente: **Suave** (por defecto, acelera y frena), **Lineal** o **Mantener** (salto seco al llegar al siguiente). Las acciones de la barra que cambian la proporción o el mín. (proporción, **Ajustar a**, **Rellenar fotograma**, **Añadir mín.**) se aplican al clip entero: cada keyframe conserva su centro y su tamaño relativo; **Quitar bandas negras** recorta igual y además mantiene todos los keyframes dentro de la imagen. Desactivar **Animar** (pide confirmación) borra los keyframes y el clip se queda con el encuadre que se ve en el cursor; lo mismo al borrar el último. El render, la previsualización en vivo y las miniaturas usan el encuadre animado.
 
 **Copiar y pegar el encuadre**: el menú contextual de un clip (lista de clips o pestaña **Montaje**) tiene **Copiar encuadre** (máx., mín., giro y, si el clip está animado, sus keyframes) y **Pegar encuadre**, también con `Ctrl/Cmd+Mayús+C` y `Ctrl/Cmd+Mayús+V`. Pegar se aplica al clip activo o, si hay varios seleccionados, a todos ellos, en un solo paso de deshacer. Si la fuente del clip de destino tiene otro tamaño se escala proporcionalmente (como al volver a vincular una fuente, §2); si además tiene otra proporción, el encuadre se ajusta al fotograma y aparece un aviso. **Ampliar más allá del máx. si hace falta** y el audio del clip no se copian.
 
@@ -301,6 +304,7 @@ Puedes ver y personalizar todos los atajos en **Ayuda → Atajos de teclado y ra
 | Duplicar / eliminar clip seleccionado | `Ctrl/Cmd+D` / `Supr` |
 | Girar el clip seleccionado +90° / −90° / 180° | `R` / `Mayús+R` / `Alt+R` |
 | Copiar / pegar el encuadre del clip seleccionado | `Ctrl/Cmd+Mayús+C` / `Ctrl/Cmd+Mayús+V` |
+| Keyframe de encuadre anterior / siguiente / borrar el del cursor | `Mayús+,` / `Mayús+.` / `Mayús+Retroceso` |
 | Ir al clip anterior / siguiente | `↑` / `↓` |
 | Ir al primer / último clip | `Av Pág` / `Re Pág` |
 | Deshacer / rehacer | `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` |

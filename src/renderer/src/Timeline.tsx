@@ -118,6 +118,7 @@ function Timeline({
   setCutTime,
   setHoveringTime,
   cursorDurationLabel,
+  clipKeyframeTimes,
 } : {
   fileDurationNonZero: number,
   startTimeOffset: number,
@@ -155,6 +156,8 @@ function Timeline({
   setHoveringTime: (time: number | undefined) => void,
   /** E1: duration counter next to the playhead ("mm:ss" or "mm:ss → mm:ss"), or `undefined` to show nothing. */
   cursorDurationLabel?: string | undefined,
+  /** VideoMix A9 (T49): the times (source s) of the selected clip's framing keyframes, drawn as marks. */
+  clipKeyframeTimes?: number[] | undefined,
 }) {
   const { t } = useTranslation();
 
@@ -451,6 +454,11 @@ function Timeline({
 
           {shouldShowKeyframes && !areKeyframesTooClose && keyFramesInZoomWindow.map((f) => (
             <div key={f.time} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(f.time / fileDurationNonZero) * 100}%`, marginLeft: -1, width: 1, background: 'var(--gray-10)', pointerEvents: 'none' }} />
+          ))}
+
+          {/* VideoMix A9 (T49): the selected clip's framing keyframes, as diamonds at the bottom */}
+          {clipKeyframeTimes?.map((time) => (
+            <div key={time} data-testid="clip-keyframe-mark" data-time={time} style={{ position: 'absolute', bottom: 2, left: `${(time / fileDurationNonZero) * 100}%`, width: 8, height: 8, marginLeft: -4, transform: 'rotate(45deg)', background: 'var(--amber-9)', border: '1px solid var(--gray-1)', boxSizing: 'border-box', pointerEvents: 'none' }} />
           ))}
 
           {currentTimePercent !== undefined && (

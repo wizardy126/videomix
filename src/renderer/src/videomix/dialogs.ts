@@ -60,3 +60,16 @@ export async function askForStylePresetName(defaultName: string): Promise<string
   });
   return value != null ? value.trim() : undefined;
 }
+
+/** A9 (T49): turning "Animate" off removes the clip's keyframes; it keeps the framing shown at the cursor. */
+export async function askForStopAnimating(count: number): Promise<boolean> {
+  const { isConfirmed } = await getSwal().Swal.fire({
+    icon: 'warning',
+    title: i18n.t('Stop animating this clip?'),
+    text: i18n.t('Its {{count}} keyframes will be removed. The clip keeps the framing shown at the cursor.', { count }),
+    showCancelButton: true,
+    confirmButtonText: i18n.t('Remove keyframes'),
+    cancelButtonText: i18n.t('Cancel'),
+  });
+  return isConfirmed;
+}

@@ -1,6 +1,6 @@
 # T50 · v4: i18n, manual, e2e y cierre
 
-- **Hito**: M11 · **Modelo**: Sonnet · **Depende de**: T44–T49 · **Estado**: pendiente
+- **Hito**: M11 · **Modelo**: Sonnet · **Depende de**: T44–T49 · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 

@@ -1,9 +1,9 @@
 import { describe, test, expect } from 'vitest';
 
 import {
-  clampTransform, easeKeyframe, findKeyframeIndex, getBaseTransform, getClipRectsAt, getKeyframeSegments, getKeyframeTransformAt,
+  clampTransform, easeKeyframe, findKeyframeIndex, getAnimatedRectsEdit, getBaseTransform, getClipRectsAt, getKeyframeSegments, getKeyframeTransformAt,
   getNextKeyframe, getPrevKeyframe, getRectsForTransform, getTransformFromMaxRect, getTransformedRects, isClipAnimated,
-  normalizeKeyframes, removeKeyframe, rescaleKeyframes, rotateKeyframes, setKeyframe, setKeyframeInterpolation, shiftKeyframes,
+  limitKeyframesToRect, normalizeKeyframes, removeKeyframe, rescaleKeyframes, rotateKeyframes, setKeyframe, setKeyframeInterpolation, shiftKeyframes,
 } from './clipKeyframes';
 import { rotateClipRects } from './clipRotation';
 import { rectContains } from './geometry';
@@ -162,6 +162,57 @@ describe('editing helpers', () => {
     expect(getNextKeyframe(keyframes, 1)?.time).toBe(3);
     expect(getNextKeyframe(keyframes, 0)?.time).toBe(1);
     expect(getNextKeyframe(keyframes, 3)).toBeUndefined();
+  });
+});
+
+describe('editing an animated clip in the overlay (T49)', () => {
+  const clip = { maxRect, minRect, keyframes: [kf(1, 960, 540, 1), kf(3, 700, 400, 0.5, 'linear')] };
+
+  test('moving or scaling the max adds or updates the keyframe at the time, the min stays', () => {
+    const shown = getClipRectsAt(clip, 2, frame);
+    const moved = { ...shown, maxRect: { ...shown.maxRect, x: shown.maxRect.x + 100 } };
+    const edit = getAnimatedRectsEdit({ clip, time: 2, shown, edited: moved });
+    expect(edit.minRect).toBe(minRect);
+    expect(edit.keyframes).toHaveLength(3);
+    // the new keyframe shows exactly the edited max
+    expect(getClipRectsAt({ ...clip, ...edit }, 2, frame).maxRect).toEqual(moved.maxRect);
+    // at an existing keyframe it's updated, keeping its interpolation
+    const shown3 = getClipRectsAt(clip, 3, frame);
+    const scaled = { maxRect: { x: 100, y: 100, width: 240, height: 136 } };
+    const edit3 = getAnimatedRectsEdit({ clip, time: 3, shown: shown3, edited: scaled });
+    expect(edit3.keyframes).toHaveLength(2);
+    expect(edit3.keyframes![1]).toMatchObject({ time: 3, centerX: 220, centerY: 168, interpolation: 'linear' });
+    expect(edit3.keyframes![1]!.scale).toBeCloseTo(0.25, 2);
+    expect(getClipRectsAt({ ...clip, ...edit3 }, 3, frame).maxRect).toEqual({ x: 100, y: 100, width: 240, height: 136 });
+  });
+
+  test('editing the min changes the base min (relative to the max, in every keyframe)', () => {
+    // at 3 s the max is half the base, around (700, 400)
+    const shown = getClipRectsAt(clip, 3, frame);
+    expect(shown.maxRect).toEqual({ x: 460, y: 266, width: 480, height: 270 });
+    const edited = { maxRect: shown.maxRect, minRect: { x: 460, y: 266, width: 120, height: 270 } };
+    const edit = getAnimatedRectsEdit({ clip, time: 3, shown, edited });
+    expect(edit.keyframes).toBe(clip.keyframes);
+    // twice the size, from the base max's corner
+    expect(edit.minRect).toEqual({ x: 480, y: 270, width: 240, height: 540 });
+    expect(getClipRectsAt({ ...clip, ...edit }, 3, frame).minRect).toEqual(edited.minRect);
+  });
+
+  test('nothing changed: the keyframes and the min the clip had', () => {
+    const shown = getClipRectsAt(clip, 2, frame);
+    expect(getAnimatedRectsEdit({ clip, time: 2, shown, edited: shown })).toEqual({ keyframes: clip.keyframes, minRect });
+  });
+
+  test('limitKeyframesToRect keeps every keyframe (and so the animation) inside the bounds', () => {
+    const bounds = { x: 0, y: 120, width: 1920, height: 840 };
+    const limited = limitKeyframesToRect(maxRect, [kf(0, 960, 540, 2), kf(1, 500, 200, 0.5), kf(2, 960, 540, 1)], bounds)!;
+    // too big: the largest that fits (840 / 540), centred; too high: moved down; inside: unchanged
+    expect(limited[0]).toMatchObject({ centerX: 960, centerY: 540 });
+    expect(limited[0]!.scale).toBeCloseTo(840 / 540, 9);
+    expect(limited[1]).toEqual(kf(1, 500, 120 + 135, 0.5));
+    expect(limited[2]).toEqual(kf(2, 960, 540, 1));
+    for (let t = 0; t <= 2; t += 0.1) expect(rectContains(bounds, getClipRectsAt({ maxRect, keyframes: limited }, t, frame).maxRect)).toBe(true);
+    expect(limitKeyframesToRect(maxRect, [kf(2, 960, 540, 1)], bounds)).toBeUndefined();
   });
 });
 

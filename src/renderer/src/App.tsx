@@ -39,6 +39,8 @@ import useMixWorkspace from './videomix/hooks/useMixWorkspace';
 import useMixClips from './videomix/hooks/useMixClips';
 import useMixClipPins from './videomix/hooks/useMixClipPins';
 import useBlackBars from './videomix/hooks/useBlackBars';
+import useClipKeyframes from './videomix/hooks/useClipKeyframes';
+import useMixToolbarSlot from './videomix/hooks/useMixToolbarSlot';
 import useMixRender from './videomix/hooks/useMixRender';
 import MixSettingsDialog from './videomix/components/MixSettingsDialog';
 import MixRenderButtons from './videomix/components/MixRenderButtons';
@@ -1620,8 +1622,11 @@ function App() {
   // VideoMix: display size of the video in the player (the rect editor's frame) and, while a turned clip is selected
   // (E9, T38d), the turn of the player: the rect editor works on the turned picture
   const mixVideoSize = useMixVideoSize({ videoRef, compatPlayerEnabled, videoStream: activeVideoStream });
+  // T49: the rect editor's toolbar goes in a strip above the player area (which is what gets turned)
+  const mixToolbarSlot = useMixToolbarSlot();
+  const mixPlayerAreaRef = useRef<HTMLDivElement>(null);
   const mixPlayerTurnStyle = useMixPlayerTurn({
-    containerRef: videoContainerRef,
+    containerRef: mixPlayerAreaRef,
     videoSize: mixVideoSize,
     cssRotation: compatPlayerEnabled ? effectiveRotation : undefined,
     rotation: filePath != null && mixClips.selectedClip != null ? getClipRotation(mixClips.selectedClip) : 0,
@@ -1659,6 +1664,9 @@ function App() {
   const mixClipPins = useMixClipPins({ clips: mixProject.project.clips, sources: mixProject.project.sources, settings: mixProject.project.settings, selectedClipId: mixClips.selectedClipId, cursorTime: mixOverlays.cursorTime, selectClip: mixClips.userSelectClip, dispatchStep: mixClips.dispatchStep });
 
   // A7 (T47): background per-source black bars caching, and the "Remove black bars" button
+  // A9 (T49): the selected clip's framing keyframes
+  const mixClipKeyframes = useClipKeyframes({ clip: mixClips.selectedClip, sources: mixProject.project.sources, getRelevantTime, seekAbs, dispatchStep: mixClips.dispatchStep });
+  const mixClipKeyframeTimes = useMemo(() => mixClips.selectedClip?.keyframes?.map((k) => k.time), [mixClips.selectedClip?.keyframes]);
   const mixBlackBars = useBlackBars({ sources: mixProject.project.sources, clips: mixProject.project.clips, autoCropBlackBars: mixProject.project.settings.autoCropBlackBars, setSourceBlackBars: mixProject.setSourceBlackBars, dispatchStep: mixClips.dispatchStep, workingRef, setWorking, withErrorHandling });
 
   const toggleLastCommands = useCallback(() => setLastCommandsVisible((val) => !val), []);
@@ -2324,6 +2332,10 @@ function App() {
       // A5 (T46)
       copyClipFraming: () => mixClipPins.userCopyFraming(mixClips.selectedClipId),
       pasteClipFraming: () => mixClipPins.userPasteFraming(mixClips.selectedClipId),
+      // A9 (T49)
+      seekPreviousClipKeyframe: () => mixClipKeyframes.userSeekKeyframe(-1),
+      seekNextClipKeyframe: () => mixClipKeyframes.userSeekKeyframe(1),
+      removeClipKeyframe: () => mixClipKeyframes.userRemoveKeyframe(),
       // E6 "New clip from here": unlike setCutStart (I), always starts a new marker, even inside another clip
       // (addSegment always appends one, ignoring the current segment; setCutStart only falls back to it past the end)
       newClipFromCursor: () => { if (checkFileOpened()) addSegment(); },
@@ -2341,7 +2353,7 @@ function App() {
     }
 
     return ret;
-  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, mixClipPins, mixRender, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState, mixPreviewActive, toggleMixPreview, playMixPreview, pauseMixPreview]);
+  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, mixClipPins, mixClipKeyframes, mixRender, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState, mixPreviewActive, toggleMixPreview, playMixPreview, pauseMixPreview]);
 
   const getKeyboardAction = useCallback((action: MainKeyboardAction) => mainActions[action], [mainActions]);
 
@@ -2732,7 +2744,10 @@ function App() {
                   <div style={{ position: 'relative', flexGrow: 1, overflow: 'hidden' }} ref={videoContainerRef}>
                     {!isFileOpened && <NoFileLoaded mifiLink={mifiLink} currentCutSeg={currentCutSeg} onClick={openFilesDialog} darkMode={darkMode} keyBindingByAction={keyBindingByAction} />}
 
-                    <div className="no-user-select" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, visibility: !isFileOpened || !hasVideo || bigWaveformEnabled ? 'hidden' : undefined }} onWheel={onTimelineWheel}>
+                    {/* VideoMix (T49): the rect editor's toolbar, above the picture so it never covers the rects (empty otherwise) */}
+                    <div ref={mixToolbarSlot.setSlot} data-testid="rect-toolbar-slot" style={{ position: 'absolute', top: 0, left: 0, right: 0 }} />
+
+                    <div className="no-user-select" ref={mixPlayerAreaRef} style={{ position: 'absolute', top: mixToolbarSlot.height, left: 0, right: 0, bottom: 0, visibility: !isFileOpened || !hasVideo || bigWaveformEnabled ? 'hidden' : undefined }} onWheel={onTimelineWheel}>
                       {/* VideoMix (E9): turned with the selected clip, see useMixPlayerTurn */}
                       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, ...mixPlayerTurnStyle }}>
                         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
@@ -2765,15 +2780,22 @@ function App() {
                           videoSize={mixVideoSize}
                           cssRotation={compatPlayerEnabled ? effectiveRotation : undefined}
                           clip={mixClips.selectedClip}
+                          time={relevantTime}
                           color={segColorsContext.getSegColor({ segColorIndex: mixClips.selectedClip.color }).hex()}
                           aspectLock={mixClips.aspectLock}
                           fitLayout={mixFitLayout}
+                          toolbarContainer={bigWaveformEnabled ? undefined : mixToolbarSlot.slot}
                           onAspectLockChange={mixClips.setAspectLock}
                           onChange={mixClips.handleRectsChange}
                           onCommit={mixClips.handleRectsCommit}
                           onEdit={mixClips.handleRectsEdit}
                           onRotate={mixClips.userRotateClip}
                           onRemoveBlackBars={() => mixBlackBars.userRemoveBlackBars(mixClips.selectedClipId)}
+                          onToggleAnimate={mixClipKeyframes.userToggleAnimate}
+                          onAddKeyframe={mixClipKeyframes.userAddKeyframe}
+                          onRemoveKeyframe={mixClipKeyframes.userRemoveKeyframe}
+                          onSeekKeyframe={mixClipKeyframes.userSeekKeyframe}
+                          onKeyframeInterpolationChange={mixClipKeyframes.userSetKeyframeInterpolation}
                         />
                       )}
                     </div>
@@ -2781,7 +2803,7 @@ function App() {
                     {bigWaveformEnabled && <BigWaveform waveforms={waveforms} relevantTime={relevantTime} playing={playing} fileDurationNonZero={fileDurationNonZero} zoom={zoomUnrounded} seekRel={seekRel} darkMode={darkMode} />}
 
                     {compatPlayerEnabled && (
-                      <div style={{ position: 'absolute', top: 0, right: 0, left: 0, marginTop: '1em', marginLeft: '1em', color: 'var(--gray-12)', opacity: 0.7, display: 'flex', alignItems: 'center', pointerEvents: 'none' }}>
+                      <div style={{ position: 'absolute', top: mixToolbarSlot.height, right: 0, left: 0, marginTop: '1em', marginLeft: '1em', color: 'var(--gray-12)', opacity: 0.7, display: 'flex', alignItems: 'center', pointerEvents: 'none' }}>
                         {isRotationSet ? (
                           <>
                             <MdRotate90DegreesCcw size={26} style={{ marginRight: 5 }} />
@@ -2988,6 +3010,7 @@ function App() {
                       setCutTime={setCutTime}
                       setHoveringTime={setHoveringTime}
                       cursorDurationLabel={cursorDurationLabel}
+                      clipKeyframeTimes={mixClipKeyframeTimes}
                     />
                   )}
 

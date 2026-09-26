@@ -62,7 +62,7 @@ interface DragState {
  * Only the rects and handles take pointer events, so clicks elsewhere reach the video and the wheel bubbles to the
  * container (seek/zoom).
  */
-function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', aspectLock, cssRotation, clipRotation, fits, fitLayout, magnet = false, onChange, onCommit }: {
+function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', aspectLock, cssRotation, clipRotation, fits, fitLayout, magnet = false, onChange, onCommit, onDragEnd }: {
   maxRect: Rect,
   minRect?: Rect | undefined,
   videoSize: Size,
@@ -85,6 +85,8 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
   onChange: (rects: ClipRects) => void,
   /** `keyboard`: an arrow key nudge, the parent may merge repeated nudges into one undo step. */
   onCommit: (rects: ClipRects, info?: { keyboard: boolean }) => void,
+  /** The end of a drag (after its `onCommit`, if any), also when nothing changed or it was cancelled. */
+  onDragEnd?: (() => void) | undefined,
 }) {
   const { t } = useTranslation();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -169,7 +171,8 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
     dragRef.current = undefined;
     setSnapped(undefined);
     if (!sameRects(drag.last, drag.start)) onCommit(drag.last);
-  }, [onCommit]);
+    onDragEnd?.();
+  }, [onCommit, onDragEnd]);
 
   const handlePointerCancel = useCallback((e: PointerEvent<SVGSVGElement>) => {
     const drag = dragRef.current;
@@ -177,7 +180,8 @@ function RectOverlay({ maxRect, minRect, videoSize, color = 'var(--cyan-9)', asp
     dragRef.current = undefined;
     setSnapped(undefined);
     onChange(drag.start);
-  }, [onChange]);
+    onDragEnd?.();
+  }, [onChange, onDragEnd]);
 
   // F2: pressing or releasing Alt during a drag inverts the magnet at once, without waiting for the pointer to move.
   // Keeping the default also keeps Alt from focusing the window menu.

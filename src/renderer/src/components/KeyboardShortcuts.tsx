@@ -818,6 +818,19 @@ const KeyboardShortcuts = memo(({
         name: t('Paste framing'),
         category: mixProjectCategory,
       },
+      seekPreviousClipKeyframe: {
+        // A9 (T49): the keyframes of the selected clip's framing (pan and zoom)
+        name: t('Previous framing keyframe'),
+        category: mixProjectCategory,
+      },
+      seekNextClipKeyframe: {
+        name: t('Next framing keyframe'),
+        category: mixProjectCategory,
+      },
+      removeClipKeyframe: {
+        name: t('Remove the framing keyframe at the cursor'),
+        category: mixProjectCategory,
+      },
       showMixSettings: {
         name: t('Mix settings'),
         category: mixProjectCategory,

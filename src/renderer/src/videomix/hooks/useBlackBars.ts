@@ -10,6 +10,7 @@ import { createBlackBarsDetection, cropDetectToDisplayRect, getPictureRect, isBl
 import type { CropDetectRect } from '../blackBars';
 import type { MixProjectAction } from '../projectReducer';
 import type { BlackBarsDetection, MixClip, MixSource } from '../types';
+import { isClipAnimated, limitKeyframesToRect } from '../clipKeyframes';
 
 export interface BlackBarsDeps {
   stat: (path: string) => Promise<{ mtimeMs: number, size: number }>,
@@ -91,11 +92,14 @@ export default function useBlackBars({ sources, clips, autoCropBlackBars, setSou
         const picture = display != null ? getPictureRect(display, sourceFrame) : undefined;
         const clipPicture = picture != null ? rotateRect(picture, sourceFrame, getClipRotation(clip)) : undefined;
         const rects = clipPicture != null ? removeBlackBarsFromRects({ maxRect: clip.maxRect, minRect: clip.minRect }, clipPicture) : undefined;
-        if (rects == null) {
+        // A9 (T49): an animated clip's base rects are cut the same way, and then every keyframe is kept inside the picture
+        const keyframes = clipPicture != null && isClipAnimated(clip) ? limitKeyframesToRect((rects ?? clip).maxRect, clip.keyframes, clipPicture) : undefined;
+        if (rects == null && keyframes == null) {
           getSwal().toast.fire({ icon: 'info', title: i18n.t('No black bars found in this clip') });
           return;
         }
-        dispatchStep({ type: 'updateClip', clipId: clip.id, patch: { maxRect: rects.maxRect, minRect: rects.minRect } });
+        const { maxRect, minRect } = rects ?? clip;
+        dispatchStep({ type: 'updateClip', clipId: clip.id, patch: { maxRect, minRect, ...(keyframes != null && { keyframes }) } });
       } finally {
         setWorking(undefined);
       }

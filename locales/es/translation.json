@@ -1384,5 +1384,21 @@
   "Magnet: on. Dragged edges snap to the exact size of 1/3, 1/2 or 2/3 of the output. Hold Alt while dragging to turn it off for that drag": "Imán: activado. Los bordes que arrastras se enganchan al tamaño exacto de 1/3, 1/2 o 2/3 de la salida. Mantén Alt mientras arrastras para desactivarlo en ese arrastre",
   "Resize the max to exactly {{fraction}} of the output, centered on the min (or on the current max)": "Ajusta el máx. exactamente a {{fraction}} de la salida, centrado en el mín. (o en el máx. actual)",
   "The framing was fitted to the frame: {{count}} pasted clip(s) have another proportion_one": "El encuadre se ha ajustado al fotograma: el clip pegado tiene otra proporción",
-  "The framing was fitted to the frame: {{count}} pasted clip(s) have another proportion_other": "El encuadre se ha ajustado al fotograma: {{count}} de los clips pegados tienen otra proporción"
+  "The framing was fitted to the frame: {{count}} pasted clip(s) have another proportion_other": "El encuadre se ha ajustado al fotograma: {{count}} de los clips pegados tienen otra proporción",
+  "Add a keyframe at the cursor with the framing shown": "Añadir un keyframe en el cursor con el encuadre que se ve",
+  "Animate": "Animar",
+  "Animate the framing (pan and zoom): adds a keyframe at the cursor with the current framing; from then on, moving or scaling the max adds or updates a keyframe at the cursor": "Animar el encuadre (paneo y zoom): añade un keyframe en el cursor con el encuadre actual; a partir de ahí, mover o escalar el máx. añade o actualiza un keyframe en el cursor",
+  "Animated: moving or scaling the max adds or updates a keyframe at the cursor. Click to stop animating (removes the keyframes)": "Animado: mover o escalar el máx. añade o actualiza un keyframe en el cursor. Haz clic para dejar de animar (borra los keyframes)",
+  "Hold": "Mantener",
+  "Interpolation from this keyframe to the next one": "Interpolación de este keyframe al siguiente",
+  "Its {{count}} keyframes will be removed. The clip keeps the framing shown at the cursor._one": "Se borrará su keyframe. El clip conserva el encuadre que se ve en el cursor.",
+  "Its {{count}} keyframes will be removed. The clip keeps the framing shown at the cursor._other": "Se borrarán sus {{count}} keyframes. El clip conserva el encuadre que se ve en el cursor.",
+  "Linear": "Lineal",
+  "Next framing keyframe": "Keyframe de encuadre siguiente",
+  "Previous framing keyframe": "Keyframe de encuadre anterior",
+  "Remove keyframes": "Borrar keyframes",
+  "Remove the framing keyframe at the cursor": "Borrar el keyframe de encuadre del cursor",
+  "Smooth": "Suave",
+  "Stop animating this clip?": "¿Dejar de animar este clip?",
+  "There is no framing keyframe at the cursor": "No hay ningún keyframe de encuadre en el cursor"
 }

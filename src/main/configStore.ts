@@ -123,6 +123,11 @@ const allDefaultKeyBindings: KeyBinding[] = [
   { keys: 'MetaLeft+ShiftLeft+KeyC', action: 'copyClipFraming' },
   { keys: 'ControlLeft+ShiftLeft+KeyV', action: 'pasteClipFraming' },
   { keys: 'MetaLeft+ShiftLeft+KeyV', action: 'pasteClipFraming' },
+  // A9 (T49): the selected clip's framing keyframes. Shift+Comma/Period (next to the frame steps, Comma/Period) and
+  // Shift+Backspace are not used by any other binding or menu accelerator.
+  { keys: 'ShiftLeft+Comma', action: 'seekPreviousClipKeyframe' },
+  { keys: 'ShiftLeft+Period', action: 'seekNextClipKeyframe' },
+  { keys: 'ShiftLeft+Backspace', action: 'removeClipKeyframe' },
 
   // VideoMix mix. Plain E ('export') also renders in VideoMix mode. Ctrl/Cmd+E, Ctrl/Cmd+P and Ctrl/Cmd+Shift+M are not
   // used by any other binding or menu accelerator (Cmd+M alone is the macOS minimize shortcut, so Shift is added).
