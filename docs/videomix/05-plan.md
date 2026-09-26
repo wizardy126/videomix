@@ -86,7 +86,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T47 | v4: bandas negras (A7) | M11 | Sonnet | T44 | hecha |
 | T48 | v4: keyframes en render, previsualización y miniaturas (A9) | M11 | Opus | T44 | hecha |
 | T49 | v4: edición de keyframes (A9) | M11 | Opus | T44, T45, T48 | hecha |
-| T50 | v4: i18n, manual, e2e y cierre | M11 | Sonnet | T44–T49 | en curso |
+| T50 | v4: i18n, manual, e2e y cierre | M11 | Sonnet | T44–T49 | hecha |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 

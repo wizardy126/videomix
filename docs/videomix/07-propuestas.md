@@ -14,11 +14,11 @@ Propuestas hechas al usuario tras M7 (overlays), con su estado. El usuario elige
 | A2 ⭐ | **Miniaturas** en la lista de clips y en la vista Mix. | Alto | M | ✅ v2 (T31) |
 | A3 | **Zoom y scroll horizontal** en la vista Mix, para proyectos largos. | Medio | S | — |
 | A4 ⭐ | **Ajustes manuales del plan**: fijar un clip a un momento, agrupar clips. | Alto | L | ✅ v2 (T30) |
-| A5 | **Aplicar rectángulos a varios clips**: copiar y pegar el máx./mín. | Medio | S | 🚧 v4 |
+| A5 | **Aplicar rectángulos a varios clips**: copiar y pegar el máx./mín. | Medio | S | ✅ v4 (T46) |
 | A6 | **Crear clips en lote** por detección de escenas o silencios. | Medio | S–M | — |
-| A7 | **Sugerencia automática de recorte**: quitar bandas negras (`cropdetect`) o recorte centrado a fracción. | Medio | M | 🚧 v4 |
+| A7 | **Sugerencia automática de recorte**: quitar bandas negras (`cropdetect`) o recorte centrado a fracción. | Medio | M | ✅ v4 (T47) |
 | A8 | **Velocidad por clip** (cámara lenta o rápida), teniendo en cuenta el audio. | Medio | M | — |
-| A9 | **Keyframes o paneo del rectángulo** a lo largo del clip. | Alto | L | 🚧 v4 |
+| A9 | **Keyframes o paneo del rectángulo** a lo largo del clip. | Alto | L | ✅ v4 (T48, T49) |
 
 ## B. Aspecto del montaje y overlays
 
@@ -64,4 +64,4 @@ Propuestas hechas al usuario tras M7 (overlays), con su estado. El usuario elige
 
 - v3 (§11 de requisitos): E1–E9, bugs B1 (SAR) y B2 (re-vincular). ✅
 - M10: modal de progreso del render y vídeos convertidos en la caché. ✅
-- v4 (§12): F1 indicador de encaje en fracciones y F2 imán / "Ajustar a". 🚧
+- v4 (§12): F1 indicador de encaje en fracciones y F2 imán / "Ajustar a". ✅ (T44, T44b, T45)
