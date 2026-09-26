@@ -1,6 +1,6 @@
 # T54 · v5: "Ajustar a" sobre el mín. (G5)
 
-- **Hito**: M12 · **Modelo**: Sonnet · **Depende de**: T51 · **Estado**: pendiente
+- **Hito**: M12 · **Modelo**: Sonnet · **Depende de**: T51 · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 
