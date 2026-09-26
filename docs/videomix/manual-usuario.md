@@ -95,6 +95,8 @@ La barra de herramientas, en una franja encima del vídeo (así nunca tapa los t
 
 **Encaje en fracciones, imán y "Ajustar a"**: sobre el recorte se ven unas etiquetas (chips) que dicen en qué fracción del ancho de salida encaja el clip (1/3, 1/2, 2/3 o completo, o el alto en salida vertical): ✓ si encaja, ↔ si solo ampliando más allá del máx. (con "Ampliar más allá del máx." activo y material en la fuente), ✗ si no, con cuántos px de la fuente faltan o sobran. La lista de clips muestra lo mismo de forma compacta. El **imán** (icono a la izquierda de "Ajustar a", desactivado por defecto) engancha el borde que arrastras del máx. o del mín. al tamaño exacto de una fracción si te acercas lo suficiente; mantener **Alt** mientras arrastras invierte su estado para ese arrastre. Los botones **Ajustar a 1/3 / 1/2 / 2/3** dejan el clip encajado exactamente en esa fracción (un paso de deshacer): si el clip tiene mín., se ajusta **el mín.** (crece o encoge, centrado en sí mismo); si el máx. no es lo bastante ancho para contenerlo, se ensancha lo justo, centrado en sí mismo, dentro del fotograma. Sin mín., se ajusta el máx. como antes, centrado en sí mismo. Si no cabe ni ensanchando todo lo posible dentro del fotograma, un aviso explica el motivo y no cambia nada.
 
+**Tolerancia de encaje del 1 %**: un desajuste de hasta un 1 % entre la proporción del clip y la de su columna (por ejemplo, tres clips verticales "Ajustados a 1/3" cuya fracción exacta no cae en un número entero de píxeles) se absorbe siempre **sin deformar la imagen**, y por eso cuenta como ✓ en los chips de encaje: primero se recorta un poco dentro del máx. (repartido en los dos lados, escalando esa pequeña diferencia de forma uniforme); si eso no es posible (el mín. ya llega hasta ese borde), se amplía unos píxeles más allá del máx. cuando el clip lo permite ("Ampliar más allá del máx.", más arriba) y hay material en la fuente; solo si ninguna de las dos cabe, la imagen se estira como mucho un 1 % (sin apreciarse). Los chips ✓ ya tienen en cuenta esta tolerancia; ↔ significa que haría falta ampliar más de lo que cubre la tolerancia.
+
 **Girar un clip**: cada clip puede girarse +90°, −90° o 180° (por ejemplo, un vídeo grabado de lado) con los botones de giro de esta barra, con su menú contextual (lista de clips y pestaña **Montaje**) o con `R` (+90°), `Mayús+R` (−90°) y `Alt+R` (180°). Con el clip seleccionado, el reproductor muestra la imagen ya girada y los rectángulos se editan sobre ella; al girar, los rectángulos giran con la imagen, así que el encuadre se conserva. Todo lo demás usa la imagen girada: la orientación del clip (un vídeo horizontal girado 90° es vertical), el montaje, la previsualización en vivo, las miniaturas y el render. El giro se suma a la rotación que ya indique el propio fichero. Su fila de la lista muestra el giro junto a la orientación.
 
 **Animar el encuadre (paneo y zoom)**: el botón **Animar** crea el primer keyframe del clip en el cursor con el encuadre actual y, desde entonces, el overlay muestra el encuadre que tiene el clip en el instante del cursor (interpolado entre keyframes). Mover o escalar el máx. en un instante crea el keyframe de ese instante o actualiza el que ya haya (auto-key; un paso de deshacer por gesto). Mientras está animado, el máx. conserva siempre su proporción (los tiradores escalan sin deformar y el imán no actúa sobre él), así que el encaje en fracciones y el montaje no cambian; el mín. se mueve y escala con el máx., y editarlo cambia su posición dentro del máx. en todos los keyframes. Los keyframes se ven como rombos en la línea de tiempo; en la barra están **keyframe anterior / siguiente** (`Mayús+,` / `Mayús+.`), **añadir** un keyframe con el encuadre que se ve (útil para que se quede quieto hasta ahí) o **borrar** el del cursor (`Mayús+Retroceso`) y, con el cursor sobre un keyframe, su **interpolación** hasta el siguiente: **Suave** (por defecto, acelera y frena), **Lineal** o **Mantener** (salto seco al llegar al siguiente). Las acciones de la barra que cambian la proporción o el mín. (proporción, **Ajustar a**, **Rellenar fotograma**, **Añadir mín.**) se aplican al clip entero: cada keyframe conserva su centro y su tamaño relativo; **Quitar bandas negras** recorta igual y además mantiene todos los keyframes dentro de la imagen. Desactivar **Animar** (pide confirmación) borra los keyframes y el clip se queda con el encuadre que se ve en el cursor; lo mismo al borrar el último. El render, la previsualización en vivo y las miniaturas usan el encuadre animado.
@@ -152,6 +154,13 @@ En la lista de clips normal, un clip que está en la secuencia muestra su posici
 
 El orden de la lista de clips es la base del montaje, pero el algoritmo puede reordenar para encajar los tamaños de columna, dentro de una "ventana de reordenación" configurable: un número de posiciones (sin tope práctico; 3 por defecto) o **Ilimitado**, que permite traer clips de cualquier punto del proyecto para rellenar los huecos. Aun así, entre opciones igual de buenas se sigue prefiriendo el orden de la lista. También existe un **orden aleatorio** reproducible (con una semilla guardada en el proyecto y un botón para "barajar de nuevo"); se elige en Ajustes de montaje.
 
+Para decidir entre varios montajes posibles con esa ventana, VideoMix calcula también el plan con ventanas menores (0, 3 y 10, según cuál sea mayor) y se queda con el mejor de todos según el criterio de **Priorizar** (más abajo): así, elegir **Ilimitado** (o cualquier número grande) **nunca da un resultado peor** que elegir 3 o 10, aunque tarde un poco más en calcularlo.
+
+**Priorizar** (Ajustes de montaje → Orden) decide qué se entiende por "mejor montaje" cuando hay varias formas de encajar los clips:
+
+- **Duración más corta** (por defecto): gana el plan que dura menos; en caso de empate, el que tenga menos relleno, después el más cercano al orden de la lista y por último el que cambie menos veces de disposición. Con este criterio, el montaje puede aceptar unas franjas negras (pillarbox/letterbox) breves en algún clip si eso hace que el vídeo final sea más corto.
+- **Menos relleno**: gana el plan con menos huecos de relleno; en caso de empate, el más corto, luego el más cercano al orden de la lista y por último el que cambie menos veces de disposición.
+
 ## 5. Ajustes de montaje
 
 Se abren con **Proyecto → Ajustes de montaje...** (`Ctrl/Cmd+Shift+M`) o el botón **Ajustes** de la barra inferior:
@@ -160,7 +169,7 @@ Se abren con **Proyecto → Ajustes de montaje...** (`Ctrl/Cmd+Shift+M`) o el bo
 |---|---|
 | **Salida** | **proporción** (16:9 horizontal con clips lado a lado, 9:16 vertical con clips apilados, 1:1 cuadrado — el montaje elige lado a lado o apilados, lo que mejor encaje), resolución (lado corto: 720p / 1080p / 4K), fotogramas por segundo, calidad (CRF), preset de velocidad, **códec de vídeo** (H.264 / H.265-HEVC), **codificador** (Automático, Solo software, o uno de hardware — NVIDIA NVENC, Intel Quick Sync, Apple VideoToolbox, VAAPI — marcado como detectado o no según el equipo) y **límite de duración del vídeo** (desactivado por defecto; ver más abajo) |
 | **Composición** | máximo de columnas o filas visibles (1–6, según la proporción), separación entre columnas o filas en px (y su color), relleno del hueco (desenfoque o color sólido), **quitar bandas negras automáticamente** (activado por defecto; ver §2 y §3) |
-| **Orden** | orden de la lista o aleatorio (con semilla y "barajar de nuevo"), ventana de reordenación (número de posiciones o casilla "Ilimitado") |
+| **Orden** | orden de la lista o aleatorio (con semilla y "barajar de nuevo"), ventana de reordenación (número de posiciones o casilla "Ilimitado"), **Priorizar** (duración más corta o menos relleno; ver §4) |
 | **Enlaces** | margen para enlazar automáticamente clips de una misma fuente (segundos; 10 por defecto, `0` lo desactiva) y transición entre clips enlazados (corte directo o la transición global) — ver "Clips enlazados" en §3 |
 | **Transición** | tipo (fundido, disolución, barridos, deslizamientos...) y duración; fundido de entrada/salida al principio y final del vídeo |
 | **Música** | **lista de reproducción** de varias pistas (añadir, reordenar, quitar, volumen por pista), fundido cruzado entre pistas, repetir la lista si es más corta que el vídeo y **ducking** (bajar automáticamente la música mientras se oye algún clip) — ver §5.1 |
@@ -188,9 +197,21 @@ Si el fichero de una pista ya no se encuentra (proyecto movido o pista borrada),
 
 ## 6. Previsualizar el plan del montaje
 
-La pestaña **Montaje** (junto a **Fuente**, sobre la línea de tiempo) muestra una vista del plan de montaje calculado a partir de los clips y los ajustes actuales: un carril por columna (o por fila, en salida vertical) con los bloques de cada clip (con su color, nombre y miniatura de fondo si el bloque es lo bastante ancho), las transiciones y las zonas de relleno. Sirve para entender qué se va a ver antes de renderizar, sin necesidad de esperar al render. Al hacer clic en un bloque se selecciona su clip (igual que en la lista); arrastrar un bloque lo mueve y lo **fija** en su nuevo instante al soltarlo (§3).
+La pestaña **Montaje** (junto a **Fuente**, sobre la línea de tiempo) muestra una vista del plan de montaje calculado a partir de los clips y los ajustes actuales: los bloques de cada clip (con su color, nombre y miniatura de fondo si el bloque es lo bastante ancho), las transiciones y las zonas de relleno, repartidos en **carriles horizontales** (o verticales, en salida vertical). Los carriles son **compactos**: en vez de uno por columna del montaje, dos columnas que nunca coinciden en el tiempo comparten el mismo carril, así que solo hay tantos carriles como columnas simultáneas como máximo (normalmente 2–3), y el orden de arriba a abajo sigue en lo posible al de izquierda a derecha (o de arriba abajo, en filas). Sirve para entender qué se va a ver antes de renderizar, sin necesidad de esperar al render. Al hacer clic en un bloque se selecciona su clip (igual que en la lista); arrastrar un bloque lo mueve y lo **fija** en su nuevo instante al soltarlo (§3).
 
 Sobre el plan, donde antes solo había una miniatura del fotograma bajo el cursor, ahora hay una **previsualización en vivo** que se reproduce de verdad (ver §6.1).
+
+### Zoom y desplazamiento horizontal
+
+Por defecto, la vista de la pestaña **Montaje** muestra todo el vídeo ajustado al ancho disponible, como siempre. Para proyectos largos:
+
+- **Ctrl (o Cmd) + rueda del ratón**: acerca o aleja el zoom, centrado en el punto donde está el ratón.
+- **Rueda del ratón** o **Mayús + rueda**: desplaza la vista horizontalmente (solo tiene efecto con zoom).
+- Botones **−** / **+** / **Ajustar** en la cabecera de la vista: alejar, acercar (centrado en el medio de la vista) y volver a ajustar todo el vídeo al ancho.
+- Puedes hacer clic en el eje de tiempo (encima de los carriles) para mover el cursor, igual que en los carriles.
+- Con zoom activo, si reproduces (previsualización en vivo) y el cursor de reproducción se sale de la parte visible, la vista se desplaza sola para mantenerlo a la vista.
+
+El nivel de zoom **no se guarda** en el proyecto: siempre se empieza ajustado al ancho al reabrir el proyecto.
 
 ### 6.1 Previsualización en vivo
 
@@ -291,7 +312,17 @@ En la misma carpeta, `converted/` guarda las versiones convertidas para el repro
 
 ## 9. Atajos de teclado
 
-Puedes ver y personalizar todos los atajos en **Ayuda → Atajos de teclado y ratón** (`Mayús+/`). Los más importantes:
+Puedes ver y personalizar todos los atajos en **Ayuda → Atajos de teclado y ratón** (`Mayús+/`).
+
+**Los atajos funcionan con el foco en cualquier sitio**, por ejemplo justo después de hacer clic en un botón, salvo:
+
+- mientras escribes en un **campo de texto o número**, o dentro de un **diálogo o menú** abierto (que usan sus propias teclas);
+- en un **desplegable** (`select`), las teclas normales quedan para elegir una opción, pero las combinaciones con **Ctrl/Cmd** (como `Ctrl/Cmd+Z`) sí llegan a los atajos, así que puedes deshacer justo después de elegir una opción sin tener que hacer clic fuera antes;
+- si el foco está en un **botón** (o en otro control activable, como una casilla), **Espacio** e **Intro** activan ese control en vez de disparar el atajo que tuvieran asignado; el resto de atajos (incluido deshacer) sigue funcionando con normalidad.
+
+Cada acción de edición (mover un clip en la vista Montaje, fijarlo, cambiar un rectángulo, un keyframe, un ajuste...) queda como un único paso de deshacer, sin importar dónde estuviera el foco al hacerla.
+
+Los más importantes:
 
 | Acción | Atajo |
 |---|---|
