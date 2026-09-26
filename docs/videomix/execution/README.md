@@ -101,3 +101,8 @@
 | T48 | [T48-v4-keyframes-render.md](T48-v4-keyframes-render.md) |
 | T49 | [T49-v4-keyframes-ui.md](T49-v4-keyframes-ui.md) |
 | T50 | [T50-v4-cierre.md](T50-v4-cierre.md) |
+| T51 | [T51-v5-atajos-deshacer.md](T51-v5-atajos-deshacer.md) |
+| T52 | [T52-v5-planificador.md](T52-v5-planificador.md) |
+| T53 | [T53-v5-vista-mix.md](T53-v5-vista-mix.md) |
+| T54 | [T54-v5-ajustar-min.md](T54-v5-ajustar-min.md) |
+| T55 | [T55-v5-cierre.md](T55-v5-cierre.md) |

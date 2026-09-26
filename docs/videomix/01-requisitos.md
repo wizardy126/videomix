@@ -218,7 +218,18 @@ Además, en M10 (sin ID): **modal de progreso del render** (fase, barra, transcu
 | A7 | **Sugerencia automática de recorte** | (1) Botón **"Quitar bandas negras"**: analiza el tramo del clip con `cropdetect` y ajusta el máx. a la zona con imagen. (2) **Recorte centrado a fracción**: son los botones "Ajustar a" de F2. (3) **Automático al crear**: se detectan las bandas **una vez por fuente** (en segundo plano, cacheado en el proyecto) y los clips nuevos de esa fuente nacen sin ellas. Ajuste del proyecto para desactivarlo, **activo por defecto**. |
 | A9 | **Keyframes del rectángulo (paneo y zoom)** | Se animan **posición y escala** del máx. y el mín. juntos, **sin cambiar su proporción**, así que el encaje (F1) y el planificador no cambian. Limitado al fotograma de la fuente. Edición con **cronómetro + auto-key**: un botón "Animar" activa los keyframes del clip y, desde entonces, mover el recorte en un instante crea o actualiza el keyframe de ese instante; marcas en la línea de tiempo del clip, keyframe anterior/siguiente y borrar. **Interpolación elegible por keyframe**: suave (ease in-out, por defecto), lineal o mantener (salto seco). Render, previsualización en vivo y miniaturas usan el recorte animado. |
 
-## 13. Fuera de alcance (backlog)
+## 13. Mejoras v5 y correcciones (decididas con el usuario)
+
+| ID | Mejora | Decisiones |
+|---|---|---|
+| G1 | **Bug: la ventana de reorden ilimitada da peores vídeos** que 3 o 10 (más largos, peor encaje) | Se busca y corrige la causa. Además, como red de seguridad, el planificador **calcula el plan con varias ventanas** (la elegida y otras menores) y se queda con el mejor, así "ilimitado" nunca sale peor. Coste de cálculo medido y acotado. |
+| G2 | **Criterio de "mejor plan" configurable** | Ajuste del proyecto en Ajustes → Orden: **"Priorizar"**: *duración más corta* (por defecto: duración → relleno → orden de la lista → re-layouts) o *menos relleno* (relleno → duración → orden → re-layouts). |
+| G3 | **Bug: demasiadas filas en la vista Mix** | La vista dibujaba una fila por identificador de columna del plan. Se **compactan**: columnas que no coinciden en el tiempo comparten fila, así que hay tantas filas como columnas simultáneas (normalmente 2–3), manteniendo en lo posible arriba-abajo = izquierda-derecha. |
+| G4 | **Bug: Ctrl+Z (y el resto de atajos) no responden** tras pulsar un botón | Los atajos solo funcionaban con el foco en el cuerpo de la ventana. Ahora funcionan con el foco en cualquier sitio **salvo en campos de texto**; un botón con foco sigue respondiendo a Espacio/Intro. Se revisa que cada acción (vista Mix, clips, rectángulos, keyframes) cree su paso de deshacer. |
+| G5 | **"Ajustar a" con mín.** | Si hay mín., se ajusta **el mín.**: su ancho (alto en filas) crece o encoge, centrado en el propio mín., para que el ancho más estrecho del clip sea exactamente la fracción. Si el máx. no llega a la fracción, se **ensancha lo justo** (centrado, dentro del fotograma); si no cabe, aviso. Sin mín., se ajusta el máx. como hasta ahora. |
+| A3 | **Zoom y scroll horizontal en la vista Mix** | Por defecto, todo el vídeo ajustado al ancho (como ahora). **Ctrl + rueda**: zoom centrado en el ratón; rueda o Mayús + rueda: desplazamiento horizontal. Botones **+ / − / Ajustar** en la cabecera. Con zoom, al reproducir, la vista **sigue al cursor**. El zoom no se guarda en el proyecto. |
+
+## 14. Fuera de alcance (backlog)
 
 - Notas en los clips.
 - Resolución libre.

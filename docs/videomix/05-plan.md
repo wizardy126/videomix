@@ -25,6 +25,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M9 · Mejoras v3 y correcciones** | E1–E9, B1, B2 | T35–T40 |
 | **M10 · Render y conversiones** | Modal de progreso del render, vídeos convertidos en la caché del proyecto | T41–T43 |
 | **M11 · Mejoras v4** | F1, F2, A5, A7, A9 | T44, T44b, T45–T50 |
+| **M12 · Mejoras v5 y correcciones** | G1–G5, A3 | T51–T55 |
 
 ## Tareas
 
@@ -87,6 +88,11 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T48 | v4: keyframes en render, previsualización y miniaturas (A9) | M11 | Opus | T44 | hecha |
 | T49 | v4: edición de keyframes (A9) | M11 | Opus | T44, T45, T48 | hecha |
 | T50 | v4: i18n, manual, e2e y cierre | M11 | Sonnet | T44–T49 | hecha |
+| T51 | v5: atajos con cualquier foco y deshacer (G4) | M12 | Opus | — | en curso |
+| T52 | v5: ventana de reorden ilimitada y criterio configurable (G1, G2) | M12 | Opus | — | en curso |
+| T53 | v5: filas compactas y zoom/scroll en la vista Mix (G3, A3) | M12 | Opus | — | en curso |
+| T54 | v5: "Ajustar a" sobre el mín. (G5) | M12 | Sonnet | T51 | pendiente |
+| T55 | v5: manual, i18n y cierre | M12 | Sonnet | T51–T54 | pendiente |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 
@@ -148,6 +154,12 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 3. T46 ∥ T47.
 4. T49.
 5. T50.
+
+## Oleadas de M12
+
+1. T51 ∥ T52 ∥ T53.
+2. T54.
+3. T55.
 
 ## Pendientes al integrar en la rama por defecto
 

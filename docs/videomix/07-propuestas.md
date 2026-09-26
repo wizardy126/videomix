@@ -12,7 +12,7 @@ Propuestas hechas al usuario tras M7 (overlays), con su estado. El usuario elige
 |---|---|---|---|---|
 | A1 ⭐ | **Previsualización en vivo aproximada** del montaje en la app, sin renderizar. | Muy alto | L | ✅ v2 (T32) |
 | A2 ⭐ | **Miniaturas** en la lista de clips y en la vista Mix. | Alto | M | ✅ v2 (T31) |
-| A3 | **Zoom y scroll horizontal** en la vista Mix, para proyectos largos. | Medio | S | — |
+| A3 | **Zoom y scroll horizontal** en la vista Mix, para proyectos largos. | Medio | S | 🚧 v5 |
 | A4 ⭐ | **Ajustes manuales del plan**: fijar un clip a un momento, agrupar clips. | Alto | L | ✅ v2 (T30) |
 | A5 | **Aplicar rectángulos a varios clips**: copiar y pegar el máx./mín. | Medio | S | ✅ v4 (T46) |
 | A6 | **Crear clips en lote** por detección de escenas o silencios. | Medio | S–M | — |
@@ -65,3 +65,4 @@ Propuestas hechas al usuario tras M7 (overlays), con su estado. El usuario elige
 - v3 (§11 de requisitos): E1–E9, bugs B1 (SAR) y B2 (re-vincular). ✅
 - M10: modal de progreso del render y vídeos convertidos en la caché. ✅
 - v4 (§12): F1 indicador de encaje en fracciones y F2 imán / "Ajustar a". ✅ (T44, T44b, T45)
+- v5 (§13): G1–G5 (correcciones del planificador, la vista Mix, los atajos y "Ajustar a"). 🚧
