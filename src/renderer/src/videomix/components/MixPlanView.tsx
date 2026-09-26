@@ -2,14 +2,14 @@ import type { CSSProperties, MouseEventHandler, PointerEvent as ReactPointerEven
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { FaCut, FaExclamationTriangle, FaEye, FaFont, FaImage, FaLink, FaPlus, FaSearchMinus, FaSearchPlus, FaStopwatch, FaThumbtack, FaVolumeUp } from 'react-icons/fa';
+import { FaCaretDown, FaCaretRight, FaCut, FaExclamationTriangle, FaEye, FaEyeSlash, FaFont, FaImage, FaLink, FaLock, FaPlus, FaSearchMinus, FaSearchPlus, FaStopwatch, FaThumbtack, FaVolumeUp } from 'react-icons/fa';
 import { MdLinearScale, MdOpenInFull } from 'react-icons/md';
 
 import { useSegColors } from '../../contexts';
 import useUserSettings from '../../hooks/useUserSettings';
 import { controlsBackground, darkModeTransition, timelineBackground, warningColor } from '../../colors';
 import { formatDuration } from '../../util/duration';
-import type { MixClip, MixOverlay, MixSettings } from '../types';
+import type { MixBlock, MixBlockDef, MixClip, MixOverlay, MixSettings, OverlayAnchor } from '../types';
 import { getCellRect } from '../geometry';
 import { getPlanAxis } from '../planner/types';
 import type { ColumnPlacement, MixPlan, PlanWarning } from '../planner/types';
@@ -28,7 +28,13 @@ import { getCountdownTextAt, getOverlayFrames } from '../overlays/overlayFrames'
 import { getSlideOffset, getTextEntryFrames, getTextFontSizeForBox, getTextOpacity, getTextOverlayFontSize, getTypewriterCount, splitGraphemes, splitTextLines } from '../overlays/textLayout';
 import styles from './MixPlanView.module.css';
 import { getClipSelectModifiers } from '../hooks/useMixClipPins';
+import { getBlockDefTimes } from '../blocks/expandBlocks';
+import { getBlockMoveAnchor, getSelectionMode, isBlockDefLocked, layoutBlockLane } from '../blocks/blockUi';
+import type { BlockLaneItem } from '../blocks/blockUi';
+import type { MixOverlayPatch } from '../projectReducer';
 import type { ClipSelectModifiers, UseMixClipPins } from '../hooks/useMixClipPins';
+import BlockTemplateButtons from './BlockTemplateButtons';
+import type { UseBlockTemplates } from '../hooks/useBlockTemplates';
 
 const { pathToFileURL } = window.require('@electron/remote').require('./index.js');
 
@@ -40,6 +46,8 @@ const { pathToFileURL } = window.require('@electron/remote').require('./index.js
 // T26 adds the texts (in the countdowns/bars lane), drawn on the mini frame with their fades and entry animation.
 // T53: columns that don't coincide in time share a lane (G3), and the lanes zoom and scroll horizontally (A3), with a
 // time axis above them.
+// T57: overlay multi-selection (Ctrl/Shift+click) and a lane of blocks of overlays: each block is one piece that drags
+// as a whole, with its members (unless collapsed) below it, which can be selected and edited inside the block.
 
 const LANE_HEIGHT = 22;
 const OVERLAY_ROW_HEIGHT = 16;
@@ -223,6 +231,8 @@ const OverlayBlock = memo(({ overlay, item, duration, isSelected, canMove, canRe
       tabIndex={-1}
       data-testid="overlay-block"
       data-overlay-type={overlay.type}
+      data-overlay-id={overlay.id}
+      data-selected={isSelected || undefined}
       title={tooltip}
       onPointerDown={handleMovePointerDown}
       onPointerMove={onPointerMove}
@@ -260,6 +270,86 @@ const OverlayBlock = memo(({ overlay, item, duration, isSelected, canMove, canRe
         />
       )}
     </div>
+  );
+});
+
+/** A block of overlays in the blocks lane (T57): its piece, dragged as a whole, with the collapse toggle. */
+// eslint-disable-next-line react/display-name
+const BlockPiece = memo(({ block, def, item, duration, color, isSelected, linkedCount, tooltip, hasWarning, onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onToggleCollapsed }: {
+  block: MixBlock,
+  def: MixBlockDef,
+  item: BlockLaneItem,
+  duration: number,
+  color: string,
+  isSelected: boolean,
+  linkedCount: number,
+  tooltip: string,
+  hasWarning: boolean,
+  onPointerDown: (e: ReactPointerEvent<HTMLDivElement>, blockId: string) => void,
+  onPointerMove: PointerEventHandler<HTMLDivElement>,
+  onPointerUp: PointerEventHandler<HTMLDivElement>,
+  onPointerCancel: PointerEventHandler<HTMLDivElement>,
+  onToggleCollapsed: (blockId: string) => void,
+}) => {
+  const { t } = useTranslation();
+  const left = timeToPercent(item.start, duration);
+  const width = Math.max(MIN_BLOCK_FRACTION * 100, timeToPercent(item.end, duration) - left);
+  const handlePointerDown = useCallback<PointerEventHandler<HTMLDivElement>>((e) => onPointerDown(e, block.id), [block.id, onPointerDown]);
+  const handleToggle = useCallback<MouseEventHandler<HTMLButtonElement>>((e) => {
+    e.stopPropagation();
+    onToggleCollapsed(block.id);
+  }, [block.id, onToggleCollapsed]);
+  const commonStyle: CSSProperties = { position: 'absolute', left: `${Math.min(left, 100 - MIN_BLOCK_FRACTION * 100)}%`, width: `${width}%`, boxSizing: 'border-box' };
+  return (
+    <>
+      {/* the block's area (piece and member rows), so its members read as a group */}
+      {item.rows > 1 && <div style={{ ...commonStyle, top: item.row * OVERLAY_ROW_HEIGHT, height: item.rows * OVERLAY_ROW_HEIGHT, background: color, opacity: 0.18, borderRadius: 3, pointerEvents: 'none' }} />}
+      <div
+        role="button"
+        tabIndex={-1}
+        data-testid="block-piece"
+        data-block-id={block.id}
+        data-selected={isSelected || undefined}
+        data-hidden={block.hidden || undefined}
+        data-locked={block.locked || undefined}
+        title={tooltip}
+        onPointerDown={handlePointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onClick={stopPropagation}
+        style={{
+          ...commonStyle,
+          top: item.row * OVERLAY_ROW_HEIGHT + 1,
+          height: OVERLAY_ROW_HEIGHT - 2,
+          background: block.hidden ? `repeating-linear-gradient(45deg, ${color} 0, ${color} 4px, transparent 4px, transparent 7px)` : color,
+          opacity: block.hidden ? 0.6 : 1,
+          borderRadius: 3,
+          border: `1px solid ${isSelected ? 'var(--gray-12)' : 'transparent'}`,
+          overflow: 'hidden',
+          cursor: block.locked ? 'pointer' : 'grab',
+          touchAction: 'none',
+        }}
+      >
+        <div className="no-user-select" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', gap: '.2em', padding: '0 .2em', fontSize: '.7em', color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', pointerEvents: 'none', fontWeight: 600 }}>
+          <button
+            type="button"
+            data-testid="block-collapse"
+            title={block.collapsed ? t('Expand') : t('Collapse')}
+            onPointerDown={stopPropagation}
+            onClick={handleToggle}
+            style={{ pointerEvents: 'auto', font: 'inherit', color: 'inherit', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', flexShrink: 0 }}
+          >
+            {block.collapsed ? <FaCaretRight /> : <FaCaretDown />}
+          </button>
+          {block.locked && <FaLock style={{ flexShrink: 0 }} />}
+          {block.hidden && <FaEyeSlash style={{ flexShrink: 0 }} />}
+          {linkedCount > 1 && <FaLink style={{ flexShrink: 0 }} />}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{def.name}</span>
+          {hasWarning && <FaExclamationTriangle style={{ flexShrink: 0, color: warningColor }} />}
+        </div>
+      </div>
+    </>
   );
 });
 
@@ -437,10 +527,13 @@ const TimeAxis = memo(({ scrollerRef, duration, zoom, cursorTime, onPointerDown 
   );
 });
 
-interface BlockDrag { pointerId: number, mode: BlockDragMode, startX: number, axisWidth: number, start: MixOverlay, rawStart: number, moved: boolean }
-interface BoxDrag { pointerId: number, handle: DragHandle, startX: number, startY: number, scale: number, start: Exclude<MixOverlay, { type: 'sound' }>, moved: boolean }
+/** T57: a loose overlay, or a member of a block definition (edited inside the block: every linked copy changes). */
+type DragTarget = { kind: 'overlay' } | { kind: 'member', defId: string, members: MixOverlay[] };
+interface BlockDrag { pointerId: number, mode: BlockDragMode, startX: number, axisWidth: number, start: MixOverlay, rawStart: number, moved: boolean, target: DragTarget }
+interface BoxDrag { pointerId: number, handle: DragHandle, startX: number, startY: number, scale: number, start: Exclude<MixOverlay, { type: 'sound' }>, moved: boolean, target: DragTarget }
+interface PieceDrag { pointerId: number, blockId: string, startX: number, axisWidth: number, anchor: OverlayAnchor, rawStart: number, moved: boolean }
 
-function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOverlays, overlays, missingOverlayFiles }: {
+function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOverlays, overlays, missingOverlayFiles, blockTemplates }: {
   clips: MixClip[],
   settings: MixSettings,
   /** Selection (with the multi-selection), pins and groups (A4, T30). */
@@ -452,13 +545,18 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
   mixOverlays: UseMixOverlays,
   overlays: MixOverlay[],
   missingOverlayFiles: readonly MissingOverlayFile[],
+  /** "Insert block…" and "Import block…" (T58). */
+  blockTemplates?: Pick<UseBlockTemplates, 'userInsertBlockFromLibrary' | 'userImportBlock'> | undefined,
 }) {
   const { t } = useTranslation();
   const { darkMode } = useUserSettings();
   const { getSegColor } = useSegColors();
   const [hoverTime, setHoverTime] = useState<number>();
 
-  const { plan, resolved, selectedOverlayId, setSelectedOverlayId, cursorTime, setCursorTime, update, commitTransient, cancelTransient, userAddImage, userAddCountdown, userAddProgressBar, userAddText, userAddSound } = mixOverlays;
+  const { plan, resolved, setSelectedOverlayId, cursorTime, setCursorTime, update, commitTransient, cancelTransient, userAddImage, userAddCountdown, userAddProgressBar, userAddText, userAddSound } = mixOverlays;
+  // T57: blocks and the multi-selection
+  const { project, expanded, blockTimes, selectedIds, selectedMember, selectedFrameOverlayId, selectOverlayItem, selectBlockMember, clearOverlaySelection, userUpdateBlock, userUpdateBlockMember } = mixOverlays;
+  const { blocks, blockDefs } = project;
 
   const clipsById = useMemo(() => new Map(clips.map((clip) => [clip.id, clip])), [clips]);
   const getColor = useCallback((clip: MixClip) => getSegColor({ segColorIndex: clip.color }).desaturate(0.1).lightness(darkMode ? 40 : 55).string(), [darkMode, getSegColor]);
@@ -474,7 +572,17 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
 
   const overlayLanes = useMemo(() => (plan != null ? layoutOverlayLanes(overlays, resolved, { minDuration: plan.duration * MIN_BLOCK_FRACTION }) : []), [overlays, plan, resolved]);
   const overlaysById = useMemo(() => new Map(overlays.map((o) => [o.id, o])), [overlays]);
-  const missingOverlayIds = useMemo(() => new Set(missingOverlayFiles.map((m) => m.overlayId)), [missingOverlayFiles]);
+  const missingOverlayIds = useMemo(() => new Set(missingOverlayFiles.filter((m) => m.blockDefId == null).map((m) => m.overlayId)), [missingOverlayFiles]);
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  // T57: blocks lane
+  const blockDefsById = useMemo(() => new Map(blockDefs.map((d) => [d.id, d])), [blockDefs]);
+  const blocksById = useMemo(() => new Map(blocks.map((b) => [b.id, b])), [blocks]);
+  const blockLane = useMemo(() => (plan != null ? layoutBlockLane({ blocks, blockDefs }, blockTimes, resolved, plan.duration, { minDuration: plan.duration * MIN_BLOCK_FRACTION }) : { rows: 0, items: [] }), [blockDefs, blockTimes, blocks, plan, resolved]);
+  const expandedById = useMemo(() => new Map(expanded.all.map((o) => [o.id, o])), [expanded.all]);
+  /** Member files not found, by `defId/memberId`. */
+  const missingMemberKeys = useMemo(() => new Set(missingOverlayFiles.flatMap((m) => (m.blockDefId != null ? [`${m.blockDefId}/${m.overlayId}`] : []))), [missingOverlayFiles]);
+  const getBlockColor = useCallback((color: number) => getSegColor({ segColorIndex: color }).desaturate(0.1).lightness(darkMode ? 40 : 55).string(), [darkMode, getSegColor]);
 
   const lanesRef = useRef<HTMLDivElement>(null);
 
@@ -543,7 +651,42 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
     if (placement != null) onSelect(placement.clipId, getClipSelectModifiers(e));
   }, [lanes, onSelect, plan, timeAtClientX]);
 
-  const handleOverlayLaneClick = useCallback(() => setSelectedOverlayId(undefined), [setSelectedOverlayId]);
+  const handleOverlayLaneClick = useCallback(() => clearOverlaySelection(), [clearOverlaySelection]);
+
+  /**
+   * T57: what a press on an overlay (loose or a block's member, by its expanded id) selects, and how it can be dragged.
+   * With Ctrl/Cmd or Shift it only changes the multi-selection (a member stands for its block). Undefined: no drag
+   * (a member of a locked block, or a multi-selection click).
+   */
+  const pressOverlay = useCallback((e: ReactPointerEvent, overlayId: string): { start: MixOverlay, rawStart: number, target: DragTarget } | undefined => {
+    const mode = getSelectionMode(e);
+    const origin = expanded.origins.get(overlayId);
+    if (origin == null) {
+      if (mode !== 'replace') {
+        selectOverlayItem(overlayId, mode);
+        return undefined;
+      }
+      setSelectedOverlayId(overlayId);
+      const overlay = overlaysById.get(overlayId);
+      const times = resolved.get(overlayId);
+      return overlay != null && times != null ? { start: overlay, rawStart: times.rawStart, target: { kind: 'overlay' } } : undefined;
+    }
+    if (mode !== 'replace') {
+      selectOverlayItem(origin.blockId, mode);
+      return undefined;
+    }
+    selectBlockMember(origin.blockId, origin.memberId);
+    const def = blockDefsById.get(blocksById.get(origin.blockId)?.defId ?? '');
+    const member = def?.members.find((m) => m.id === origin.memberId);
+    if (def == null || member == null || isBlockDefLocked(project, def.id)) return undefined;
+    // times inside the block: its anchor is relative to the block's start
+    return { start: member, rawStart: getBlockDefTimes(def).get(member.id)?.start ?? 0, target: { kind: 'member', defId: def.id, members: def.members } };
+  }, [blockDefsById, blocksById, expanded.origins, overlaysById, project, resolved, selectBlockMember, selectOverlayItem, setSelectedOverlayId]);
+
+  const applyDragPatch = useCallback((target: DragTarget, overlayId: string, patch: MixOverlayPatch) => {
+    if (target.kind === 'member') userUpdateBlockMember(target.defId, overlayId, patch, { transient: true });
+    else update(overlayId, patch, { transient: true });
+  }, [update, userUpdateBlockMember]);
 
   // Block drags: transient edits while moving, one undo step on release (T04), computed from the state at pointer down
   const blockDragRef = useRef<BlockDrag>(undefined);
@@ -551,29 +694,28 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
   const handleBlockPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>, overlayId: string, mode: BlockDragMode) => {
     if (e.button !== 0) return;
     e.stopPropagation();
-    setSelectedOverlayId(overlayId);
-    const overlay = overlaysById.get(overlayId);
-    const times = resolved.get(overlayId);
+    const pressed = pressOverlay(e, overlayId);
     const axisWidth = lanesRef.current?.getBoundingClientRect().width ?? 0;
-    if (overlay == null || times == null) return;
+    if (pressed == null) return;
     // don't merge the drag with a pending transient edit (e.g. arrow key nudges of a clip rect)
     commitTransient();
     e.currentTarget.setPointerCapture(e.pointerId);
-    blockDragRef.current = { pointerId: e.pointerId, mode, startX: e.clientX, axisWidth, start: overlay, rawStart: times.rawStart, moved: false };
-  }, [commitTransient, overlaysById, resolved, setSelectedOverlayId]);
+    blockDragRef.current = { pointerId: e.pointerId, mode, startX: e.clientX, axisWidth, ...pressed, moved: false };
+  }, [commitTransient, pressOverlay]);
 
   const handleBlockPointerMove = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
     const drag = blockDragRef.current;
     if (drag == null || drag.pointerId !== e.pointerId || plan == null) return;
     e.stopPropagation();
     const dt = pixelsToSeconds(e.clientX - drag.startX, drag.axisWidth, plan.duration);
+    const siblings = drag.target.kind === 'member' ? drag.target.members : overlays;
     const patch = drag.mode === 'move'
-      ? getOverlayMovePatch({ start: drag.start, rawStart: drag.rawStart, dt, overlays })
-      : getOverlayResizePatch({ start: drag.start, dt, overlays });
+      ? getOverlayMovePatch({ start: drag.start, rawStart: drag.rawStart, dt, overlays: siblings })
+      : getOverlayResizePatch({ start: drag.start, dt, overlays: siblings });
     if (patch == null || (!drag.moved && Math.abs(e.clientX - drag.startX) < 2)) return;
     drag.moved = true;
-    update(drag.start.id, patch, { transient: true });
-  }, [overlays, plan, update]);
+    applyDragPatch(drag.target, drag.start.id, patch);
+  }, [applyDragPatch, overlays, plan]);
 
   const handleBlockPointerUp = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
     const drag = blockDragRef.current;
@@ -589,6 +731,51 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
     if (drag.moved) cancelTransient();
   }, [cancelTransient]);
 
+  // T57: a block's piece drags the whole block (its anchor), like an overlay's; a locked block is only selected
+  const pieceDragRef = useRef<PieceDrag>(undefined);
+
+  const handlePiecePointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>, blockId: string) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const mode = getSelectionMode(e);
+    selectOverlayItem(blockId, mode);
+    const block = blocksById.get(blockId);
+    const times = blockTimes.get(blockId);
+    if (mode !== 'replace' || block == null || times == null || block.locked) return;
+    commitTransient();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pieceDragRef.current = { pointerId: e.pointerId, blockId, startX: e.clientX, axisWidth: lanesRef.current?.getBoundingClientRect().width ?? 0, anchor: block.anchor, rawStart: times.rawStart, moved: false };
+  }, [blockTimes, blocksById, commitTransient, selectOverlayItem]);
+
+  const handlePiecePointerMove = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
+    const drag = pieceDragRef.current;
+    if (drag == null || drag.pointerId !== e.pointerId || plan == null) return;
+    e.stopPropagation();
+    if (!drag.moved && Math.abs(e.clientX - drag.startX) < 2) return;
+    drag.moved = true;
+    const dt = pixelsToSeconds(e.clientX - drag.startX, drag.axisWidth, plan.duration);
+    userUpdateBlock(drag.blockId, { anchor: getBlockMoveAnchor({ anchor: drag.anchor, rawStart: drag.rawStart, dt }) }, { transient: true });
+  }, [plan, userUpdateBlock]);
+
+  const handlePiecePointerUp = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
+    const drag = pieceDragRef.current;
+    if (drag == null || drag.pointerId !== e.pointerId) return;
+    pieceDragRef.current = undefined;
+    if (drag.moved) commitTransient();
+  }, [commitTransient]);
+
+  const handlePiecePointerCancel = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
+    const drag = pieceDragRef.current;
+    if (drag == null || drag.pointerId !== e.pointerId) return;
+    pieceDragRef.current = undefined;
+    if (drag.moved) cancelTransient();
+  }, [cancelTransient]);
+
+  const handleToggleCollapsed = useCallback((blockId: string) => {
+    const block = blocksById.get(blockId);
+    if (block != null) userUpdateBlock(blockId, { collapsed: block.collapsed ? undefined : true });
+  }, [blocksById, userUpdateBlock]);
+
   // Box drags on the mini frame, in output px (overlayMath), same transient/commit pattern
   const boxDragRef = useRef<BoxDrag>(undefined);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -596,14 +783,13 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
   const handleBoxPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>, overlayId: string, handle: DragHandle) => {
     if (e.button !== 0 || plan == null) return;
     e.stopPropagation();
-    setSelectedOverlayId(overlayId);
-    const overlay = overlaysById.get(overlayId);
+    const pressed = pressOverlay(e, overlayId);
     const frameWidth = frameRef.current?.getBoundingClientRect().width ?? 0;
-    if (overlay == null || overlay.type === 'sound' || frameWidth <= 0) return;
+    if (pressed == null || pressed.start.type === 'sound' || frameWidth <= 0) return;
     commitTransient();
     e.currentTarget.setPointerCapture(e.pointerId);
-    boxDragRef.current = { pointerId: e.pointerId, handle, startX: e.clientX, startY: e.clientY, scale: plan.width / frameWidth, start: overlay, moved: false };
-  }, [commitTransient, overlaysById, plan, setSelectedOverlayId]);
+    boxDragRef.current = { pointerId: e.pointerId, handle, startX: e.clientX, startY: e.clientY, scale: plan.width / frameWidth, start: pressed.start, moved: false, target: pressed.target };
+  }, [commitTransient, plan, pressOverlay]);
 
   const handleBoxPointerMove = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
     const drag = boxDragRef.current;
@@ -617,9 +803,9 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
     const box = applyOverlayBoxDrag({ start: start.box, handle: drag.handle, dx: (e.clientX - drag.startX) * drag.scale, dy: (e.clientY - drag.startY) * drag.scale, frame, aspect });
     drag.moved = true;
     // A text's size follows its box height (its lines fill it), like the countdown's
-    if (start.type === 'text' && box.height !== start.box.height) update(start.id, { box, fontSize: getTextFontSizeForBox(start.text, start.lineSpacing, box.height) }, { transient: true });
-    else update(start.id, { box }, { transient: true });
-  }, [plan, update]);
+    if (start.type === 'text' && box.height !== start.box.height) applyDragPatch(drag.target, start.id, { box, fontSize: getTextFontSizeForBox(start.text, start.lineSpacing, box.height) });
+    else applyDragPatch(drag.target, start.id, { box });
+  }, [applyDragPatch, plan]);
 
   const handleBoxPointerUp = useCallback<PointerEventHandler<HTMLDivElement>>((e) => {
     const drag = boxDragRef.current;
@@ -704,13 +890,19 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
   }, [cursorTime, duration]);
 
   const frameTime = hoverTime ?? cursorTime;
-  const frameBoxes = useMemo(() => getOverlayFrameBoxes(overlays, resolved, frameTime, selectedOverlayId), [frameTime, overlays, resolved, selectedOverlayId]);
-  const selectedFrameBox = frameBoxes.find((b) => b.overlay.id === selectedOverlayId);
+  // T57: the blocks' visible members too (layer order: above the loose overlays)
+  const frameBoxes = useMemo(() => getOverlayFrameBoxes(expanded.visible, resolved, frameTime, selectedFrameOverlayId), [expanded.visible, frameTime, resolved, selectedFrameOverlayId]);
+  const selectedFrameBox = frameBoxes.find((b) => b.overlay.id === selectedFrameOverlayId);
+  /** Boxes of the multi-selection (loose overlays, members of selected blocks): outlined. */
+  const isBoxInSelection = useCallback((overlayId: string) => selectedIdSet.has(expanded.origins.get(overlayId)?.blockId ?? overlayId), [expanded.origins, selectedIdSet]);
 
   const clipLanesHeight = Math.max(LANE_HEIGHT, lanes.length * LANE_HEIGHT);
   // Overlay lanes go below the clip lanes, each as tall as its rows (+1 px border)
   const overlayLaneTops = overlayLanes.map((_, i) => clipLanesHeight + overlayLanes.slice(0, i).reduce((acc, lane) => acc + lane.rows * OVERLAY_ROW_HEIGHT + 1, 0));
   const overlayLanesHeight = overlayLanes.reduce((acc, lane) => acc + lane.rows * OVERLAY_ROW_HEIGHT + 1, 0);
+  // T57: the blocks lane goes last
+  const blockLaneTop = clipLanesHeight + overlayLanesHeight;
+  const blockLaneHeight = blockLane.rows > 0 ? blockLane.rows * OVERLAY_ROW_HEIGHT + 1 : 0;
 
   if (plan == null || tl == null) {
     return (
@@ -721,7 +913,9 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
   }
 
   return (
-    <div data-testid="mix-plan-view" style={{ flexGrow: 1, display: 'flex', overflow: 'hidden', background: controlsBackground, transition: darkModeTransition, padding: '.3em .5em', gap: '.5em', boxSizing: 'border-box' }}>
+    // `isolation`: the z-indexes inside (the sticky time axis, a dragged clip) stay in the view's own stacking context, so
+    // dialogs and menus (fixed, later in the document) always paint above it (T57)
+    <div data-testid="mix-plan-view" style={{ flexGrow: 1, display: 'flex', overflow: 'hidden', background: controlsBackground, transition: darkModeTransition, padding: '.3em .5em', gap: '.5em', boxSizing: 'border-box', isolation: 'isolate' }}>
       <div style={{ width: Math.min(FRAME_MAX_WIDTH, FRAME_MAX_HEIGHT * (plan.width / plan.height)), flexShrink: 0 }}>
         <div ref={frameRef}>
           <FramePreview plan={plan} tl={tl} time={frameTime} clipsById={clipsById} getColor={getColor}>
@@ -735,7 +929,7 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
                 onPointerMove={handleBoxPointerMove}
                 onPointerUp={handleBoxPointerUp}
                 onPointerCancel={handleBoxPointerCancel}
-                style={{ ...boxPercentStyle(frameBox.overlay.box), opacity: frameBox.visible ? 1 : 0.4, cursor: 'move', touchAction: 'none', outline: frameBox.visible ? undefined : '1px dashed var(--gray-12)' }}
+                style={{ ...boxPercentStyle(frameBox.overlay.box), opacity: frameBox.visible ? 1 : 0.4, cursor: 'move', touchAction: 'none', outline: frameBox.visible ? (isBoxInSelection(frameBox.overlay.id) ? '1px dashed var(--cyan-9)' : undefined) : '1px dashed var(--gray-12)' }}
               >
                 <OverlayBoxContent frameBox={frameBox} fps={settings.fps} />
               </div>
@@ -770,6 +964,7 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
           <button type="button" style={toolbarButtonStyle} onClick={userAddCountdown}><FaStopwatch />{t('Add countdown')}</button>
           <button type="button" style={toolbarButtonStyle} onClick={userAddProgressBar}><MdLinearScale />{t('Add progress bar')}</button>
           <button type="button" style={toolbarButtonStyle} onClick={userAddSound}><FaVolumeUp />{t('Add sound…')}</button>
+          {blockTemplates != null && <BlockTemplateButtons blockTemplates={blockTemplates} buttonStyle={toolbarButtonStyle} />}
           {truncated != null && (
             <span data-testid="mix-truncated" style={{ fontSize: '.7em', marginLeft: 'auto', color: warningColor, display: 'inline-flex', alignItems: 'center', gap: '.3em' }} title={t('The mix is longer than its maximum duration: it is cut at {{time}} with the fade-out, {{seconds}} s are left out', { time: formatDuration({ seconds: truncated.time, shorten: true }), seconds: Math.round(truncated.seconds) })}>
               <FaCut />
@@ -798,7 +993,7 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
               onMouseLeave={handleMouseLeave}
               onPointerDown={handleLanesPointerDown}
               // blocks past the end (an overlay outside the video, a dragged clip) don't widen the scrolled area
-              style={{ position: 'relative', height: clipLanesHeight + overlayLanesHeight, background: timelineBackground, overflow: 'hidden' }}
+              style={{ position: 'relative', height: clipLanesHeight + overlayLanesHeight + blockLaneHeight, background: timelineBackground, overflow: 'hidden' }}
             >
               {relayouts.map((layout) => (
                 <div
@@ -887,7 +1082,7 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
                           overlay={overlay}
                           item={item}
                           duration={plan.duration}
-                          isSelected={overlay.id === selectedOverlayId}
+                          isSelected={selectedIdSet.has(overlay.id)}
                           canMove={!linked}
                           canResize={!linked && overlay.type !== 'sound'}
                           tooltip={tooltipLines.join('\n')}
@@ -902,6 +1097,83 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
                   </div>
                 );
               })}
+
+              {blockLane.rows > 0 && (
+                <div
+                  role="button"
+                  tabIndex={-1}
+                  data-testid="block-lane"
+                  onClick={handleOverlayLaneClick}
+                  style={{ position: 'absolute', top: blockLaneTop, left: 0, right: 0, height: blockLane.rows * OVERLAY_ROW_HEIGHT, borderBottom: '1px solid var(--gray-6)', background: 'var(--gray-a2)' }}
+                >
+                  <div className="no-user-select" style={{ position: 'absolute', left: '.3em', top: 0, height: OVERLAY_ROW_HEIGHT, display: 'flex', alignItems: 'center', fontSize: '.65em', color: 'var(--gray-11)', pointerEvents: 'none', opacity: 0.8 }}>
+                    {t('Blocks')}
+                  </div>
+                  {blockLane.items.map((item) => {
+                    const block = blocksById.get(item.blockId);
+                    const def = block != null ? blockDefsById.get(block.defId) : undefined;
+                    if (block == null || def == null) return null;
+                    const warnings = blockTimes.get(block.id)?.warnings ?? [];
+                    const missing = def.members.some((m) => missingMemberKeys.has(`${def.id}/${m.id}`));
+                    const memberWarning = def.members.some((m) => (resolved.get(`${block.id}/${m.id}`)?.warnings.length ?? 0) > 0);
+                    const linkedCount = blocks.filter((b) => b.defId === def.id).length;
+                    const tooltip = [
+                      def.name,
+                      ...(block.hidden ? [t('Hidden')] : []),
+                      ...(block.locked ? [t('Locked')] : []),
+                      ...(linkedCount > 1 ? [t('Linked: {{count}} copies share its content', { count: linkedCount })] : []),
+                      ...(missing ? [t('File not found')] : []),
+                      ...warnings.map((w) => getOverlayTimeWarningText(w)),
+                      ...(block.locked ? [] : [t('Drag to move the whole block')]),
+                    ].join('\n');
+                    return (
+                      <div key={block.id} style={{ display: 'contents' }}>
+                        <BlockPiece
+                          block={block}
+                          def={def}
+                          item={item}
+                          duration={plan.duration}
+                          color={getBlockColor(def.color)}
+                          isSelected={selectedIdSet.has(block.id)}
+                          linkedCount={linkedCount}
+                          tooltip={tooltip}
+                          hasWarning={missing || memberWarning || warnings.length > 0}
+                          onPointerDown={handlePiecePointerDown}
+                          onPointerMove={handlePiecePointerMove}
+                          onPointerUp={handlePiecePointerUp}
+                          onPointerCancel={handlePiecePointerCancel}
+                          onToggleCollapsed={handleToggleCollapsed}
+                        />
+                        {item.members.map((memberItem) => {
+                          const overlay = expandedById.get(memberItem.overlayId);
+                          if (overlay == null) return null;
+                          const memberWarnings = resolved.get(overlay.id)?.warnings ?? [];
+                          const memberMissing = missingMemberKeys.has(`${def.id}/${memberItem.memberId}`);
+                          const contentLocked = isBlockDefLocked(project, def.id);
+                          const linked = getLinkedCountdown(overlay, expandedById) != null;
+                          return (
+                            <OverlayBlock
+                              key={overlay.id}
+                              overlay={overlay}
+                              item={memberItem}
+                              duration={plan.duration}
+                              isSelected={selectedMember?.overlayId === overlay.id}
+                              canMove={!linked && !contentLocked}
+                              canResize={!linked && !contentLocked && overlay.type !== 'sound'}
+                              tooltip={[overlay.name, ...(memberMissing ? [t('File not found')] : []), ...memberWarnings.map((w) => getOverlayTimeWarningText(w))].join('\n')}
+                              hasWarning={memberMissing || memberWarnings.length > 0}
+                              onPointerDown={handleBlockPointerDown}
+                              onPointerMove={handleBlockPointerMove}
+                              onPointerUp={handleBlockPointerUp}
+                              onPointerCancel={handleBlockPointerCancel}
+                            />
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               <div data-testid="mix-cursor" style={{ position: 'absolute', top: 0, bottom: 0, left: `${timeToPercent(cursorTime, plan.duration)}%`, width: 1, background: 'var(--red-9)', pointerEvents: 'none' }} />
             </div>

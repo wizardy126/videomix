@@ -847,6 +847,27 @@ const KeyboardShortcuts = memo(({
         name: t('Clear render cache'),
         category: mixProjectCategory,
       },
+      // H2, H3 (T58): block templates
+      importBlock: {
+        name: t('Import block'),
+        category: mixProjectCategory,
+      },
+      exportBlock: {
+        name: t('Export block'),
+        category: mixProjectCategory,
+      },
+      saveBlockToLibrary: {
+        name: t('Save block to library'),
+        category: mixProjectCategory,
+      },
+      insertBlockFromLibrary: {
+        name: t('Insert block'),
+        category: mixProjectCategory,
+      },
+      openBlockLibraryFolder: {
+        name: t('Open library folder'),
+        category: mixProjectCategory,
+      },
     };
 
     // eslint-disable-next-line no-shadow

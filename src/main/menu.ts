@@ -310,6 +310,45 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
             mainWindow.webContents.send('clearRenderCache');
           },
         },
+        { type: 'separator' },
+        {
+          // H2, H3 (T58): .vmxblock templates and the template library
+          label: esc(t('Block templates')),
+          submenu: [
+            {
+              label: esc(t('Insert block...')),
+              click() {
+                mainWindow.webContents.send('insertBlockFromLibrary');
+              },
+            },
+            {
+              label: esc(t('Import block...')),
+              click() {
+                mainWindow.webContents.send('importBlock');
+              },
+            },
+            { type: 'separator' },
+            {
+              label: esc(t('Export block...')),
+              click() {
+                mainWindow.webContents.send('exportBlock');
+              },
+            },
+            {
+              label: esc(t('Save block to library...')),
+              click() {
+                mainWindow.webContents.send('saveBlockToLibrary');
+              },
+            },
+            { type: 'separator' },
+            {
+              label: esc(t('Open library folder')),
+              click() {
+                mainWindow.webContents.send('openBlockLibraryFolder');
+              },
+            },
+          ],
+        },
       ],
     },
 

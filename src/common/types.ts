@@ -8,7 +8,8 @@ export type KeyboardAction = 'addSegment' | 'togglePlayResetSpeed' | 'togglePlay
   | 'rotateClipClockwise' | 'rotateClipCounterclockwise' | 'rotateClip180'
   | 'copyClipFraming' | 'pasteClipFraming'
   | 'seekPreviousClipKeyframe' | 'seekNextClipKeyframe' | 'removeClipKeyframe'
-  | 'showMixSettings' | 'previewMix' | 'renderMix' | 'clearRenderCache';
+  | 'showMixSettings' | 'previewMix' | 'renderMix' | 'clearRenderCache'
+  | 'importBlock' | 'exportBlock' | 'saveBlockToLibrary' | 'insertBlockFromLibrary' | 'openBlockLibraryFolder';
 
 export interface KeyBinding {
   keys: string,

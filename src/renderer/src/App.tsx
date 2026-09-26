@@ -45,8 +45,9 @@ import useMixRender from './videomix/hooks/useMixRender';
 import MixSettingsDialog from './videomix/components/MixSettingsDialog';
 import MixRenderButtons from './videomix/components/MixRenderButtons';
 import MixPlanView from './videomix/components/MixPlanView';
-import OverlayPanel from './videomix/components/OverlayPanel';
+import OverlaySelectionPanel from './videomix/components/OverlaySelectionPanel';
 import useMixOverlays from './videomix/hooks/useMixOverlays';
+import useBlockTemplates from './videomix/hooks/useBlockTemplates';
 import useMixDuration from './videomix/hooks/useMixDuration';
 import useMixLivePreview from './videomix/hooks/useMixLivePreview';
 import MixLivePreview from './videomix/components/MixLivePreview';
@@ -1645,6 +1646,8 @@ function App() {
 
   // VideoMix: overlays edited in the Mix view (T22): plan + resolved overlay times, selection, cursor and overlay actions
   const mixOverlays = useMixOverlays({ mixProject, enabled: videoMixMode && showMixPlan, withErrorHandling, onFileReplaced: mixWorkspace.clearMissingOverlayFile });
+  // VideoMix: block templates (H2, H3, T58): export/import .vmxblock files and the template library
+  const mixBlockTemplates = useBlockTemplates({ mixProject, cursorTime: mixOverlays.cursorTime, selectedBlockIds: mixOverlays.selectedBlockIds, selectedOverlayIds: mixOverlays.selectedLooseOverlayIds, showGenericDialog, withErrorHandling });
 
   // VideoMix: "≈ m:ss" estimated duration (E3), visible in both tabs; reuses mixOverlays.fullPlan when the Mix tab has one
   const mixDuration = useMixDuration({ clips: mixProject.project.clips, settings: mixProject.project.settings, mixPlan: mixOverlays.fullPlan });
@@ -2343,6 +2346,12 @@ function App() {
       previewMix: () => { mixRender.userPreviewMix(); },
       renderMix: () => { mixRender.userRenderMix(); },
       clearRenderCache: () => { mixRender.userClearRenderCache(); },
+      // H2, H3 (T58)
+      importBlock: () => { mixBlockTemplates.userImportBlock(); },
+      exportBlock: () => { mixBlockTemplates.userExportBlock(); },
+      saveBlockToLibrary: () => { mixBlockTemplates.userSaveBlockToLibrary(); },
+      insertBlockFromLibrary: () => { mixBlockTemplates.userInsertBlockFromLibrary(); },
+      openBlockLibraryFolder: () => { mixBlockTemplates.userOpenBlockLibraryFolder(); },
     };
 
     // VideoMix: retired LosslessCut actions do nothing, also when an older config binds them or the HTTP API calls them (T16)
@@ -2353,7 +2362,7 @@ function App() {
     }
 
     return ret;
-  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, mixClipPins, mixClipKeyframes, mixRender, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState, mixPreviewActive, toggleMixPreview, playMixPreview, pauseMixPreview]);
+  }, [togglePlaySelectedSegments, toggleLoopSelectedSegments, pause, timelineToggleComfortZoom, captureSnapshot, captureSnapshotAsCoverArt, captureSnapshotToClipboard, setCutStart, setCutEnd, cleanupFilesDialog, splitCurrentSegment, focusSegmentAtCursor, selectSegmentsAtCursor, increaseRotation, jumpCutStart, jumpCutEnd, jumpTimelineStart, jumpTimelineEnd, batchOpenSelectedFile, closeBatch, addSegment, duplicateCurrentSegment, toggleLastCommands, extractCurrentSegmentFramesAsImages, extractSelectedSegmentsFramesAsImages, reorderSegsByStartTime, invertAllSegments, fillSegmentsGaps, combineOverlappingSegments, combineSelectedSegments, createFixedDurationSegments, createNumSegments, createFixedByteSizedSegments, createRandomSegments, alignSegmentTimesToKeyframes, shuffleSegments, clearSegments, toggleSegmentsList, toggleStreamsSelector, extractAllStreams, convertFormatBatch, concatBatch, toggleCaptureFormat, toggleStripAudio, toggleStripVideo, toggleStripSubtitle, toggleStripThumbnail, toggleStripAll, toggleDarkMode, askStartTimeOffset, deselectAllSegments, selectAllSegments, selectOnlyCurrentSegment, editCurrentSegmentTags, toggleCurrentSegmentSelected, invertSelectedSegments, removeSelectedSegments, tryFixInvalidDuration, tryDecimate, shiftAllSegmentTimes, toggleMuted, copySegmentsToClipboard, handleShowStreamsSelectorClick, openFilesDialog, openDirDialog, toggleSettings, detectBlackScenes, detectSilentScenes, detectSceneChanges, readAllKeyframes, createSegmentsFromKeyframes, toggleWaveformMode, toggleShowThumbnails, toggleShowKeyframes, showIncludeExternalStreamsDialog, toggleFullscreenVideo, selectAllMarkers, selectSegmentsByLabel, selectSegmentsByExpr, labelSelectedSegments, mutateSegmentsByExpr, toggleKeyboardShortcuts, generateOverviewWaveform, mixWorkspace, mixClips, mixClipPins, mixClipKeyframes, mixRender, mixBlockTemplates, checkFileOpened, cutSegments, seekRel, keyboardSeekAccFactor, togglePlay, play, userChangePlaybackRate, goToTimecode, keyboardNormalSeekSpeed, keyboardSeekSpeed2, keyboardSeekSpeed3, seekRelPercent, seekClosestKeyframe, shortStep, jumpSeg, zoomRel, batchFileJump, removeSegment, currentSegIndexSafe, cutSegmentsHistory, labelSegment, onExportPress, userHtml5ifyCurrentFile, toggleKeyframeCut, applyEnabledStreamsFilter, setPlaybackVolume, commandedTimeRef, closeFileWithConfirm, openSendReportDialogWithState, mixPreviewActive, toggleMixPreview, playMixPreview, pauseMixPreview]);
 
   const getKeyboardAction = useCallback((action: MainKeyboardAction) => mainActions[action], [mainActions]);
 
@@ -2853,19 +2862,18 @@ function App() {
 
                   {/* VideoMix: all the clips of the project (any source) replace the segments of the current file */}
                   {/* VideoMix: the properties of the overlay selected in the Mix view take the place of the clip list (T22) */}
-                  {videoMixMode && showRightBar && showMixPlan && mixOverlays.selectedOverlay != null && (
-                    <OverlayPanel
+                  {/* T57: or of the selected block, of a member edited inside it, or the actions on a multi-selection */}
+                  {videoMixMode && showRightBar && showMixPlan && mixOverlays.hasOverlaySelection && (
+                    <OverlaySelectionPanel
                       width={rightBarWidth}
-                      overlay={mixOverlays.selectedOverlay}
-                      overlays={mixProject.project.overlays}
                       clips={mixProject.project.clips}
-                      resolved={mixOverlays.resolved}
-                      missingKinds={mixWorkspace.missingOverlayFiles.filter((m) => m.overlayId === mixOverlays.selectedOverlayId).map((m) => m.kind)}
+                      selectedClipIds={mixClipPins.selectedClipIds}
+                      missingOverlayFiles={mixWorkspace.missingOverlayFiles}
                       mixOverlays={mixOverlays}
                       onLocate={mixWorkspace.userLocateOverlayFile}
                     />
                   )}
-                  {videoMixMode && showRightBar && !(showMixPlan && mixOverlays.selectedOverlay != null) && (
+                  {videoMixMode && showRightBar && !(showMixPlan && mixOverlays.hasOverlaySelection) && (
                     <ClipList
                       width={rightBarWidth}
                       clips={mixProject.project.clips}
@@ -2972,6 +2980,7 @@ function App() {
                       mixOverlays={mixOverlays}
                       overlays={mixProject.project.overlays}
                       missingOverlayFiles={mixWorkspace.missingOverlayFiles}
+                      blockTemplates={mixBlockTemplates}
                     />
                   ) : (
                     <Timeline

@@ -1,7 +1,7 @@
 import type { ChangeEventHandler, CSSProperties, KeyboardEventHandler, ReactNode } from 'react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FaAngleDoubleDown, FaAngleDoubleUp, FaArrowDown, FaArrowUp, FaClone, FaExclamationTriangle, FaFolderOpen, FaTimes, FaTrash } from 'react-icons/fa';
+import { FaAngleDoubleDown, FaAngleDoubleUp, FaArrowDown, FaArrowLeft, FaArrowUp, FaClone, FaExclamationTriangle, FaFolderOpen, FaLink, FaLock, FaTimes, FaTrash } from 'react-icons/fa';
 
 import Select from '../../components/Select';
 import Switch from '../../components/Switch';
@@ -188,21 +188,27 @@ const OutlineRows = memo(({ overlay, set, setTransient, commitTransient }: {
   );
 });
 
-/** Where the overlay starts: at a time, or anchored to an edge of a clip or of another overlay (01-requisitos §9.2). */
+/** An element an anchor can point to (an overlay, a block or a block's member, T57). */
+export interface ElementTarget { id: string, name: string }
+
+/**
+ * Where the overlay (or a block, T57) starts: at a time, or anchored to an edge of a clip or of another overlay
+ * (01-requisitos §9.2). `targets`: the elements it can be anchored to without a cycle (the current one is added, so the
+ * select can show it). Inside a block (T57), "at a time" is relative to the block's start and there are no clips.
+ */
 // eslint-disable-next-line react/display-name
-const AnchorFields = memo(({ overlayId, anchor, overlays, clips, rawStart, onChange }: {
-  overlayId: string,
+export const AnchorFields = memo(({ anchor, targets, clips, rawStart, timeLabel, onChange }: {
   anchor: OverlayAnchor,
-  overlays: MixOverlay[],
+  targets: readonly ElementTarget[],
   clips: MixClip[],
   /** Current start, kept when switching to "at a time". */
   rawStart: number,
+  timeLabel?: string | undefined,
   onChange: (newAnchor: OverlayAnchor) => void,
 }) => {
   const { t } = useTranslation();
 
-  // Only targets that don't create a cycle (the current one is kept, so the select can show it)
-  const elementTargets = useMemo(() => overlays.filter((o) => o.id !== overlayId && (canOverlayDependOn(overlays, overlayId, o.id) || (anchor.kind === 'element' && anchor.elementId === o.id))), [anchor, overlayId, overlays]);
+  const elementTargets = targets;
 
   const handleKindChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
     const kind = e.target.value as OverlayAnchor['kind'];
@@ -236,7 +242,7 @@ const AnchorFields = memo(({ overlayId, anchor, overlays, clips, rawStart, onCha
         </Select>
       </Row>
 
-      {anchor.kind === 'absolute' && <SecondsField label={t('Time')} value={anchor.time} onCommit={handleTimeCommit} />}
+      {anchor.kind === 'absolute' && <SecondsField label={timeLabel ?? t('Time')} value={anchor.time} onCommit={handleTimeCommit} />}
 
       {anchor.kind !== 'absolute' && (
         <>
@@ -262,9 +268,25 @@ const AnchorFields = memo(({ overlayId, anchor, overlays, clips, rawStart, onCha
   );
 });
 
-function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds, mixOverlays, onLocate }: {
+/** T57: the overlay is a member of a block, edited inside it (its definition: every linked copy changes). */
+export interface OverlayPanelMember {
+  blockId: string,
+  defId: string,
+  /** Expanded overlay id of the member in this block instance (its resolved times). */
+  overlayId: string,
+  blockName: string,
+  /** Instances sharing the content (H5): > 1 shows the "changes all of them" warning. */
+  linkedCount: number,
+  /** The content can't be edited: this block or a linked copy is locked (H8). */
+  locked: boolean,
+  /** Its start relative to the block's start (s). */
+  relativeStart: number,
+}
+
+function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds, mixOverlays, onLocate, elementTargets, member }: {
   width: number,
   overlay: MixOverlay,
+  /** The loose overlays, or the members of its block (T57). */
   overlays: MixOverlay[],
   clips: MixClip[],
   resolved: ReadonlyMap<string, ResolvedOverlayTime>,
@@ -272,14 +294,19 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
   missingKinds: OverlayFileKind[],
   mixOverlays: UseMixOverlays,
   onLocate: (overlayId: string, kind: OverlayFileKind) => void,
+  /** T57: anchor targets (loose overlays, blocks and members) without cycles. Default: the other `overlays`. */
+  elementTargets?: readonly ElementTarget[] | undefined,
+  member?: OverlayPanelMember | undefined,
 }) {
   const { t } = useTranslation();
-  const { update, commitTransient, userRemoveOverlay, userDuplicateOverlay, userMoveOverlayLayer, userChooseOverlayFile, setSelectedOverlayId, outputSize, withErrorHandling } = mixOverlays;
+  const { update, commitTransient, userRemoveOverlay, userDuplicateOverlay, userMoveOverlayLayer, userChooseOverlayFile, setSelectedOverlayId, outputSize, withErrorHandling, userUpdateBlockMember, userRemoveBlockMember, userChooseBlockMemberFile, selectOverlayItem } = mixOverlays;
   const { id } = overlay;
-  const times = resolved.get(id);
+  const times = resolved.get(member?.overlayId ?? id);
+  const locked = member?.locked === true;
 
-  const set = useCallback((patch: MixOverlayPatch) => update(id, patch), [id, update]);
-  const setTransient = useCallback((patch: MixOverlayPatch, transient: boolean) => update(id, patch, { transient }), [id, update]);
+  const set = useCallback((patch: MixOverlayPatch) => (member != null ? userUpdateBlockMember(member.defId, id, patch) : update(id, patch)), [id, member, update, userUpdateBlockMember]);
+  const setTransient = useCallback((patch: MixOverlayPatch, transient: boolean) => (member != null ? userUpdateBlockMember(member.defId, id, patch, { transient }) : update(id, patch, { transient })), [id, member, update, userUpdateBlockMember]);
+  const chooseFile = useCallback((kind: OverlayFileKind) => (member != null ? userChooseBlockMemberFile(member.defId, id, kind) : userChooseOverlayFile(id, kind)), [id, member, userChooseBlockMemberFile, userChooseOverlayFile]);
 
   // The draft belongs to one overlay, so selecting another one doesn't show (or apply) it
   const [nameDraftState, setNameDraftState] = useState<{ id: string, text: string }>();
@@ -295,6 +322,15 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
   const timeLinked = linkedCountdown != null;
 
   const countdownTargets = useMemo(() => overlays.filter((o) => o.type === 'countdown' && (canOverlayDependOn(overlays, id, o.id) || (overlay.type === 'progressBar' && overlay.linkedCountdownId === o.id))), [id, overlay, overlays]);
+
+  // Only targets that don't create a cycle, plus the current one (so the select can show it)
+  const anchorTargets = useMemo(() => {
+    const { anchor } = overlay;
+    const base = elementTargets ?? overlays.filter((o) => canOverlayDependOn(overlays, id, o.id)).map((o) => ({ id: o.id, name: o.name }));
+    if (anchor.kind !== 'element' || base.some((target) => target.id === anchor.elementId)) return base;
+    const current = overlays.find((o) => o.id === anchor.elementId);
+    return current != null ? [...base, { id: current.id, name: current.name }] : base;
+  }, [elementTargets, id, overlay, overlays]);
 
   const handleAnchorChange = useCallback((newAnchor: OverlayAnchor) => set({ anchor: newAnchor }), [set]);
   const handleDurationCommit = useCallback((duration: number) => set({ duration: roundOverlayTime(duration) }), [set]);
@@ -318,32 +354,52 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
   return (
     <div className="consistent-scrollbar" data-testid="overlay-panel" style={{ width, flexShrink: 0, overflowY: 'auto', background: controlsBackground, transition: darkModeTransition, padding: '.5em .6em', boxSizing: 'border-box', borderLeft: '1px solid var(--gray-6)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '.3em' }}>
+        {member != null && <button type="button" data-testid="member-back" style={{ ...iconButtonStyle, border: 'none', background: 'transparent' }} title={t('Back to the block')} onClick={() => selectOverlayItem(member.blockId)}><FaArrowLeft /></button>}
         <span style={{ fontSize: '.75em', color: 'var(--gray-11)', flexGrow: 1 }}>{getOverlayTypeLabel(overlay.type)}</span>
-        <button type="button" style={{ ...iconButtonStyle, border: 'none', background: 'transparent' }} title={t('Close')} onClick={() => setSelectedOverlayId(undefined)}><FaTimes /></button>
+        <button type="button" style={{ ...iconButtonStyle, border: 'none', background: 'transparent' }} title={t('Close')} onClick={() => (member != null ? selectOverlayItem(member.blockId) : setSelectedOverlayId(undefined))}><FaTimes /></button>
       </div>
-      <input
-        style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', fontSize: '.9em', marginBottom: '.4em' }}
-        value={nameDraft ?? overlay.name}
-        onChange={(e) => setNameDraft(e.target.value)}
-        onBlur={commitName}
-        onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setNameDraft(undefined); }}
-        title={t('Name')}
-      />
+      {member != null && (
+        <div data-testid="member-context" style={{ fontSize: '.75em', margin: '.2em 0 .4em' }}>
+          <div style={{ opacity: 0.8 }}>{t('In block "{{name}}"', { name: member.blockName })}</div>
+          {member.linkedCount > 1 && (
+            <div data-testid="member-linked-warning" style={{ display: 'flex', gap: '.3em', marginTop: '.2em', color: 'var(--amber-11)' }}>
+              <FaLink style={{ flexShrink: 0, marginTop: '.15em' }} />
+              <span>{t('Linked block: changes apply to its {{count}} copies', { count: member.linkedCount })}</span>
+            </div>
+          )}
+          {locked && (
+            <div style={{ display: 'flex', gap: '.3em', marginTop: '.2em' }}>
+              <FaLock style={{ flexShrink: 0, marginTop: '.15em' }} />
+              <span>{t('Locked: unlock the block (and its linked copies) to edit it')}</span>
+            </div>
+          )}
+        </div>
+      )}
+      {/* H8 (T57): nothing can be edited in a locked block */}
+      <fieldset disabled={locked} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, ...(locked && { opacity: 0.6 }) }}>
+        <input
+          style={{ ...inputStyle, width: '100%', boxSizing: 'border-box', fontSize: '.9em', marginBottom: '.4em' }}
+          value={nameDraft ?? overlay.name}
+          onChange={(e) => setNameDraft(e.target.value)}
+          onBlur={commitName}
+          onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') commitName(); if (e.key === 'Escape') setNameDraft(undefined); }}
+          title={t('Name')}
+        />
 
-      <div style={{ ...rowStyle, gap: '.25em' }}>
-        <button type="button" style={iconButtonStyle} title={t('Duplicate')} onClick={() => userDuplicateOverlay(id)}><FaClone /></button>
-        <button type="button" style={iconButtonStyle} title={t('Delete')} onClick={() => userRemoveOverlay(id)}><FaTrash /></button>
-        {overlay.type !== 'sound' && (
+        <div style={{ ...rowStyle, gap: '.25em' }}>
+          {member == null && <button type="button" style={iconButtonStyle} title={t('Duplicate')} onClick={() => userDuplicateOverlay(id)}><FaClone /></button>}
+          <button type="button" style={iconButtonStyle} title={member != null ? t('Remove from the block') : t('Delete')} onClick={() => (member != null ? userRemoveBlockMember(member.defId, id) : userRemoveOverlay(id))}><FaTrash /></button>
+          {overlay.type !== 'sound' && member == null && (
           <>
             <button type="button" style={iconButtonStyle} title={t('Bring forward')} onClick={() => userMoveOverlayLayer(id, 'up')}><FaArrowUp /></button>
             <button type="button" style={iconButtonStyle} title={t('Send backward')} onClick={() => userMoveOverlayLayer(id, 'down')}><FaArrowDown /></button>
             <button type="button" style={iconButtonStyle} title={t('Bring to front')} onClick={() => userMoveOverlayLayer(id, 'front')}><FaAngleDoubleUp /></button>
             <button type="button" style={iconButtonStyle} title={t('Send to back')} onClick={() => userMoveOverlayLayer(id, 'back')}><FaAngleDoubleDown /></button>
           </>
-        )}
-      </div>
+          )}
+        </div>
 
-      {(missingKinds.length > 0 || warnings.length > 0) && (
+        {(missingKinds.length > 0 || warnings.length > 0) && (
         <div style={{ fontSize: '.75em', margin: '.4em 0' }}>
           {missingKinds.map((kind) => (
             <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: '.3em', marginBottom: '.2em' }}>
@@ -359,16 +415,16 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
             </div>
           ))}
         </div>
-      )}
+        )}
 
-      <h4 style={sectionTitleStyle}>{t('Time')}</h4>
-      {times != null && (
+        <h4 style={sectionTitleStyle}>{t('Time')}</h4>
+        {times != null && (
         <div style={{ fontSize: '.75em', opacity: 0.8, marginBottom: '.4em' }}>
           {t('{{start}} to {{end}}', { start: formatDuration({ seconds: times.start, shorten: true }), end: formatDuration({ seconds: times.end, shorten: true }) })}
         </div>
-      )}
+        )}
 
-      {overlay.type === 'progressBar' && (
+        {overlay.type === 'progressBar' && (
         <Row label={t('Link to countdown')}>
           <Select style={selectStyle} value={overlay.linkedCountdownId ?? ''} onChange={handleLinkChange}>
             <option value="">{t('None')}</option>
@@ -376,23 +432,23 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
             {overlay.linkedCountdownId != null && !countdownTargets.some((o) => o.id === overlay.linkedCountdownId) && <option value={overlay.linkedCountdownId}>{t('(missing)')}</option>}
           </Select>
         </Row>
-      )}
+        )}
 
-      {timeLinked ? (
-        <div style={{ fontSize: '.75em', opacity: 0.8, marginBottom: '.4em' }}>{t('Takes the start and duration of "{{name}}"', { name: linkedCountdown.name })}</div>
-      ) : (
-        <>
-          <AnchorFields overlayId={id} anchor={overlay.anchor} overlays={overlays} clips={clips} rawStart={times?.rawStart ?? 0} onChange={handleAnchorChange} />
-          {overlay.type !== 'sound' && <SecondsField label={t('Duration')} value={overlay.duration} onCommit={handleDurationCommit} />}
-        </>
-      )}
-      {overlay.type === 'sound' && (
+        {timeLinked ? (
+          <div style={{ fontSize: '.75em', opacity: 0.8, marginBottom: '.4em' }}>{t('Takes the start and duration of "{{name}}"', { name: linkedCountdown.name })}</div>
+        ) : (
+          <>
+            <AnchorFields anchor={overlay.anchor} targets={anchorTargets} clips={member != null ? [] : clips} rawStart={member != null ? member.relativeStart : (times?.rawStart ?? 0)} timeLabel={member != null ? t('Time in the block') : undefined} onChange={handleAnchorChange} />
+            {overlay.type !== 'sound' && <SecondsField label={t('Duration')} value={overlay.duration} onCommit={handleDurationCommit} />}
+          </>
+        )}
+        {overlay.type === 'sound' && (
         <Row label={t('Duration')}>
           <span style={{ fontSize: '.8em' }}>{times != null && !warnings.some((w) => w.type === 'unknown-duration') ? formatDuration({ seconds: times.rawEnd - times.rawStart, shorten: true }) : t('Unknown')}</span>
         </Row>
-      )}
+        )}
 
-      {box != null && (
+        {box != null && (
         <>
           <h4 style={sectionTitleStyle}>{t('Position and size')}</h4>
           <div style={{ ...rowStyle, gap: '.2em' }}>
@@ -409,24 +465,24 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
             {t('% of the video frame ({{width}}×{{height}}). You can also drag the box on the frame view.', { width: outputSize.width, height: outputSize.height })}
           </div>
         </>
-      )}
+        )}
 
-      {overlay.type === 'image' && (
+        {overlay.type === 'image' && (
         <>
           <h4 style={sectionTitleStyle}>{t('Image')}</h4>
           <Row label={t('File')}>
             <Truncated maxWidth="8em" title={overlay.absolutePath}>{fileName}</Truncated>
-            <button type="button" style={iconButtonStyle} title={t('Replace…')} onClick={() => userChooseOverlayFile(id, 'media')}><FaFolderOpen /></button>
+            <button type="button" style={iconButtonStyle} title={t('Replace…')} onClick={() => chooseFile('media')}><FaFolderOpen /></button>
           </Row>
           <SecondsField label={t('Fade in')} value={overlay.fadeIn} onCommit={(v) => set({ fadeIn: roundOverlayTime(v) })} />
           <SecondsField label={t('Fade out')} value={overlay.fadeOut} onCommit={(v) => set({ fadeOut: roundOverlayTime(v) })} />
         </>
-      )}
+        )}
 
-      {overlay.type === 'countdown' && (
+        {overlay.type === 'countdown' && (
         <>
           <h4 style={sectionTitleStyle}>{t('Text')}</h4>
-          <FontRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} onChooseFont={() => userChooseOverlayFile(id, 'font')} />
+          <FontRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} onChooseFont={() => chooseFile('font')} />
           <Row label={t('Decimals')}>
             <Select style={selectStyle} value={overlay.decimals} onChange={(e) => set({ decimals: Number(e.target.value) as 0 | 1 | 2 | 3 })}>
               {[0, 1, 2, 3].map((n) => <option key={n} value={n}>{n}</option>)}
@@ -439,12 +495,13 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
           <SecondsField label={t('Fade out')} value={overlay.fadeOut} onCommit={(v) => set({ fadeOut: roundOverlayTime(v) })} />
           <div style={{ fontSize: '.7em', opacity: 0.7 }}>{t('Border and shadow in px of a 1080p video (scaled for other resolutions).')}</div>
         </>
-      )}
+        )}
 
-      {overlay.type === 'text' && (
+        {overlay.type === 'text' && (
         <>
           <h4 style={sectionTitleStyle}>{t('Text')}</h4>
           <TextField key={id} value={overlay.text} onCommit={(text) => set(getTextOverlayLayoutPatch(overlay, { text }))} />
+          {member != null && <div style={{ fontSize: '.7em', opacity: 0.7, marginBottom: '.35em' }}>{t('{{example}} or {{exampleWithDefault}} in the text is a variable: its value is set in each copy of the block.', { example: '{{name}}', exampleWithDefault: '{{name|default}}' })}</div>}
           <Row label={t('Text size')}>
             <NumberField style={inputStyle} value={Math.round(getTextOverlayFontSize(overlay) * 1000) / 10} step={0.5} min={0.5} max={100} onCommit={(percent) => set(getTextOverlayLayoutPatch(overlay, { fontSize: percent / 100 }))} title={t('% of the video frame height')} />
             <span style={{ fontSize: '.75em' }}>%</span>
@@ -452,7 +509,7 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
           <Row label={t('Line spacing')}>
             <NumberField style={inputStyle} value={overlay.lineSpacing} step={0.1} min={0} max={5} onCommit={(lineSpacing) => set(getTextOverlayLayoutPatch(overlay, { lineSpacing }))} title={t('Space between lines, as a fraction of the text size')} />
           </Row>
-          <FontRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} onChooseFont={() => userChooseOverlayFile(id, 'font')} />
+          <FontRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} onChooseFont={() => chooseFile('font')} />
           <OutlineRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} />
           <SecondsField label={t('Fade in')} value={overlay.fadeIn} onCommit={(v) => set({ fadeIn: roundOverlayTime(v) })} />
           <SecondsField label={t('Fade out')} value={overlay.fadeOut} onCommit={(v) => set({ fadeOut: roundOverlayTime(v) })} />
@@ -478,9 +535,9 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
           )}
           {overlay.entry.kind !== 'none' && <SecondsField label={t('Duration')} value={overlay.entry.duration} onCommit={(v) => set({ entry: { ...overlay.entry, duration: roundOverlayTime(v) } })} />}
         </>
-      )}
+        )}
 
-      {overlay.type === 'progressBar' && (
+        {overlay.type === 'progressBar' && (
         <>
           <h4 style={sectionTitleStyle}>{t('Bar')}</h4>
           <Row label={t('Fill color')}>
@@ -508,21 +565,21 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
             </Select>
           </Row>
         </>
-      )}
+        )}
 
-      {isStyledOverlay(overlay) && (
+        {isStyledOverlay(overlay) && (
         <>
           <h4 style={sectionTitleStyle}>{t('Style')}</h4>
           <OverlayStylePresets overlay={overlay} withErrorHandling={withErrorHandling} onApply={set} />
         </>
-      )}
+        )}
 
-      {overlay.type === 'sound' && (
+        {overlay.type === 'sound' && (
         <>
           <h4 style={sectionTitleStyle}>{t('Sound')}</h4>
           <Row label={t('File')}>
             <Truncated maxWidth="8em" title={overlay.absolutePath}>{fileName}</Truncated>
-            <button type="button" style={iconButtonStyle} title={t('Replace…')} onClick={() => userChooseOverlayFile(id, 'media')}><FaFolderOpen /></button>
+            <button type="button" style={iconButtonStyle} title={t('Replace…')} onClick={() => chooseFile('media')}><FaFolderOpen /></button>
           </Row>
           <Row label={t('Volume')}>
             <NumberField style={inputStyle} value={overlay.gainDb} step={0.5} min={-40} max={20} onCommit={(v) => set({ gainDb: v })} />
@@ -530,7 +587,8 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
           </Row>
           <div style={{ fontSize: '.7em', opacity: 0.7 }}>{t('0 dB = as loud as the clips')}</div>
         </>
-      )}
+        )}
+      </fieldset>
     </div>
   );
 }

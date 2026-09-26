@@ -1819,6 +1819,416 @@ test.describe('VideoMix (shortcuts with the focus on a button)', () => {
   });
 });
 
+test.describe('VideoMix (block templates)', () => {
+  test('25. import a hand-edited .vmxblock (variables, clip anchor, adapt), errors and missing files, export with files, library and "Insert block" (H2, H3, H4, H7, T58)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    const workDir = mkdtempSync(join(tmpdir(), 'videomix-e2e-blocks-'));
+    try {
+      // a 16:9 project with one clip
+      await mockOpenDialog(ctx.app, [media(sourceFiles[0]!)]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await waitIdle(page);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(1);
+      const projectPath = join(workDir, 'blocks.vmx');
+      await mockSaveDialog(ctx.app, projectPath);
+      await pressShortcut(page, 'Control+s');
+      await expect(page).toHaveTitle(/^blocks - /);
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      const planView = page.getByTestId('mix-plan-view');
+      await expect(planView).toBeVisible();
+
+      // A block made by hand for 9:16: JSON5 (comments, trailing commas), a text with a variable, a countdown anchored to
+      // it and an image next to the file
+      mkdirSync(join(workDir, 'files'));
+      copyFileSync(media('overlay-logo.png'), join(workDir, 'files', 'logo.png'));
+      const handPath = join(workDir, 'scoreboard.vmxblock');
+      writeFileSync(handPath, `// Scoreboard, written by hand
+{
+  format: 'videomix-block',
+  version: 1,
+  name: 'Scoreboard',
+  color: 2,
+  aspect: '9:16', // made for vertical videos
+  originalStart: 1.5,
+  members: [
+    { id: 'logo', type: 'image', name: 'Logo', path: 'files/logo.png', anchor: { kind: 'absolute', time: 0 }, duration: 4,
+      box: { x: 0.1, y: 0.05, width: 0.3, height: 0.1 }, fadeIn: 0, fadeOut: 0 },
+    /* the title: {{team}} is asked when importing */
+    { id: 'title', type: 'text', name: 'Title', anchor: { kind: 'absolute', time: 0.5 }, duration: 3, text: '{{team|Blue}} wins',
+      box: { x: 0.1, y: 0.4, width: 0.8, height: 0.06 }, fontSize: 0.05, align: 'center', color: '#ffff00',
+      border: { width: 4, color: '#000000' }, lineSpacing: 0.2, fadeIn: 0, fadeOut: 0, entry: { kind: 'none', duration: 0.5 } },
+    { id: 'cd', type: 'countdown', name: 'Countdown', anchor: { kind: 'element', elementId: 'title', edge: 'start', offset: 0 }, duration: 3,
+      box: { x: 0.35, y: 0.6, width: 0.3, height: 0.08 }, align: 'center', decimals: 0, leadingZeros: false, color: '#ffffff',
+      border: { width: 4, color: '#000000' }, fadeOut: 0, },
+  ],
+}
+`);
+      await mockOpenDialog(ctx.app, [handPath]);
+      await planView.getByRole('button', { name: 'Import block…' }).click();
+      const importDialog = page.getByTestId('block-import-dialog');
+      await expect(importDialog).toBeVisible();
+      await expect(importDialog.getByTestId('block-import-name')).toHaveText('Scoreboard');
+      await expect(importDialog.getByTestId('block-import-summary')).toContainText('3 overlay(s), 4 s · 9:16 · scoreboard.vmxblock');
+      await expect(importDialog.getByTestId('block-import-member')).toHaveCount(3);
+      await expect(importDialog.getByTestId('block-import-missing')).toHaveCount(0);
+      // "Adapt" is offered (9:16 → 16:9) and checked by default; original times by default
+      const adapt = importDialog.getByRole('checkbox', { name: /^Adapt to 16:9/ });
+      await expect(adapt).toBeChecked();
+      await expect(importDialog.getByRole('radio', { name: /^Original times/ })).toBeChecked();
+      const variable = importDialog.getByTestId('block-import-variable').locator('input');
+      await expect(variable).toHaveValue('Blue');
+      await variable.fill('Red');
+      await importDialog.getByRole('radio', { name: 'Anchored to a clip' }).check();
+      await importDialog.getByLabel('Edge').selectOption('end');
+      await importDialog.getByLabel('Offset (s)').fill('-1');
+      await expect(importDialog.getByTestId('block-template-picture')).toBeVisible();
+      await screenshot(page, '25-block-import');
+      await importDialog.getByRole('button', { name: 'Import', exact: true }).click();
+      await expect(importDialog).toHaveCount(0);
+
+      interface SavedBlocks {
+        clips: { id: string }[],
+        overlays: { id: string, type: string }[],
+        blockDefs: { id: string, name: string, members: { id: string, type: string, box: { x: number, y: number, width: number, height: number }, path?: string }[] }[],
+        blocks: { id: string, defId: string, anchor: Record<string, unknown>, variables?: Record<string, string> }[],
+      }
+      // Saves (Ctrl+S) and reads the project once it has `numBlocks` blocks (the file is written asynchronously)
+      const saveAndRead = async (numBlocks: number, numOverlays = 0) => {
+        await pressShortcut(page, 'Control+s', { blur: true });
+        const read = () => {
+          try {
+            return JSON5.parse(readFileSync(projectPath, 'utf8')) as SavedBlocks;
+          } catch {
+            return undefined;
+          }
+        };
+        await expect.poll(() => { const p = read(); return p != null ? [p.blocks.length, p.overlays.length] : undefined; }).toEqual([numBlocks, numOverlays]);
+        return read()!;
+      };
+      let saved = await saveAndRead(1);
+      expect(saved.blocks).toHaveLength(1);
+      expect(saved.blocks[0]!.anchor).toEqual({ kind: 'clip', clipId: saved.clips[0]!.id, edge: 'end', offset: -1 });
+      expect(saved.blocks[0]!.variables).toEqual({ team: 'Red' });
+      const def = saved.blockDefs[0]!;
+      expect(def.name).toBe('Scoreboard');
+      expect(def.members.map((m) => m.id)).toEqual(['logo', 'title', 'cd']);
+      // adapted to 16:9: same height, narrower in fractions of the (wider) frame, same centre
+      const logoBox = def.members[0]!.box;
+      expect(logoBox.height).toBeCloseTo(0.1);
+      expect(logoBox.width).toBeCloseTo(0.3 * (9 / 16) * (9 / 16), 3);
+      // the image is the file next to the .vmxblock (saved relative to the project)
+      expect(def.members[0]!.path).toBe('files/logo.png');
+
+      // one undo step
+      await pressShortcut(page, 'Control+z', { blur: true });
+      await saveAndRead(0);
+      await pressShortcut(page, 'Control+Shift+z', { blur: true });
+      await saveAndRead(1);
+
+      // a broken file: every problem with its field, nothing imported
+      const badPath = join(workDir, 'bad.vmxblock');
+      writeFileSync(badPath, readFileSync(handPath, 'utf8').replace("aspect: '9:16'", "aspect: '4:3'").replace('width: 0.3,', "width: 'wide',"));
+      await mockOpenDialog(ctx.app, [badPath]);
+      await planView.getByRole('button', { name: 'Import block…' }).click();
+      const errorDialog = page.getByRole('dialog').filter({ hasText: 'Failed to import the block' });
+      await expect(errorDialog).toContainText('nothing was imported');
+      await expect(errorDialog).toContainText('aspect: Invalid option');
+      await expect(errorDialog).toContainText('members[0].box.width: Invalid input: expected number, received string');
+      await screenshot(page, '25-block-errors');
+      await errorDialog.getByRole('button', { name: 'OK' }).click();
+      await expect(page.getByTestId('block-import-dialog')).toHaveCount(0);
+
+      // a missing file: "Locate…" before importing
+      const missingPath = join(workDir, 'missing.vmxblock');
+      writeFileSync(missingPath, readFileSync(handPath, 'utf8').replace('files/logo.png', 'gone/logo.png'));
+      await mockOpenDialog(ctx.app, [missingPath]);
+      await planView.getByRole('button', { name: 'Import block…' }).click();
+      await expect(importDialog.getByTestId('block-import-missing')).toContainText(join(workDir, 'gone', 'logo.png'));
+      const importButton = importDialog.getByRole('button', { name: 'Import', exact: true });
+      await expect(importButton).toBeDisabled();
+      await mockOpenDialog(ctx.app, [join(workDir, 'files', 'logo.png')]);
+      await importDialog.getByRole('button', { name: 'Locate...' }).click();
+      await expect(importDialog.getByTestId('block-import-missing')).toHaveCount(0);
+      // ungrouped: loose overlays with the same times
+      await importDialog.getByRole('checkbox', { name: 'Import ungrouped (as loose overlays)' }).click();
+      await importButton.click();
+      saved = await saveAndRead(1, 3);
+      expect(saved.overlays.map((o) => o.type)).toEqual(['image', 'text', 'countdown']);
+
+      // export a selection (the image added now, selected) with its files
+      await mockOpenDialog(ctx.app, [media('overlay-logo.png')]);
+      await planView.getByRole('button', { name: 'Add image…' }).click();
+      await expect(page.getByTestId('overlay-panel')).toBeVisible();
+      const exportPath = join(workDir, 'shared', 'My logo.vmxblock');
+      mkdirSync(join(workDir, 'shared'));
+      await mockSaveDialog(ctx.app, exportPath);
+      await sendMenuAction(ctx.app, 'exportBlock');
+      const exportDialog = page.getByTestId('block-export-dialog');
+      await expect(exportDialog).toBeVisible();
+      await exportDialog.locator('input[type=text]').fill('My logo');
+      await exportDialog.getByRole('checkbox', { name: 'Include files' }).click();
+      await screenshot(page, '25-block-export');
+      await exportDialog.getByRole('button', { name: 'Export…' }).click();
+      await expect.poll(() => existsSync(exportPath)).toBe(true);
+      const exported = JSON.parse(readFileSync(exportPath, 'utf8')) as { format: string, name: string, aspect: string, members: { type: string, path: string }[] };
+      expect(exported).toMatchObject({ format: 'videomix-block', name: 'My logo', aspect: '16:9' });
+      expect(exported.members.map((m) => m.path)).toEqual(['My logo_files/overlay-logo.png']);
+      expect(readdirSync(join(workDir, 'shared', 'My logo_files'))).toEqual(['overlay-logo.png']);
+
+      // the library: save the selection, then "Insert block" shows it with its thumbnail, at the cursor by default
+      await sendMenuAction(ctx.app, 'saveBlockToLibrary');
+      await expect(exportDialog).toBeVisible();
+      await exportDialog.locator('input[type=text]').fill('Library logo');
+      await exportDialog.getByRole('button', { name: 'Save' }).click();
+      const libraryDir = join(ctx.configDir, 'block-library');
+      await expect.poll(() => (existsSync(libraryDir) ? readdirSync(libraryDir).sort() : [])).toEqual(['Library logo.vmxblock', 'Library logo_files']);
+      await planView.getByRole('button', { name: 'Insert block…' }).click();
+      const libraryDialog = page.getByTestId('block-library-dialog');
+      await expect(libraryDialog.getByTestId('block-library-entry')).toHaveCount(1);
+      await expect(libraryDialog.getByTestId('block-library-entry')).toContainText('Library logo');
+      const thumbnail = libraryDialog.getByTestId('block-template-picture');
+      await expect(thumbnail).toBeVisible();
+      expect(await thumbnail.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+      await screenshot(page, '25-block-library');
+      await libraryDialog.getByTestId('block-library-entry').click();
+      await expect(importDialog.getByRole('radio', { name: /^At the cursor/ })).toBeChecked();
+      await importDialog.getByRole('button', { name: 'Import', exact: true }).click();
+      saved = await saveAndRead(2, 4);
+      expect(saved.blockDefs.map((d) => d.name)).toEqual(['Scoreboard', 'Library logo']);
+      expect(saved.blocks[1]!.anchor).toEqual({ kind: 'absolute', time: 0 });
+
+      // "Open library folder"
+      await ctx.app.evaluate(({ shell }) => {
+        // eslint-disable-next-line no-param-reassign
+        shell.openPath = async (p: string) => { (globalThis as unknown as { openedPath: string }).openedPath = p; return ''; };
+      });
+      await sendMenuAction(ctx.app, 'openBlockLibraryFolder');
+      await expect.poll(async () => ctx.app.evaluate(() => (globalThis as unknown as { openedPath?: string }).openedPath)).toBe(libraryDir);
+
+      // only the error of the broken file, reported by the app
+      expect(ctx.consoleErrors.filter((e) => !e.startsWith('handleError Failed to import the block'))).toEqual([]);
+    } finally {
+      await ctx.close();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test.describe('VideoMix (blocks of overlays)', () => {
+  test('24. multi-select and group overlays into a block, drag it whole, variables, repeat, edit a linked member, unlink, stretch, hide, lock and ungroup (H1, H4, H5, H6, H8, T57)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    const workDir = mkdtempSync(join(tmpdir(), 'videomix-e2e-block-ui-'));
+    interface SavedBlocks {
+      clips: { id: string }[],
+      overlays: { id: string, type: string }[],
+      blockDefs: { id: string, name: string, members: { id: string, type: string, duration?: number, anchor: { kind: string, time?: number } }[] }[],
+      blocks: { id: string, defId: string, anchor: { kind: string, time?: number, clipId?: string }, variables?: Record<string, string>, hidden?: boolean, locked?: boolean, collapsed?: boolean }[],
+    }
+    try {
+      // two sources, a clip of each
+      const files = [sourceFiles[0]!, sourceFiles[1]!];
+      await mockOpenDialog(ctx.app, files.map((f) => media(f)));
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(2);
+      await waitIdle(page);
+      for (const [i, file] of files.entries()) {
+        // eslint-disable-next-line no-await-in-loop
+        await activateSource(page, i, file);
+        // eslint-disable-next-line no-await-in-loop
+        await pressShortcut(page, 'n');
+        // eslint-disable-next-line no-await-in-loop
+        await expect(clipRows(page)).toHaveCount(i + 1);
+      }
+      const projectPath = join(workDir, 'block-ui.vmx');
+      await mockSaveDialog(ctx.app, projectPath);
+      const save = async () => {
+        // blur: after typing in a field, the focus stays there (text fields keep the keys)
+        await pressShortcut(page, 'Control+s', { blur: true });
+        await expect(page).toHaveTitle(/^block-ui - /);
+        return JSON5.parse(readFileSync(projectPath, 'utf8')) as SavedBlocks;
+      };
+
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      const planView = page.getByTestId('mix-plan-view');
+      await expect(planView).toBeVisible();
+      const overlayPanel = page.getByTestId('overlay-panel');
+      const blockPanel = page.getByTestId('block-panel');
+
+      // A dialog paints above the whole Mix view, its sticky time axis included (it had a z-index above the dialogs')
+      await textButton(page, 'Settings').click();
+      await expect(page.getByTestId('mix-settings')).toBeVisible();
+      await expect.poll(async () => planView.getByTestId('mix-time-axis').evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const { pointerEvents } = document.body.style;
+        document.body.style.pointerEvents = 'auto';
+        const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        document.body.style.pointerEvents = pointerEvents;
+        return top != null && !el.contains(top);
+      })).toBe(true);
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('mix-settings')).toHaveCount(0);
+
+      // a countdown (3 s) and a text with a variable, both at 0 s
+      await planView.getByRole('button', { name: 'Add countdown' }).click();
+      const duration = panelField(overlayPanel, 'Duration', 'input');
+      await duration.fill('3');
+      await duration.press('Enter');
+      await planView.getByRole('button', { name: 'Add text' }).click();
+      await expect(overlayPanel).toContainText('Text');
+      const textArea = overlayPanel.locator('textarea');
+      await textArea.fill('Go {{team|Blue}}!');
+      await textArea.blur();
+
+      // Ctrl+click the countdown too: 2 selected, grouped into one block
+      const overlayBlocks = planView.getByTestId('overlay-block');
+      await expect(overlayBlocks).toHaveCount(2);
+      await overlayBlocks.filter({ hasText: 'Countdown #1' }).click({ modifiers: ['Control'] });
+      const selectionPanel = page.getByTestId('overlay-selection-panel');
+      await expect(selectionPanel).toContainText('2 selected');
+      await selectionPanel.getByTestId('group-overlays').click();
+      await expect(blockPanel).toBeVisible();
+      const pieces = planView.getByTestId('block-piece');
+      await expect(pieces).toHaveCount(1);
+      await expect(pieces.first()).toContainText('Block #1');
+      // its members show below its piece, in the blocks lane
+      const blockLane = planView.getByTestId('block-lane');
+      await expect(blockLane.getByTestId('overlay-block')).toHaveCount(2);
+      await screenshot(page, '24a-block-grouped');
+      // the selected block is what "Export block…" (T58) exports: the whole block, not a selection of overlays
+      await sendMenuAction(ctx.app, 'exportBlock');
+      const exportDialog = page.getByTestId('block-export-dialog');
+      await expect(exportDialog).toContainText('Export block');
+      await page.keyboard.press('Escape');
+      await expect(exportDialog).toHaveCount(0);
+      let saved = await save();
+      expect(saved.overlays).toEqual([]);
+      expect(saved.blockDefs).toHaveLength(1);
+      expect(saved.blockDefs[0]!.members.map((m) => m.type).toSorted()).toEqual(['countdown', 'text']);
+      expect(saved.blocks).toHaveLength(1);
+      expect(saved.blocks[0]!.anchor).toEqual({ kind: 'absolute', time: 0 });
+
+      // grouping is one undo step
+      await pressShortcut(page, 'Control+z');
+      await expect(pieces).toHaveCount(0);
+      await expect(overlayBlocks).toHaveCount(2);
+      await pressShortcut(page, 'Control+Shift+z');
+      await expect(pieces).toHaveCount(1);
+
+      // variables (H4): the value of this copy
+      await pieces.first().click();
+      await expect(blockPanel).toBeVisible();
+      const variable = blockPanel.getByTestId('block-variable-team');
+      await expect(variable).toHaveAttribute('placeholder', 'Blue');
+      await variable.fill('Red');
+      await variable.press('Enter');
+      saved = await save();
+      expect(saved.blocks[0]!.variables).toEqual({ team: 'Red' });
+
+      // drag the whole block to the right: its anchor moves, one undo step
+      const lanes = planView.getByTestId('mix-lanes');
+      const lanesBox = (await lanes.boundingBox())!;
+      const pieceBox = (await pieces.first().boundingBox())!;
+      await page.mouse.move(pieceBox.x + 20, pieceBox.y + pieceBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(pieceBox.x + 20 + lanesBox.width / 8, pieceBox.y + pieceBox.height / 2, { steps: 5 });
+      await page.mouse.up();
+      saved = await save();
+      const movedTo = saved.blocks[0]!.anchor.time!;
+      expect(movedTo).toBeGreaterThan(0.5);
+      // the members follow (same relative times)
+      await expect.poll(async () => (await blockLane.getByTestId('overlay-block').first().boundingBox())!.x).toBeGreaterThan(pieceBox.x + lanesBox.width / 16);
+      await pressShortcut(page, 'Control+z');
+      saved = await save();
+      expect(saved.blocks[0]!.anchor).toEqual({ kind: 'absolute', time: 0 });
+
+      // collapse and expand its track
+      await pieces.first().getByTestId('block-collapse').click();
+      await expect(blockLane.getByTestId('overlay-block')).toHaveCount(0);
+      await pieces.first().getByTestId('block-collapse').click();
+      await expect(blockLane.getByTestId('overlay-block')).toHaveCount(2);
+
+      // repeat (H5): 3 times every 4 s → 3 linked copies
+      await blockPanel.getByTestId('block-repeat').click();
+      const swal = page.locator('.swal2-popup');
+      await expect(swal).toBeVisible();
+      await swal.getByTestId('block-repeat-times').fill('3');
+      await swal.getByTestId('block-repeat-interval').fill('4');
+      await swal.getByRole('button', { name: 'Repeat' }).click();
+      await expect(pieces).toHaveCount(3);
+      await expect(blockPanel.getByTestId('block-linked')).toContainText('3 copies');
+      saved = await save();
+      expect(saved.blockDefs).toHaveLength(1);
+      expect(saved.blocks.map((b) => b.anchor)).toEqual([{ kind: 'absolute', time: 0 }, { kind: 'absolute', time: 4 }, { kind: 'absolute', time: 8 }]);
+
+      // edit a member inside the block: a warning says it changes all the copies
+      await blockPanel.getByTestId('block-member-row').filter({ hasText: 'Countdown #1' }).click();
+      await expect(overlayPanel.getByTestId('member-context')).toContainText('In block "Block #1 (1/3)"');
+      await expect(overlayPanel.getByTestId('member-linked-warning')).toContainText('its 3 copies');
+      const memberDuration = panelField(overlayPanel, 'Duration', 'input');
+      await memberDuration.fill('2');
+      await memberDuration.press('Enter');
+      await screenshot(page, '24b-block-member');
+      saved = await save();
+      expect(saved.blockDefs[0]!.members.find((m) => m.type === 'countdown')!.duration).toBe(2);
+
+      // back to the block; unlink this copy: 2 copies left linked, its own content
+      await overlayPanel.getByTestId('member-back').click();
+      await expect(blockPanel.getByTestId('block-linked')).toContainText('3 copies');
+      await blockPanel.getByRole('button', { name: 'Unlink' }).click();
+      await expect(blockPanel.getByTestId('block-linked')).toHaveCount(0);
+      saved = await save();
+      expect(saved.blockDefs).toHaveLength(2);
+
+      // stretch (H6): 3 s → 6 s (the text lasts 5 s by default: its block lasts 5 s)
+      const blockDuration = await blockPanel.getByTestId('block-duration').textContent();
+      await blockPanel.getByTestId('block-stretch').click();
+      await expect(swal).toBeVisible();
+      await swal.locator('input.swal2-input').fill('10');
+      await swal.getByRole('button', { name: 'Apply' }).click();
+      await expect(blockPanel.getByTestId('block-duration')).not.toHaveText(blockDuration!);
+      await expect(blockPanel.getByTestId('block-duration')).toHaveText(/^0:10(\.0+)?$/);
+
+      // hide (H8): not ungroupable while hidden
+      await blockPanel.getByRole('switch', { name: 'Hidden' }).click();
+      await expect(pieces.first()).toHaveAttribute('data-hidden', 'true');
+      await expect(blockPanel.getByTestId('block-ungroup')).toBeDisabled();
+      await blockPanel.getByRole('switch', { name: 'Hidden' }).click();
+      await expect(blockPanel.getByTestId('block-ungroup')).toBeEnabled();
+
+      // lock (H8): it doesn't move and can't be edited or deleted
+      await blockPanel.getByRole('switch', { name: 'Locked' }).click();
+      await expect(pieces.first()).toHaveAttribute('data-locked', 'true');
+      await expect(blockPanel.getByTestId('block-name')).toBeDisabled();
+      await expect(blockPanel.getByTitle('Delete')).toBeDisabled();
+      const lockedBox = (await pieces.first().boundingBox())!;
+      await page.mouse.move(lockedBox.x + 20, lockedBox.y + lockedBox.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(lockedBox.x + 20 + lanesBox.width / 8, lockedBox.y + lockedBox.height / 2, { steps: 5 });
+      await page.mouse.up();
+      await screenshot(page, '24c-block-locked');
+      saved = await save();
+      const lockedBlock = saved.blocks.find((b) => b.locked)!;
+      expect(lockedBlock.anchor).toEqual({ kind: 'absolute', time: 0 });
+      await blockPanel.getByRole('switch', { name: 'Locked' }).click();
+
+      // ungroup: its members are loose overlays again (selected), with the variable baked into the text
+      await blockPanel.getByTestId('block-ungroup').click();
+      await expect(pieces).toHaveCount(2);
+      await expect(page.getByTestId('overlay-selection-panel')).toContainText('2 selected');
+      saved = await save();
+      expect(saved.overlays.map((o) => o.type).toSorted()).toEqual(['countdown', 'text']);
+      expect((saved.overlays.find((o) => o.type === 'text') as unknown as { text: string }).text).toBe('Go Red!');
+    } finally {
+      await ctx.close();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test.describe('VideoMix (Spanish UI)', () => {
   test('10. the UI is in Spanish', async () => {
     const ctx = await launchApp({ language: 'es' });

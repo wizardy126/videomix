@@ -92,8 +92,9 @@ export type MixProjectAction =
    * When `patch.output` changes the aspect, the boxes of the image overlays present in this map are refit to keep the
    * image's proportion on the new frame, centered on their previous box (see `refitImageOverlayBox`); overlays missing
    * from the map (their file couldn't be read) keep their box unchanged.
+   * `memberImageSizes` (T57): the same for the image members of the blocks, by definition id and then member id.
    */
-  | { type: 'updateSettings', patch: Partial<MixSettings>, imageSizes?: ReadonlyMap<string, Size> }
+  | { type: 'updateSettings', patch: Partial<MixSettings>, imageSizes?: ReadonlyMap<string, Size>, memberImageSizes?: ReadonlyMap<string, ReadonlyMap<string, Size>> }
   /** Music playlist (C2). Inserted at `index`, or appended. */
   | { type: 'addMusicTracks', tracks: MixMusicTrack[], index?: number | undefined }
   | { type: 'updateMusicTrack', trackId: string, patch: MixMusicTrackPatch }
@@ -341,15 +342,16 @@ export function mixProjectReducer(project: MixProject, action: MixProjectAction)
       const settings = { ...project.settings, ...action.patch };
       // Pending from T29: refit image overlays to the new frame's proportion when the output aspect changes
       const aspectChanged = action.patch.output != null && action.patch.output.aspect !== project.settings.output.aspect;
-      if (!aspectChanged || action.imageSizes == null || action.imageSizes.size === 0) return { ...project, settings };
+      if (!aspectChanged || ((action.imageSizes?.size ?? 0) === 0 && (action.memberImageSizes?.size ?? 0) === 0)) return { ...project, settings };
       const frame = getOutputSize(settings.output);
-      const overlays = project.overlays.map((overlay) => {
-        if (overlay.type !== 'image') return overlay;
-        const imageSize = action.imageSizes?.get(overlay.id);
-        if (imageSize == null) return overlay;
-        return { ...overlay, box: refitImageOverlayBox(overlay.box, imageSize, frame) };
+      const refit = (overlay: MixOverlay, imageSize: Size | undefined): MixOverlay => (overlay.type === 'image' && imageSize != null ? { ...overlay, box: refitImageOverlayBox(overlay.box, imageSize, frame) } : overlay);
+      const overlays = action.imageSizes != null && action.imageSizes.size > 0 ? project.overlays.map((overlay) => refit(overlay, action.imageSizes?.get(overlay.id))) : project.overlays;
+      // T57: the blocks' images too (their content: every linked copy)
+      const blockDefs = project.blockDefs.map((def) => {
+        const sizes = action.memberImageSizes?.get(def.id);
+        return sizes != null && sizes.size > 0 ? { ...def, members: def.members.map((member) => refit(member, sizes.get(member.id))) } : def;
       });
-      return { ...project, settings, overlays };
+      return { ...project, settings, overlays, blockDefs };
     }
 
     case 'addMusicTracks': {

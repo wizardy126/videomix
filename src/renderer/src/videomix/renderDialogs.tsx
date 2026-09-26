@@ -9,10 +9,14 @@ import type { RenderWarning } from './render/renderOutput';
 // confirm before it.
 
 /** Translated text of a validateMixProject issue (its `message` is English, for logs). */
-export function getIssueText(issue: MixProjectIssue, clipName: string | undefined, overlayName?: string | undefined) {
+export function getIssueText(issue: MixProjectIssue, clipName: string | undefined, overlayName?: string | undefined, blockName?: string | undefined): string {
   const clip = clipName ?? issue.clipId ?? '';
   // T22: callers that know the overlays pass the name; the id is a readable enough fallback
   const overlay = overlayName ?? issue.overlayId ?? '';
+  // T57: same for the blocks (the name of its content)
+  const block = blockName ?? issue.blockId ?? issue.blockDefId ?? '';
+  // T57: a member's content issue (`blockDefId` + `overlayId`) says in which block it is
+  if (issue.blockDefId != null && issue.overlayId != null && !issue.code.includes('block')) return i18n.t('Block "{{block}}": {{issue}}', { block, issue: getIssueText({ ...issue, blockDefId: undefined }, clipName, overlayName) });
   switch (issue.code) {
     case 'duplicate-source-id': { return i18n.t('The project has duplicate source ids'); }
     case 'duplicate-clip-id': { return i18n.t('The project has duplicate clip ids'); }
@@ -44,6 +48,18 @@ export function getIssueText(issue: MixProjectIssue, clipName: string | undefine
     case 'always-visible-unknown-clip': { return i18n.t('The always-visible sequence references a clip that is not in the project'); }
     case 'duplicate-always-visible-id': { return i18n.t('The always-visible sequence has a clip more than once'); }
     case 'clip-in-sequence-and-group': { return i18n.t('Clip "{{clip}}" is in the always-visible sequence and in a group', { clip }); }
+    // v7 (T56, T57): blocks of overlays
+    case 'duplicate-block-id': { return i18n.t('The project has duplicate block ids'); }
+    case 'duplicate-block-def-id': { return i18n.t('The project has duplicate block content ids'); }
+    case 'block-unknown-def': { return i18n.t('Block "{{block}}": its content is not in the project', { block }); }
+    case 'block-def-unused': { return i18n.t('Block "{{block}}" is not used in the video', { block }); }
+    case 'block-empty': { return i18n.t('Block "{{block}}" is empty', { block }); }
+    case 'duplicate-block-member-id': { return i18n.t('Block "{{block}}" has duplicate overlay ids', { block }); }
+    case 'invalid-block-member-id': { return i18n.t('Block "{{block}}": the id of overlay "{{overlay}}" is not valid', { block, overlay }); }
+    case 'block-member-invalid-reference': { return i18n.t('Block "{{block}}": overlay "{{overlay}}" depends on something outside the block', { block, overlay }); }
+    case 'block-broken-reference': { return i18n.t('Block "{{block}}": the clip or overlay it depends on is not in the project', { block }); }
+    case 'block-cycle': { return i18n.t('Block "{{block}}": its anchors form a cycle', { block }); }
+    case 'block-missing-variable': { return i18n.t('Block "{{block}}" has text variables without a value', { block }); }
     default: { return issue.message; }
   }
 }

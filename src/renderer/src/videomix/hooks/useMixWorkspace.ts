@@ -41,7 +41,7 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   withErrorHandling: WithErrorHandling,
   confirmDialog: ConfirmDialog,
 }) {
-  const { project, addSources, removeSource, relinkSource, updateSettings, setSourceMeta, relinkOverlayFile } = mixProject;
+  const { project, addSources, removeSource, relinkSource, updateSettings, setSourceMeta, relinkOverlayFile, dispatch } = mixProject;
 
   // Sources whose file wasn't found (when opening/recovering the project or activating the source)
   const [missingSourceIds, setMissingSourceIds] = useState<ReadonlySet<string>>(new Set());
@@ -62,11 +62,12 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   const currentSourceId = currentSource?.id;
 
   // T22: the list isn't pruned when an overlay is removed (T19), so only report the files of overlays that still exist.
-  // T56: only loose overlays for now (the files of the blocks' members carry `blockDefId`; showing them is T57/T58's)
+  // T57: the files of the blocks' members carry `blockDefId` (and their member id), shown in the block's panel
   const existingMissingOverlayFiles = useMemo(() => {
     const ids = new Set(project.overlays.map((o) => o.id));
-    return missingOverlayFiles.filter((m) => m.blockDefId == null && ids.has(m.overlayId));
-  }, [missingOverlayFiles, project.overlays]);
+    const memberIds = new Map(project.blockDefs.map((d) => [d.id, new Set(d.members.map((m) => m.id))]));
+    return missingOverlayFiles.filter((m) => (m.blockDefId == null ? ids.has(m.overlayId) : memberIds.get(m.blockDefId)?.has(m.overlayId) === true));
+  }, [missingOverlayFiles, project.blockDefs, project.overlays]);
 
   const clipCountBySource = useMemo(() => countClipsBySource(project.clips), [project.clips]);
 
@@ -151,22 +152,30 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   }, [activateSourceFile, project.sources, relinkSource, withErrorHandling]);
 
   /** Clears a pending "file not found" warning for one overlay file, e.g. once it's relinked ("Locate...", "Replace…"). */
-  const clearMissingOverlayFile = useCallback((overlayId: string, kind: OverlayFileKind) => {
-    setMissingOverlayFiles((existing) => existing.filter((m) => m.overlayId !== overlayId || m.kind !== kind));
+  /** `blockDefId` for a member of a block (T57): `overlayId` is then its member id. */
+  const clearMissingOverlayFile = useCallback((overlayId: string, kind: OverlayFileKind, blockDefId?: string | undefined) => {
+    setMissingOverlayFiles((existing) => existing.filter((m) => m.overlayId !== overlayId || m.kind !== kind || m.blockDefId !== blockDefId));
   }, []);
 
-  const userLocateOverlayFile = useCallback(async (overlayId: string, kind: OverlayFileKind) => {
-    const overlay = project.overlays.find((o) => o.id === overlayId);
+  const userLocateOverlayFile = useCallback(async (overlayId: string, kind: OverlayFileKind, blockDefId?: string | undefined) => {
+    const overlay = blockDefId != null
+      ? project.blockDefs.find((d) => d.id === blockDefId)?.members.find((m) => m.id === overlayId)
+      : project.overlays.find((o) => o.id === overlayId);
     const file = overlay != null ? getOverlayFiles(overlay).find((f) => f.kind === kind)?.file : undefined;
     if (file == null) return;
     await withErrorHandling(async () => {
       const { canceled, filePaths } = await showOpenDialog({ properties: ['openFile'], defaultPath: dirname(file.absolutePath), title: i18n.t('Locate {{name}}', { name: basename(file.absolutePath) }) });
       const [newPath] = filePaths;
       if (canceled || newPath == null) return;
-      relinkOverlayFile(overlayId, kind, newPath);
-      clearMissingOverlayFile(overlayId, kind);
+      if (blockDefId != null) {
+        const newFile = { path: newPath, absolutePath: newPath };
+        dispatch({ type: 'updateBlockMember', defId: blockDefId, memberId: overlayId, patch: kind === 'font' ? { font: newFile } : newFile });
+      } else {
+        relinkOverlayFile(overlayId, kind, newPath);
+      }
+      clearMissingOverlayFile(overlayId, kind, blockDefId);
     }, i18n.t('Failed to open file'));
-  }, [clearMissingOverlayFile, project.overlays, relinkOverlayFile, withErrorHandling]);
+  }, [clearMissingOverlayFile, dispatch, project.blockDefs, project.overlays, relinkOverlayFile, withErrorHandling]);
 
   const userRemoveSource = useCallback(async (sourceId: string) => {
     const source = project.sources.find((s) => s.id === sourceId);

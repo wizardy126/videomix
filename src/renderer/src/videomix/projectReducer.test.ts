@@ -153,6 +153,23 @@ describe('mixProjectReducer', () => {
     expect(asImage(noSizes, 'i1').box).toEqual(image.box);
   });
 
+  test('updateSettings refits the image members of the blocks too (T57)', () => {
+    const image: ImageOverlay = { ...createImageOverlay({ id: 'm1', name: 'img', filePath: '/i.png' }), box: { x: 0.2, y: 0.4, width: 0.4, height: 0.1 } };
+    const other: ImageOverlay = createImageOverlay({ id: 'm2', name: 'img2', filePath: '/i2.png' });
+    const project: MixProject = {
+      ...makeProject(),
+      blockDefs: [{ id: 'd1', name: 'Block', color: 0, members: [image, other] }],
+      blocks: [{ id: 'b1', defId: 'd1', anchor: { kind: 'absolute', time: 0 } }],
+    };
+    const output = { aspect: '9:16' as const, resolution: '1080' as const };
+    const next = mixProjectReducer(project, { type: 'updateSettings', patch: { output }, memberImageSizes: new Map([['d1', new Map([['m1', { width: 400, height: 200 }]])]]) });
+    const [m1, m2] = next.blockDefs[0]!.members as ImageOverlay[];
+    expect(m1!.box.width).toBeCloseTo(0.4);
+    expect(m1!.box.height).toBeCloseTo((0.4 * 1080 * 200) / (400 * 1920));
+    expect(m1!.box.y + m1!.box.height / 2).toBeCloseTo(0.45);
+    expect(m2!.box).toEqual(other.box);
+  });
+
   describe('pinned and grouped clips (v3)', () => {
     const groups = (project: MixProject) => project.clips.map((c) => c.groupId);
 

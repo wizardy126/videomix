@@ -219,6 +219,8 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       issue,
       issue.clipId != null ? clipNameById.get(issue.clipId) : undefined,
       issue.overlayId != null ? ((issue.blockDefId != null ? memberName(issue.blockDefId, issue.overlayId) : undefined) ?? overlayNameById.get(issue.overlayId)) : undefined,
+      // T57: the block's name for the block-* issues
+      currentProject.blockDefs.find((def) => def.id === (issue.blockDefId ?? currentProject.blocks.find((b) => b.id === issue.blockId)?.defId))?.name,
     );
     const issues = validateMixProject(currentProject);
     const errors = issues.filter((issue) => issue.level === 'error');

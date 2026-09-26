@@ -131,21 +131,27 @@ export default function useMixProject() {
     const current = historyRef.current.present;
     const aspectChanged = patch.output != null && patch.output.aspect !== current.settings.output.aspect;
     let imageSizes: Map<string, Size> | undefined;
+    let memberImageSizes: Map<string, Map<string, Size>> | undefined;
     if (aspectChanged) {
-      const imageOverlays = current.overlays.filter((o): o is ImageOverlay => o.type === 'image');
-      const sizes = await Promise.all(imageOverlays.map(async (overlay) => {
-        try {
-          const { streams } = await readFileFfprobeMeta(overlay.absolutePath);
-          const stream = streams.find((s) => s.width != null && s.height != null);
-          if (stream?.width != null && stream.height != null) return [overlay.id, { width: stream.width, height: stream.height }] as const;
-        } catch (err) {
-          console.warn('Could not read the image size', err);
-        }
-        return undefined;
-      }));
-      imageSizes = new Map(sizes.filter((s): s is readonly [string, Size] => s != null));
+      const readImageSizes = async (overlays: readonly MixOverlay[]) => {
+        const imageOverlays = overlays.filter((o): o is ImageOverlay => o.type === 'image');
+        const sizes = await Promise.all(imageOverlays.map(async (overlay) => {
+          try {
+            const { streams } = await readFileFfprobeMeta(overlay.absolutePath);
+            const stream = streams.find((s) => s.width != null && s.height != null);
+            if (stream?.width != null && stream.height != null) return [overlay.id, { width: stream.width, height: stream.height }] as const;
+          } catch (err) {
+            console.warn('Could not read the image size', err);
+          }
+          return undefined;
+        }));
+        return new Map(sizes.filter((s): s is readonly [string, Size] => s != null));
+      };
+      imageSizes = await readImageSizes(current.overlays);
+      // T57: the images inside blocks too
+      memberImageSizes = new Map(await Promise.all(current.blockDefs.map(async (def) => [def.id, await readImageSizes(def.members)] as const)));
     }
-    dispatch({ type: 'updateSettings', patch, ...(imageSizes != null && { imageSizes }) }, options);
+    dispatch({ type: 'updateSettings', patch, ...(imageSizes != null && { imageSizes }), ...(memberImageSizes != null && { memberImageSizes }) }, options);
   }, [dispatch]);
 
   // Pinned and grouped clips (A4, T30)
