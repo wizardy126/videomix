@@ -116,7 +116,17 @@ function RectOverlayToolbar({ docked = false, aspect, hasMin, rotation, magnet, 
       </Button>
       <span>{t('Fit to')}</span>
       {snapFractions.map((fraction) => (
-        <Button key={fraction} data-testid={`fit-to-${fraction.replace('/', '-')}`} onClick={() => onFitTo(fraction)} title={t('Resize the max to exactly {{fraction}} of the output, centered on the min (or on the current max)', { fraction })}>{fraction}</Button>
+        <Button
+          key={fraction}
+          data-testid={`fit-to-${fraction.replace('/', '-')}`}
+          onClick={() => onFitTo(fraction)}
+          title={hasMin
+            // G5 (v5, T54): with a min, the min is resized (centred on itself); the max only widens if it's too narrow
+            ? t('Resize the min to exactly {{fraction}} of the output, centered on itself (the max widens first if it is too narrow to contain it)', { fraction })
+            : t('Resize the max to exactly {{fraction}} of the output, centered on it', { fraction })}
+        >
+          {fraction}
+        </Button>
       ))}
 
       {/* A9 (T49): keyframes of the framing (pan and zoom), auto-key while animated */}

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
 
 import {
-  fitFractions, fitMaxRectToFraction, getClipFractionFits, getFitAxes, getFitLayout, getFractionCellAspect, getFractionFits, getFractionLength, getSnapEdge, snapRectDrag, snapRectEdge,
+  fitFractions, fitMaxRectToFraction, fitMinRectToFraction, getClipFractionFits, getFitAxes, getFitLayout, getFractionCellAspect, getFractionFits, getFractionLength, getSnapEdge, snapRectDrag, snapRectEdge,
 } from './fitFractions';
 import type { FitFraction, FitLayout } from './fitFractions';
 import { distributeWidths, getAspectRange, getMainAspectRange, normalizeRectEven, rectContains } from './geometry';
@@ -322,6 +322,85 @@ describe('fitMaxRectToFraction (F2 "Fit to")', () => {
         }
       }
     }
+    expect(tolerated).toBeLessThan(total * 0.02);
+  });
+});
+
+describe('fitMinRectToFraction (G5, T54: "Fit to" resizes the min when there is one)', () => {
+  test('grows a narrow min, centred on itself; the max is untouched', () => {
+    const minRect = { x: 800, y: 0, width: 200, height: 1080 };
+    const res = fitMinRectToFraction({ maxRect: full, minRect, frame, fraction: '1/2', layout: L1080 });
+    expect(res).toEqual({ ok: true, maxRect: full, minRect: { x: 420, y: 0, width: 960, height: 1080 } });
+    expect(getFractionFits({ maxRect: full, minRect: res.ok ? res.minRect : undefined, layout: L1080, fractions: ['1/2'], exact: true })[0]!.status).toBe('fits');
+  });
+
+  test('shrinks a too-wide min, centred on itself', () => {
+    const minRect = { x: 0, y: 0, width: 1900, height: 1080 };
+    const res = fitMinRectToFraction({ maxRect: full, minRect, frame, fraction: '1/3', layout: L1080 });
+    // centred on the min's own centre (950), not on the max: 950 − 320 = 630
+    expect(res).toEqual({ ok: true, maxRect: full, minRect: { x: 630, y: 0, width: 640, height: 1080 } });
+  });
+
+  test('a max too narrow for the min is widened, centred on itself, and the min matches it exactly', () => {
+    const maxRect = { x: 0, y: 0, width: 400, height: 1080 };
+    const res = fitMinRectToFraction({ maxRect, minRect: maxRect, frame, fraction: '1/3', layout: L1080 });
+    expect(res).toEqual({ ok: true, maxRect: { x: 0, y: 0, width: 640, height: 1080 }, minRect: { x: 0, y: 0, width: 640, height: 1080 } });
+  });
+
+  test('a max off-centre still widens centred on itself, then is shifted to stay inside the frame', () => {
+    const maxRect = { x: 1700, y: 0, width: 200, height: 1080 };
+    const res = fitMinRectToFraction({ maxRect, minRect: maxRect, frame, fraction: '1/3', layout: L1080 });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.maxRect).toEqual(res.minRect);
+    expect(res.maxRect.width).toBe(640);
+    expect(rectContains(full, res.maxRect)).toBe(true);
+    expect(getFractionFits({ maxRect: res.maxRect, layout: L1080, fractions: ['1/3'] })[0]!.status).toBe('fits');
+  });
+
+  test('fails with no-room when even the whole frame is not wide enough', () => {
+    const narrowFrame = { width: 800, height: 1080 };
+    const maxRect = { x: 0, y: 0, width: 800, height: 1080 };
+    expect(fitMinRectToFraction({ maxRect, minRect: maxRect, frame: narrowFrame, fraction: 'full', layout: L1080 })).toEqual({ ok: false, reason: 'no-room' });
+  });
+
+  test('rows (9:16): heights, transposed like fitMaxRectToFraction', () => {
+    const rows = layout(1080, 1920);
+    const maxRect = { x: 0, y: 0, width: 1080, height: 1920 };
+    const minRect = { x: 0, y: 900, width: 1080, height: 200 };
+    const res = fitMinRectToFraction({ maxRect, minRect, frame: { width: 1080, height: 1920 }, fraction: '1/2', layout: rows });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.maxRect).toEqual(maxRect);
+    expect(getFractionFits({ maxRect: res.maxRect, minRect: res.minRect, layout: rows, fractions: ['1/2'], exact: true })[0]!.status).toBe('fits');
+    // the min grew along the height only, centred on its own vertical centre (1000)
+    expect(res.minRect.x).toBe(0);
+    expect(res.minRect.width).toBe(1080);
+    expect(res.minRect.y + res.minRect.height / 2).toBe(1000);
+  });
+
+  test('the result fits the fraction exactly (or within the tolerance), is even, inside the frame and min ⊆ max (any layout)', () => {
+    const random = makeRandom(9);
+    let tolerated = 0;
+    let total = 0;
+    for (let i = 0; i < 150; i += 1) {
+      const { maxRect, minRect } = randomClip(random, true);
+      for (const l of layouts) {
+        for (const fraction of ['1/3', '1/2', '2/3'] as const) {
+          const res = fitMinRectToFraction({ maxRect, minRect: minRect!, frame, fraction, layout: l });
+          if (res.ok) {
+            const { maxRect: r, minRect: m } = res;
+            expect([r.x, r.y, r.width, r.height, m.x, m.y, m.width, m.height].every((v) => v % 2 === 0)).toBe(true);
+            expect(rectContains(full, r)).toBe(true);
+            expect(rectContains(r, m)).toBe(true);
+            expect(getFractionFits({ maxRect: r, minRect: m, layout: l, fractions: [fraction] })[0]!.status).toBe('fits');
+            total += 1;
+            if (getFractionFits({ maxRect: r, minRect: m, layout: l, fractions: [fraction], exact: true })[0]!.status !== 'fits') tolerated += 1;
+          }
+        }
+      }
+    }
+    expect(total).toBeGreaterThan(200);
     expect(tolerated).toBeLessThan(total * 0.02);
   });
 });

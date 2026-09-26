@@ -18,6 +18,7 @@ import { getOverlayBoxPreset } from '../overlays/factories';
 import { getTextOverlayFontSize, getTextOverlayLayoutPatch } from '../overlays/textLayout';
 import { isStyledOverlay } from '../overlayStylePresets';
 import OverlayStylePresets from './OverlayStylePresets';
+import { NumberField } from './TransientInputs';
 import type { OverlayBoxPreset } from '../overlays/factories';
 import { getAnchorOfKind, joinOverlayColor, roundOverlayTime, splitOverlayColor } from '../overlayTimeline';
 import { getOverlayTimeWarningText, getOverlayTypeLabel } from '../overlayTexts';
@@ -48,53 +49,6 @@ function Row({ label, children }: { label: string, children: ReactNode }) {
   );
 }
 
-/** A number typed freely and applied on blur or Enter (Escape reverts), so typing "12.5" is one edit, not four. */
-// eslint-disable-next-line react/display-name
-const NumberField = memo(({ value, onCommit, step = 0.1, min, max, disabled, title }: {
-  value: number,
-  onCommit: (newValue: number) => void,
-  step?: number | undefined,
-  min?: number | undefined,
-  max?: number | undefined,
-  disabled?: boolean | undefined,
-  title?: string | undefined,
-}) => {
-  const [draft, setDraft] = useState<string>();
-  const shown = draft ?? String(value);
-
-  const commit = useCallback(() => {
-    if (draft == null) return;
-    setDraft(undefined);
-    const parsed = Number(draft.replace(',', '.'));
-    if (draft.trim() === '' || !Number.isFinite(parsed)) return;
-    const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed));
-    if (clamped !== value) onCommit(clamped);
-  }, [draft, max, min, onCommit, value]);
-
-  const handleChange = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    // the spinner arrows are discrete steps: apply them right away
-    const native = e.nativeEvent as InputEvent;
-    if (native.inputType == null || native.inputType === '') {
-      setDraft(undefined);
-      const parsed = Number(e.target.value);
-      if (Number.isFinite(parsed) && e.target.value !== '') onCommit(parsed);
-      return;
-    }
-    setDraft(e.target.value);
-  }, [onCommit]);
-
-  const handleKeyDown = useCallback<KeyboardEventHandler<HTMLInputElement>>((e) => {
-    // don't trigger the app's keyboard shortcuts while typing
-    e.stopPropagation();
-    if (e.key === 'Enter') commit();
-    if (e.key === 'Escape') setDraft(undefined);
-  }, [commit]);
-
-  return (
-    <input type="number" style={inputStyle} value={shown} step={step} min={min} max={max} disabled={disabled} title={title} onChange={handleChange} onBlur={commit} onKeyDown={handleKeyDown} />
-  );
-});
-
 /** `<input type="color">` (no alpha) plus, with `withAlpha`, an opacity in %. Picking is transient, committed on blur. */
 // eslint-disable-next-line react/display-name
 const ColorField = memo(({ value, onChange, onCommit, withAlpha }: {
@@ -112,7 +66,7 @@ const ColorField = memo(({ value, onChange, onCommit, withAlpha }: {
       <input type="color" value={rgb} onChange={handleColorChange} onBlur={onCommit} style={{ width: '2.5em', height: '1.6em', padding: 0, border: 'none', background: 'transparent' }} />
       {withAlpha && (
         <>
-          <NumberField value={Math.round(alpha * 100)} step={5} min={0} max={100} onCommit={handleAlphaCommit} title={t('Opacity (%)')} />
+          <NumberField style={inputStyle} value={Math.round(alpha * 100)} step={5} min={0} max={100} onCommit={handleAlphaCommit} title={t('Opacity (%)')} />
           <span style={{ fontSize: '.75em' }}>%</span>
         </>
       )}
@@ -125,7 +79,7 @@ const SecondsField = memo(({ label, value, onCommit, allowNegative = false }: { 
   const { t } = useTranslation();
   return (
     <Row label={label}>
-      <NumberField value={value} min={allowNegative ? undefined : 0} onCommit={onCommit} />
+      <NumberField style={inputStyle} value={value} step={0.1} min={allowNegative ? undefined : 0} onCommit={onCommit} />
       <span style={{ fontSize: '.75em' }}>{t('s')}</span>
     </Row>
   );
@@ -137,7 +91,7 @@ const PercentField = memo(({ label, field, box, onChange }: { label: string, fie
   const handleCommit = useCallback((percent: number) => onChange({ ...box, [field]: percent / 100 }), [box, field, onChange]);
   return (
     <Row label={label}>
-      <NumberField value={Math.round(box[field] * 1000) / 10} step={1} onCommit={handleCommit} />
+      <NumberField style={inputStyle} value={Math.round(box[field] * 1000) / 10} step={1} onCommit={handleCommit} />
       <span style={{ fontSize: '.75em' }}>%</span>
     </Row>
   );
@@ -217,7 +171,7 @@ const OutlineRows = memo(({ overlay, set, setTransient, commitTransient }: {
         </Select>
       </Row>
       <Row label={t('Border (px)')}>
-        <NumberField value={overlay.border.width} step={1} min={0} onCommit={(v) => set({ border: { ...overlay.border, width: v } })} />
+        <NumberField style={inputStyle} value={overlay.border.width} step={1} min={0} onCommit={(v) => set({ border: { ...overlay.border, width: v } })} />
         <ColorField value={overlay.border.color} onChange={(color, transient) => setTransient({ border: { ...overlay.border, color } }, transient)} onCommit={commitTransient} />
       </Row>
       <Row label={t('Shadow')}>
@@ -225,8 +179,8 @@ const OutlineRows = memo(({ overlay, set, setTransient, commitTransient }: {
       </Row>
       {shadow != null && (
         <Row label={t('Shadow (px)')}>
-          <NumberField value={shadow.x} step={1} onCommit={(v) => set({ shadow: { ...shadow, x: v } })} title={t('Horizontal')} />
-          <NumberField value={shadow.y} step={1} onCommit={(v) => set({ shadow: { ...shadow, y: v } })} title={t('Vertical')} />
+          <NumberField style={inputStyle} value={shadow.x} step={1} onCommit={(v) => set({ shadow: { ...shadow, x: v } })} title={t('Horizontal')} />
+          <NumberField style={inputStyle} value={shadow.y} step={1} onCommit={(v) => set({ shadow: { ...shadow, y: v } })} title={t('Vertical')} />
           <ColorField value={shadow.color} onChange={(color, transient) => setTransient({ shadow: { ...shadow, color } }, transient)} onCommit={commitTransient} />
         </Row>
       )}
@@ -492,11 +446,11 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
           <h4 style={sectionTitleStyle}>{t('Text')}</h4>
           <TextField key={id} value={overlay.text} onCommit={(text) => set(getTextOverlayLayoutPatch(overlay, { text }))} />
           <Row label={t('Text size')}>
-            <NumberField value={Math.round(getTextOverlayFontSize(overlay) * 1000) / 10} step={0.5} min={0.5} max={100} onCommit={(percent) => set(getTextOverlayLayoutPatch(overlay, { fontSize: percent / 100 }))} title={t('% of the video frame height')} />
+            <NumberField style={inputStyle} value={Math.round(getTextOverlayFontSize(overlay) * 1000) / 10} step={0.5} min={0.5} max={100} onCommit={(percent) => set(getTextOverlayLayoutPatch(overlay, { fontSize: percent / 100 }))} title={t('% of the video frame height')} />
             <span style={{ fontSize: '.75em' }}>%</span>
           </Row>
           <Row label={t('Line spacing')}>
-            <NumberField value={overlay.lineSpacing} step={0.1} min={0} max={5} onCommit={(lineSpacing) => set(getTextOverlayLayoutPatch(overlay, { lineSpacing }))} title={t('Space between lines, as a fraction of the text size')} />
+            <NumberField style={inputStyle} value={overlay.lineSpacing} step={0.1} min={0} max={5} onCommit={(lineSpacing) => set(getTextOverlayLayoutPatch(overlay, { lineSpacing }))} title={t('Space between lines, as a fraction of the text size')} />
           </Row>
           <FontRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} onChooseFont={() => userChooseOverlayFile(id, 'font')} />
           <OutlineRows overlay={overlay} set={set} setTransient={setTransient} commitTransient={commitTransient} />
@@ -536,7 +490,7 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
             <ColorField value={overlay.backgroundColor} withAlpha onChange={(backgroundColor, transient) => setTransient({ backgroundColor }, transient)} onCommit={commitTransient} />
           </Row>
           <Row label={t('Border (px)')}>
-            <NumberField value={overlay.border.width} step={1} min={0} onCommit={(v) => set({ border: { ...overlay.border, width: v } })} />
+            <NumberField style={inputStyle} value={overlay.border.width} step={1} min={0} onCommit={(v) => set({ border: { ...overlay.border, width: v } })} />
             <ColorField value={overlay.border.color} onChange={(color, transient) => setTransient({ border: { ...overlay.border, color } }, transient)} onCommit={commitTransient} />
           </Row>
           <Row label={t('Direction')}>
@@ -571,7 +525,7 @@ function OverlayPanel({ width, overlay, overlays, clips, resolved, missingKinds,
             <button type="button" style={iconButtonStyle} title={t('Replace…')} onClick={() => userChooseOverlayFile(id, 'media')}><FaFolderOpen /></button>
           </Row>
           <Row label={t('Volume')}>
-            <NumberField value={overlay.gainDb} step={0.5} min={-40} max={20} onCommit={(v) => set({ gainDb: v })} />
+            <NumberField style={inputStyle} value={overlay.gainDb} step={0.5} min={-40} max={20} onCommit={(v) => set({ gainDb: v })} />
             <span style={{ fontSize: '.75em' }}>{t('dB')}</span>
           </Row>
           <div style={{ fontSize: '.7em', opacity: 0.7 }}>{t('0 dB = as loud as the clips')}</div>

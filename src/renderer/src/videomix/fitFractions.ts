@@ -9,13 +9,16 @@ import { getOutputSize, MIN_RECT_SIZE } from './types';
 import type { MixClip, MixSettings, MixSource, Rect } from './types';
 
 // F1/F2 (v4, T44): in which fractions of the output's main axis a clip fits (1/3, 1/2, 2/3, full), the magnet that
-// snaps a dragged edge to a fraction's exact proportion, and "Fit to" a fraction. See 04-diseno §10.1.
+// snaps a dragged edge to a fraction's exact proportion, and "Fit to" a fraction. See 04-diseno §10.1 and §10.2.
 //
 // Everything works like the planner: the cell length of a fraction comes from the same usable length (the gaps taken
 // out, even-floored) that `distributeWidths` shares among n columns, and a clip fits a cell when its even width bounds
 // (`getTolerantWidthRange` of its main-axis aspect range, on the even-normalized rects: T44b, within the 1 % aspect
 // tolerance the crop absorbs) contain the cell length. Rows (9:16, or 1:1 in rows) are the transpose of columns:
 // lengths are heights and the clip's rects are transposed. The magnet and "Fit to" still aim at the exact proportion.
+//
+// G5 (v5, T54): "Fit to" a clip with a min resizes the **min** (`fitMinRectToFraction`), not the max: the toolbar
+// still uses `fitMaxRectToFraction` for a clip without one.
 
 export const fitFractions = ['1/3', '1/2', '2/3', 'full'] as const;
 
@@ -335,6 +338,76 @@ export function fitMaxRectToFraction({ maxRect, minRect, frame, fraction, layout
     height,
   };
   return { ok: true, maxRect: toMainSpace(axis, rect) };
+}
+
+/** Why {@link fitMinRectToFraction} can't fit: the frame isn't wide enough along the main axis, even filled entirely. */
+export type FitMinToFractionFailure = 'no-room';
+
+export type FitMinToFractionResult = { ok: true, maxRect: Rect, minRect: Rect } | { ok: false, reason: FitMinToFractionFailure };
+
+/**
+ * G5 (v5, T54) "Fit to 1/3 / 1/2 / 2/3" for a clip **with a min**: resizes the min instead of the max, along the main
+ * axis only and centred on the min itself (its cross length, its position on the cross axis, and the max are
+ * otherwise untouched), so the clip's narrowest width (`min.w / max.h`, the lower end of {@link getAspectRange}) is
+ * exactly the fraction's cell — that's the width the planner would give it in a row of equal cells (§10.2). If the
+ * max isn't wide enough to contain that min (it "doesn't reach" the fraction), the max is widened along the main
+ * axis, centred on itself, just enough to contain it (so min = max on that axis) — clamped to the frame; if the
+ * frame itself isn't wide enough even filled entirely, this fails with `no-room`. {@link fitMaxRectToFraction} is
+ * still what "Fit to" uses for a clip **without** a min (01-requisitos §13, G5; the toolbar picks one or the other).
+ *
+ * Aims at the exact proportion, like `fitMaxRectToFraction` (nudged by 2 px for the even rounding near the limits;
+ * settles for the tolerance, T44b, only where the exact one isn't reachable — {@link getFractionFits} with `exact` →
+ * `fits`). Even edges throughout.
+ */
+export function fitMinRectToFraction({ maxRect, minRect, frame, fraction, layout }: {
+  maxRect: Rect,
+  minRect: Rect,
+  frame: Size,
+  fraction: FitFraction,
+  layout: FitLayout,
+}): FitMinToFractionResult {
+  const { axis } = layout;
+  const { cross } = getAxisLengths(axis, layout);
+  // main / cross aspect of the narrowest crop (getAspectRange's lower bound) the fraction's cell needs
+  const targetAspect = getFractionLength(fraction, layout) / cross;
+  const frameMain = floorEven(toMainSize(axis, frame).width);
+
+  const { max: normMax, min: normMin } = normalizeClipRects(maxRect, minRect);
+  const max = toMainSpace(axis, normMax);
+  const min = toMainSpace(axis, normMin);
+
+  // whether a min this wide (main axis) hits the fraction, with the max widened just enough to contain it for the
+  // check (a min can never be wider than its max)
+  const fitsAt = (mainWidth: number, exact = true) => getFractionFits({
+    maxRect: { x: 0, y: 0, width: Math.max(mainWidth, max.width), height: max.height },
+    minRect: { x: 0, y: 0, width: mainWidth, height: min.height },
+    layout: { ...layout, axis: 'columns', ...mainSpaceSize(axis, layout) },
+    fractions: [fraction],
+    exact,
+  })[0]!;
+
+  // desired min main length: targetAspect · the max's (unchanged) cross length; nudged by 2 px near the limits, like
+  // fitMaxRectToFraction's own nudge loop
+  let minMain = clamp(roundEven(targetAspect * max.height), 2, frameMain);
+  for (let i = 0; i < 8; i += 1) {
+    const fit = fitsAt(minMain);
+    if (fit.excess != null && minMain - 2 >= 2) minMain -= 2;
+    else if (fit.missing != null && minMain + 2 <= frameMain) minMain += 2;
+    else break;
+  }
+
+  const maxMain = Math.max(max.width, minMain);
+  if (maxMain > frameMain || fitsAt(minMain, false).status !== 'fits') return { ok: false, reason: 'no-room' };
+
+  const widened = maxMain > max.width;
+  const newMax = widened
+    ? { ...max, x: clamp(roundEven(max.x + max.width / 2 - maxMain / 2), 0, frameMain - maxMain), width: maxMain }
+    : max;
+  // widened: "just enough" means the min now spans exactly the widened max; else centred on the min's own centre
+  const newMinX = widened ? newMax.x : clamp(roundEven(min.x + min.width / 2 - minMain / 2), newMax.x, newMax.x + newMax.width - minMain);
+  const newMin = { ...min, x: newMinX, width: minMain };
+
+  return { ok: true, maxRect: toMainSpace(axis, newMax), minRect: toMainSpace(axis, newMin) };
 }
 
 /**

@@ -1172,6 +1172,59 @@ test.describe('VideoMix (fit in fractions, magnet and "Fit to")', () => {
       await ctx.close();
     }
   });
+
+  test('23. with a min, "Fit to" resizes the min (or widens the max if it is too narrow), not the max (G5, T54)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    try {
+      await mockOpenDialog(ctx.app, [media(sourceFiles[0]!)]); // 1920×1080
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      await waitIdle(page);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(1);
+      const label = page.getByTestId('rect-label');
+      await expect(label).toContainText('Max 1920×1080');
+
+      // a min narrower than a third (the default: half the max, 960×540): "Fit to 1/3" shrinks it to exactly 640 px
+      // wide, centred on its own centre; the max is untouched
+      await page.getByRole('button', { name: 'Add min', exact: true }).click();
+      await expect(label).toContainText('Min 960×540');
+      await page.getByTestId('fit-to-1-3').click();
+      await expect(label).toContainText('Max 1920×1080');
+      await expect(label).toContainText('Min 640×540');
+      await screenshot(page, '23a-fit-min-shrinks');
+      await pressShortcut(page, 'Control+z');
+      await expect(label).toContainText('Min 960×540');
+
+      // shrink the max well below a third (1920 → ~300 px): the min is clamped inside it
+      const maxWidth = async () => Number(/Max (\d+)×/.exec((await label.textContent()) ?? '')?.[1]);
+      const minWidth = async () => Number(/Min (\d+)×/.exec((await label.textContent()) ?? '')?.[1]);
+      const eastBox = (await page.getByTestId('rect-handle-max-e').boundingBox())!;
+      const westBox = (await page.getByTestId('rect-handle-max-w').boundingBox())!;
+      const scale = (eastBox.x - westBox.x) / 1920;
+      const y = eastBox.y + eastBox.height / 2;
+      await page.mouse.move(eastBox.x, y);
+      await page.mouse.down();
+      await page.mouse.move(westBox.x + 300 * scale, y, { steps: 5 });
+      await page.mouse.up();
+      expect(await maxWidth()).toBeLessThan(640);
+      const shrunkMax = await maxWidth();
+
+      // "Fit to 1/3" (640 px) needs more than the shrunk max has: it widens the max, centred on itself, just enough
+      // to contain the min — both end up exactly 640 px wide
+      await page.getByTestId('fit-to-1-3').click();
+      await expect(label).toContainText('Max 640×1080');
+      expect(await minWidth()).toBe(640);
+      await screenshot(page, '23b-fit-min-widens-max');
+      await pressShortcut(page, 'Control+z');
+      expect(await maxWidth()).toBe(shrunkMax);
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+    }
+  });
 });
 
 test.describe('VideoMix (copy/paste framing)', () => {
@@ -1734,6 +1787,25 @@ test.describe('VideoMix (shortcuts with the focus on a button)', () => {
       await page.mouse.move(sliderBox.x + sliderBox.width * 0.1, sliderY, { steps: 5 });
       await page.mouse.up();
       await expect(crfLabel).not.toHaveText(crfText);
+
+      // T54: typing digits into a number field (gap width) is one undo step, not one per keystroke. Committed with
+      // Enter (the field keeps the focus, which ignores shortcuts: `blur` before the app-level Ctrl+Z/Ctrl+Shift+Z,
+      // like `seekBy` does for the same reason).
+      const gapInput = dialog.locator('label', { hasText: 'Gap between columns' }).locator('input');
+      await expect(gapInput).toHaveValue('0');
+      await gapInput.click();
+      await gapInput.press('Control+a');
+      await gapInput.pressSequentially('12', { delay: 20 });
+      await gapInput.press('Enter');
+      await expect(gapInput).toHaveValue('12');
+      await pressShortcut(page, 'Control+z', { blur: true });
+      await expect(gapInput).toHaveValue('0');
+      await pressShortcut(page, 'Control+Shift+z', { blur: true });
+      await expect(gapInput).toHaveValue('12');
+      await pressShortcut(page, 'Control+z', { blur: true });
+      await expect(gapInput).toHaveValue('0');
+      await expect(crfLabel).not.toHaveText(crfText);
+
       await dialog.getByRole('button', { name: 'Close', exact: true }).first().click();
       await expect(dialog).toBeHidden();
       await pressShortcut(page, 'Control+z');

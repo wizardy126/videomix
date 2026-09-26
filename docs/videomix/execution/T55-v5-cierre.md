@@ -1,6 +1,6 @@
 # T55 · v5: manual, i18n y cierre
 
-- **Hito**: M12 · **Modelo**: Sonnet · **Depende de**: T51–T54 · **Estado**: pendiente
+- **Hito**: M12 · **Modelo**: Sonnet · **Depende de**: T51–T54 · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 

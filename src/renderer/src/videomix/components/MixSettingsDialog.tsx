@@ -14,7 +14,7 @@ import useEncoderAvailability from '../hooks/useEncoderAvailability';
 import { getOutputSize, mixEncoderCodecs, mixEncoderHardware, mixFpsValues, mixOutputAspects, mixOutputResolutions, mixPresets, transitionTypes } from '../types';
 import type { MixEncoderCodec, MixEncoderHardware, MixMusicPlaylist, MixOutput, MixOutputAspect, MixOutputResolution, MixPlanPriority, MixSettings, TransitionType } from '../types';
 import MixMusicSection from './MixMusicSection';
-import { ColorInput, RangeInput } from './TransientInputs';
+import { ColorInput, NumberField, RangeInput } from './TransientInputs';
 
 // E4: sensible starting point when the switch is turned on with no previous value.
 const DEFAULT_MAX_DURATION = 60;
@@ -81,13 +81,6 @@ function Section({ title, children }: { title: string, children: ReactNode }) {
 }
 
 // clamp to a non-negative even number (yuv420p needs even widths, see validateMixProject)
-// E8: an integer ≥ 0 (the schema's rule), without practical upper limit; undefined while the field isn't a number
-function toReorderWindow(value: string) {
-  const n = Math.round(Number(value));
-  if (value.trim() === '' || !Number.isFinite(n)) return undefined;
-  return Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, n));
-}
-
 function toEvenNonNegative(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.round(value / 2) * 2);
@@ -178,8 +171,9 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ maxColumns: Number(e.target.value) });
   }, [onChange]);
 
-  const handleGapWidthChange = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    onChange({ gap: { ...settings.gap, width: toEvenNonNegative(Number(e.target.value)) } });
+  // T54 (G4/T51 follow-up): NumberField applies one typed value on blur/Enter, not one undo step per digit
+  const handleGapWidthCommit = useCallback((width: number) => {
+    onChange({ gap: { ...settings.gap, width: toEvenNonNegative(width) } });
   }, [onChange, settings.gap]);
 
   const handleGapColorInput = useCallback((color: string) => {
@@ -219,18 +213,13 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
   const reorderUnlimited = settings.reorderWindow === 'unlimited';
   const [lastReorderWindow, setLastReorderWindow] = useState(() => (typeof settings.reorderWindow === 'number' ? settings.reorderWindow : DEFAULT_REORDER_WINDOW));
   const reorderWindowNumber = typeof settings.reorderWindow === 'number' ? settings.reorderWindow : lastReorderWindow;
-  // local draft while the field is being edited (it may be empty for a moment); each valid number is applied
-  const [reorderWindowText, setReorderWindowText] = useState<string>();
 
-  const handleReorderWindowChange = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    setReorderWindowText(e.target.value);
-    const reorderWindow = toReorderWindow(e.target.value);
-    if (reorderWindow == null) return;
+  // T54: an integer ≥ 0 (the schema's rule), without practical upper limit; one undo step per commit, not per digit
+  const handleReorderWindowCommit = useCallback((value: number) => {
+    const reorderWindow = Math.min(Number.MAX_SAFE_INTEGER, Math.round(value));
     setLastReorderWindow(reorderWindow);
     onChange({ reorderWindow });
   }, [onChange]);
-
-  const handleReorderWindowBlur = useCallback(() => setReorderWindowText(undefined), []);
 
   const handleReorderUnlimitedChange = useCallback((checked: boolean | 'indeterminate') => {
     onChange({ reorderWindow: checked === true ? 'unlimited' : lastReorderWindow });
@@ -241,16 +230,10 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ planPriority: e.target.value as MixPlanPriority });
   }, [onChange]);
 
-  // E2 (T39): automatic links between clips of a source. Local draft while the field is edited (it may be empty for a
-  // moment); each valid number (≥ 0 s) is applied
-  const [maxGapText, setMaxGapText] = useState<string>();
-  const handleMaxGapChange = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    setMaxGapText(e.target.value);
-    const maxGap = Number(e.target.value);
-    if (e.target.value.trim() === '' || !Number.isFinite(maxGap) || maxGap < 0) return;
+  // E2 (T39): automatic links between clips of a source. T54: one undo step per commit (blur/Enter), not per digit.
+  const handleMaxGapCommit = useCallback((maxGap: number) => {
     onChange({ links: { ...settings.links, maxGap } });
   }, [onChange, settings.links]);
-  const handleMaxGapBlur = useCallback(() => setMaxGapText(undefined), []);
 
   const handleLinkTransitionChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
     onChange({ links: { ...settings.links, transition: e.target.value as MixSettings['links']['transition'] } });
@@ -390,7 +373,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
               {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
               <label>
                 {settings.output.aspect === '16:9' ? t('Gap between columns (px)') : (settings.output.aspect === '9:16' ? t('Gap between rows (px)') : t('Gap between columns or rows (px)'))}<br />
-                <input type="number" min={0} step={2} style={{ width: '6em' }} value={settings.gap.width} onChange={handleGapWidthChange} />
+                <NumberField min={0} step={2} style={{ width: '6em' }} value={settings.gap.width} onCommit={handleGapWidthCommit} />
               </label>
               {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
               <label>
@@ -446,7 +429,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
                 {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
                 <label>
                   {t('Reorder window (± positions)')}<br />
-                  <input type="number" min={0} step={1} style={{ width: '6em' }} disabled={reorderUnlimited} value={reorderWindowText ?? reorderWindowNumber} onChange={handleReorderWindowChange} onBlur={handleReorderWindowBlur} />
+                  <NumberField min={0} step={1} style={{ width: '6em' }} disabled={reorderUnlimited} value={reorderWindowNumber} onCommit={handleReorderWindowCommit} />
                 </label>
                 <Checkbox label={t('Unlimited')} checked={reorderUnlimited} onCheckedChange={handleReorderUnlimitedChange} />
               </div>
@@ -481,7 +464,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
               {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
               <label>
                 {t('Link clips of a source up to this far apart (s)')}<br />
-                <input type="number" data-testid="links-max-gap" min={0} step={0.5} style={{ width: '6em' }} value={maxGapText ?? settings.links.maxGap} onChange={handleMaxGapChange} onBlur={handleMaxGapBlur} />
+                <NumberField data-testid="links-max-gap" min={0} step={0.5} style={{ width: '6em' }} value={settings.links.maxGap} onCommit={handleMaxGapCommit} />
               </label>
               {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
               <label>

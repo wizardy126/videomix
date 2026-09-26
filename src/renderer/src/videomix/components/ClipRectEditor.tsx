@@ -8,7 +8,7 @@ import type { MixClipPatch } from '../projectReducer';
 import type { ClipRects, Size } from '../overlayMath';
 import { applyAspect, createDefaultMin, fillFrame } from '../overlayMath';
 import { getClipRotation, rotateSize } from '../clipRotation';
-import { fitMaxRectToFraction, getFractionFits } from '../fitFractions';
+import { fitMaxRectToFraction, fitMinRectToFraction, getFractionFits } from '../fitFractions';
 import type { FitFraction, FitLayout } from '../fitFractions';
 import { findKeyframeIndex, getAnimatedRectsEdit, getClipRectsAt, getKeyframeInterpolation, getNextKeyframe, getPrevKeyframe, isClipAnimated } from '../clipKeyframes';
 import { canExtendBeyondMax } from '../planner/plannerInput';
@@ -126,17 +126,29 @@ function ClipRectEditor({ videoSize, cssRotation, clip, time, color, aspectLock,
   const extendBeyondMax = canExtendBeyondMax(clip);
   const fits = useMemo(() => (frameSize != null ? getFractionFits({ maxRect: clip.maxRect, minRect: clip.minRect, frame: frameSize, extendBeyondMax, layout: fitLayout }) : undefined), [clip.maxRect, clip.minRect, extendBeyondMax, fitLayout, frameSize]);
 
+  // G5 (v5, T54): with a min, "Fit to" resizes the min (fitMinRectToFraction); without one, the max as before
   const handleFitTo = useCallback((fraction: FitFraction) => {
     if (frameSize == null) return;
-    const result = fitMaxRectToFraction({ maxRect: rects.maxRect, minRect: rects.minRect, frame: frameSize, fraction, layout: fitLayout });
+    if (rects.minRect != null) {
+      const result = fitMinRectToFraction({ maxRect: rects.maxRect, minRect: rects.minRect, frame: frameSize, fraction, layout: fitLayout });
+      if (!result.ok) {
+        // the only failure: the source frame isn't wide enough along that axis, even filled entirely
+        getSwal().toast.fire({ icon: 'warning', timer: 6000, title: t('Cannot fit the min to {{fraction}}: the source frame is not big enough along that axis, even filled entirely', { fraction }) });
+        return;
+      }
+      onAspectLockChange(undefined);
+      onEdit({ maxRect: result.maxRect, minRect: result.minRect });
+      return;
+    }
+    const result = fitMaxRectToFraction({ maxRect: rects.maxRect, minRect: undefined, frame: frameSize, fraction, layout: fitLayout });
     if (!result.ok) {
-      // the only failure: the min doesn't fit in a max of that proportion inside the frame
+      // unreachable without a min (fitMaxRectToFraction only fails when the min doesn't fit), kept for exhaustiveness
       getSwal().toast.fire({ icon: 'warning', timer: 6000, title: t('Cannot fit the max to {{fraction}}: the min rectangle does not fit in a rectangle of that proportion inside the frame. Make the min smaller', { fraction }) });
       return;
     }
     // the new proportion replaces a locked one
     onAspectLockChange(undefined);
-    onEdit({ maxRect: result.maxRect, minRect: rects.minRect });
+    onEdit({ maxRect: result.maxRect, minRect: undefined });
   }, [fitLayout, frameSize, onAspectLockChange, onEdit, rects, t]);
 
   const toolbarKeyframes = useMemo<ToolbarKeyframes>(() => {
