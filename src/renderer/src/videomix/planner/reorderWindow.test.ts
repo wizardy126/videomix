@@ -23,6 +23,8 @@ const settings = (overrides: Partial<PlannerSettings> = {}): PlannerSettings => 
   reorderWindow: 3,
   order: { mode: 'list', seed: 0 },
   transitionDuration: 0.5,
+  // T52: the planner with this one window (the safety net over several windows is tested in safetyNet.test.ts)
+  bestOfWindows: false,
   ...overrides,
 });
 
@@ -63,8 +65,9 @@ describe('a clip that fits far away in the list', () => {
       expect(p.layouts[0]!.columns.map((c) => c.width)).toEqual([608, 608, 704]);
       expect(fillOf(p, 0)).toBe(0);
       expect(startOrder(p).slice(0, 3)).toEqual(['c0', 'c1', FAR]);
-      // the other clips keep the list order (they are all alike)
-      expect(startOrder(p).filter((id) => id !== FAR)).toEqual(clips.map((c) => c.id).filter((id) => id !== FAR));
+      // the other clips keep the list order (they are all alike), but at the very end, where a long clip may go
+      // before shorter ones so it doesn't play alone (G1, T52: due clips)
+      expect(startOrder(p).filter((id) => id !== FAR).slice(0, 34)).toEqual(clips.map((c) => c.id).filter((id) => id !== FAR).slice(0, 34));
     }
   });
 
@@ -93,22 +96,27 @@ describe('list order among equally good options', () => {
       for (const maxColumns of [1, 3, 6]) {
         const input = { clips, settings: settings({ maxColumns, reorderWindow: 'unlimited' }) };
         const p = plan(input);
-        // as if the window were 0
-        expect(validatePlan(p, { ...input, settings: settings({ maxColumns, reorderWindow: 0 }) })).toEqual([]);
+        // as if the window were 0, but for the last clips: there a long one may go first (G1, T52: due clips), and the
+        // video is never longer for it
+        expect(startOrder(p).slice(0, 50)).toEqual(clips.slice(0, 50).map((c) => c.id));
+        expect(p.duration).toBeLessThanOrEqual(plan({ clips, settings: settings({ maxColumns, reorderWindow: 0 }) }).duration);
       }
     }
   });
 
   test('a clip that fits nowhere waits for its place without disturbing the order of the others', () => {
     // a 16:9 clip first in the list, then verticals that fill the frame three at a time (3 × 640): with window 3 the
-    // 16:9 clip is forced in early (re-layouts and fill around it); unlimited, it waits until the verticals run out
+    // 16:9 clip is forced in early (re-layouts and fill around it); unlimited, it waits until the verticals are about
+    // to run out, but not longer (G1, T52): it goes in while two of them still keep it company, instead of playing
+    // alone after them (48 s before T52, with 10 s of fill at the end)
     const verticals = range(9 / 16, 640 / 1080, 640 / 1080);
     const clips = [clip('h', 10, rigid(16 / 9)), ...Array.from({ length: 12 }, (_v, i) => clip(`v${i}`, 8 + (i % 3), verticals))];
     const small = plan({ clips, settings: settings({ reorderWindow: 3 }) });
     expect(startOrder(small).indexOf('h')).toBe(3);
     const p = plan({ clips, settings: settings({ reorderWindow: 'unlimited' }) });
-    expect(startOrder(p)).toEqual([...clips.slice(1).map((c) => c.id), 'h']);
+    expect(startOrder(p)).toEqual([...clips.slice(1, 12).map((c) => c.id), 'h', 'v11']);
     expect(p.layouts.filter((l) => l.time > 0 && l.time < 30)).toEqual([]);
+    expect(p.duration).toBe(40);
   });
 });
 
@@ -189,7 +197,7 @@ describe('properties with large and unlimited windows', () => {
     }
   });
 
-  test('200 clips with an unlimited window are planned in well under a second, also with pins, groups, chains and a limit', () => {
+  test('200 clips with an unlimited window are planned in well under a second (two with the safety net), also with pins, groups, chains and a limit', () => {
     const clips = Array.from({ length: 200 }, (_v, i) => clip(`c${i}`, 3 + (i % 11), presets[(i * 7) % presets.length]!));
     const busy = clips.map((c, i) => ({
       ...c,
@@ -204,18 +212,23 @@ describe('properties with large and unlimited windows', () => {
           { clips: busy, chains, sequence: ['c0', 'c100', 'c199'], settings: settings({ width, height, maxColumns, reorderWindow: 'unlimited', maxDuration: 400 }) },
         ];
         for (const input of inputs) {
-          // best of 3: a single wall-clock sample is noisy when the whole suite runs in parallel
-          let best = Infinity;
-          let result = planMix(input);
-          for (let attempt = 0; attempt < 3 && best >= 1000; attempt += 1) {
-            const start = performance.now();
-            result = planMix(input);
-            best = Math.min(best, performance.now() - start);
+          // the unlimited window alone, and with the safety net (T52: the plans of windows 10, 3 and 0 too, about twice
+          // as long at worst; see T52's notes)
+          for (const [bestOfWindows, limit] of [[false, 1000], [true, 2000]] as const) {
+            const netInput = { ...input, settings: { ...input.settings, bestOfWindows } };
+            // best of 3: a single wall-clock sample is noisy when the whole suite runs in parallel
+            let best = Infinity;
+            let result = planMix(netInput);
+            for (let attempt = 0; attempt < 3 && best >= limit; attempt += 1) {
+              const start = performance.now();
+              result = planMix(netInput);
+              best = Math.min(best, performance.now() - start);
+            }
+            expect(best).toBeLessThan(limit);
+            expect(validatePlan(result, netInput)).toEqual([]);
           }
-          expect(best).toBeLessThan(1000);
-          expect(validatePlan(result, input)).toEqual([]);
         }
       }
     }
-  }, 90_000);
+  }, 120_000);
 });

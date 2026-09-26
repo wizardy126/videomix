@@ -28,6 +28,9 @@ export interface PlannerClip {
   extendBeyondMax?: { frame: FrameSize } | undefined,
 }
 
+/** G2 (T52): `duration` = shorter, then less fill, list order, re-layouts; `fill` = less fill, then shorter, order, re-layouts. */
+export type PlanPriority = 'duration' | 'fill';
+
 export interface PlannerSettings {
   /** Output size in px. */
   width: number,
@@ -59,6 +62,15 @@ export interface PlannerSettings {
    * goes past it, the scoring favours more columns so that more fits before the cut.
    */
   maxDuration?: number | undefined,
+  /**
+   * G2 (T52): what makes a plan better when the safety net compares them (`comparePlanQuality`). Default `duration`.
+   */
+  priority?: PlanPriority | undefined,
+  /**
+   * G1 (T52): plan also with the smaller reorder windows and keep the best plan (`planMixBest`). Default true; the
+   * preview turns it off to use the window the final render picked.
+   */
+  bestOfWindows?: boolean | undefined,
 }
 
 export interface PlanMixInput {

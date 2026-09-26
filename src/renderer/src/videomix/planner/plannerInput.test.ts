@@ -22,7 +22,7 @@ test('getPlannerInput', () => {
   project.settings.output = { aspect: '16:9', resolution: '720' };
   const input = getPlannerInput(project);
   expect(input.settings).toEqual({
-    width: 1280, height: 720, maxColumns: 3, gap: 0, reorderWindow: 3, order: { mode: 'list', seed: 0 }, transitionDuration: 0.5, linkTransition: 'cut',
+    width: 1280, height: 720, maxColumns: 3, gap: 0, reorderWindow: 3, order: { mode: 'list', seed: 0 }, priority: 'duration', transitionDuration: 0.5, linkTransition: 'cut',
   });
   expect(input).not.toHaveProperty('chains');
   expect(input).not.toHaveProperty('sequence');

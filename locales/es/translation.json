@@ -1400,5 +1400,14 @@
   "Remove the framing keyframe at the cursor": "Borrar el keyframe de encuadre del cursor",
   "Smooth": "Suave",
   "Stop animating this clip?": "¿Dejar de animar este clip?",
-  "There is no framing keyframe at the cursor": "No hay ningún keyframe de encuadre en el cursor"
+  "There is no framing keyframe at the cursor": "No hay ningún keyframe de encuadre en el cursor",
+  "Zoom in (Ctrl + mouse wheel)": "Acercar (Ctrl + rueda del ratón)",
+  "Zoom out (Ctrl + mouse wheel)": "Alejar (Ctrl + rueda del ratón)",
+  "Fit": "Ajustar",
+  "Fit the whole mix in the view": "Ver todo el montaje",
+  "Prioritize": "Priorizar",
+  "Shortest video": "Duración más corta",
+  "Least fill": "Menos relleno",
+  "The plan with the least fill wins, then the shortest one, the one closest to the list order and the one with fewer layout changes. Plans with smaller reorder windows are tried too.": "Gana el plan con menos relleno; después, el más corto, el más cercano al orden de la lista y el de menos cambios de disposición. También se prueban planes con ventanas de reordenación menores.",
+  "The shortest plan wins, then the one with the least fill, the one closest to the list order and the one with fewer layout changes. Plans with smaller reorder windows are tried too.": "Gana el plan más corto; después, el de menos relleno, el más cercano al orden de la lista y el de menos cambios de disposición. También se prueban planes con ventanas de reordenación menores."
 }

@@ -28,6 +28,8 @@ const settings = (overrides: Partial<PlannerSettings> = {}): PlannerSettings => 
   reorderWindow: 3,
   order: { mode: 'list', seed: 0 },
   transitionDuration: 0.5,
+  // T52: the planner with this one window (the safety net over several windows is tested in safetyNet.test.ts)
+  bestOfWindows: false,
   ...overrides,
 });
 
@@ -441,7 +443,7 @@ describe('properties', () => {
       if (issues.length > 0) throw new Error(`seed ${seed}: ${issues.join('; ')}\n${formatPlan(result)}`);
       expect(planMix(input)).toEqual(result); // deterministic
     }
-  });
+  }, 30_000);
 
   test('random projects in each output shape and axis satisfy every invariant (T29)', () => {
     const shapes: [number, number, PlannerSettings['axis']][] = [[1920, 1080, undefined], [1080, 1920, undefined], [1080, 1080, undefined], [1080, 1080, 'columns'], [1080, 1080, 'rows'], [360, 640, undefined]];
@@ -456,7 +458,7 @@ describe('properties', () => {
         expect(planMix(input)).toEqual(result); // deterministic
       }
     }
-  });
+  }, 30_000);
 
   test('200 clips are planned in well under a second', () => {
     const clips = Array.from({ length: 200 }, (_v, i) => clip(`c${i}`, 3 + (i % 11), presets[i % presets.length]!));

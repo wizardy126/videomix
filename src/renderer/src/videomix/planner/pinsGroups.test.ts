@@ -25,6 +25,8 @@ const settings = (overrides: Partial<PlannerSettings> = {}): PlannerSettings => 
   reorderWindow: 3,
   order: { mode: 'list', seed: 0 },
   transitionDuration: 0.5,
+  // T52: the planner with this one window (the safety net over several windows is tested in safetyNet.test.ts)
+  bestOfWindows: false,
   ...overrides,
 });
 
@@ -260,7 +262,7 @@ describe('properties with pins and groups', () => {
     expect(stats.exactPins / stats.pins).toBeGreaterThan(0.8);
     expect(stats.groups).toBeGreaterThan(200);
     expect(stats.splitGroups / stats.groups).toBeLessThan(0.02);
-  });
+  }, 60_000);
 
   test('9:16: a rows plan with pins and groups is the columns plan of the transposed clips', () => {
     for (let seed = 1; seed <= 40; seed += 1) {

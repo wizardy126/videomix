@@ -1,4 +1,4 @@
-import type { ChangeEventHandler, CSSProperties, FormEventHandler } from 'react';
+import type { CSSProperties } from 'react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FaExclamationTriangle, FaFolderOpen, FaGripVertical, FaMusic, FaTimes } from 'react-icons/fa';
@@ -18,6 +18,7 @@ import { warningColor } from '../../colors';
 import type { EditOptions } from '../hooks/useMixProject';
 import type { MixMusicPlaylist, MixMusicTrack } from '../types';
 import { createMusicTrack } from '../workspace';
+import { RangeInput } from './TransientInputs';
 
 const { basename, dirname } = window.require('node:path');
 
@@ -53,8 +54,8 @@ const TrackRow = memo(({ track, missing, onVolumeChange, onRemove, onLocate }: {
     borderRadius: '.3em',
   }), [sortable.isDragging, sortable.transform, sortable.transition]);
 
-  const handleVolumeInput = useCallback<FormEventHandler<HTMLInputElement>>((e) => onVolumeChange(track.id, Number(e.currentTarget.value), { transient: true }), [onVolumeChange, track.id]);
-  const handleVolumeCommit = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => onVolumeChange(track.id, Number(e.target.value)), [onVolumeChange, track.id]);
+  const handleVolumeInput = useCallback((volumeDb: number) => onVolumeChange(track.id, volumeDb, { transient: true }), [onVolumeChange, track.id]);
+  const handleVolumeCommit = useCallback((volumeDb: number) => onVolumeChange(track.id, volumeDb), [onVolumeChange, track.id]);
 
   return (
     <div ref={setRef} style={style}>
@@ -88,7 +89,7 @@ const TrackRow = memo(({ track, missing, onVolumeChange, onRemove, onLocate }: {
       {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
       <label style={{ display: 'block', fontSize: '.9em' }}>
         {t('Volume')}: {t('{{db}} dB', { db: track.volumeDb.toFixed(1) })}<br />
-        <input type="range" min={-30} max={6} step={0.5} style={{ width: '100%' }} value={track.volumeDb} onInput={handleVolumeInput} onChange={handleVolumeCommit} />
+        <RangeInput min={-30} max={6} step={0.5} style={{ width: '100%' }} value={track.volumeDb} onInput={handleVolumeInput} onCommit={handleVolumeCommit} />
       </label>
     </div>
   );
@@ -157,12 +158,12 @@ function MixMusicSection({ playlist, onChange }: {
     setTracks(arrayMove(tracks, ids.indexOf(String(active.id)), ids.indexOf(String(over.id))));
   }, [setTracks, tracks]);
 
-  const handleCrossfadeInput = useCallback<FormEventHandler<HTMLInputElement>>((e) => onChange({ ...playlist, crossfade: Number(e.currentTarget.value) }, { transient: true }), [onChange, playlist]);
-  const handleCrossfadeCommit = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => onChange({ ...playlist, crossfade: Number(e.target.value) }), [onChange, playlist]);
+  const handleCrossfadeInput = useCallback((crossfade: number) => onChange({ ...playlist, crossfade }, { transient: true }), [onChange, playlist]);
+  const handleCrossfadeCommit = useCallback((crossfade: number) => onChange({ ...playlist, crossfade }), [onChange, playlist]);
   const handleLoopChange = useCallback((checked: boolean) => onChange({ ...playlist, loop: checked }), [onChange, playlist]);
   const handleDuckingChange = useCallback((checked: boolean) => onChange({ ...playlist, ducking: { ...playlist.ducking, enabled: checked } }), [onChange, playlist]);
-  const handleDuckingAmountInput = useCallback<FormEventHandler<HTMLInputElement>>((e) => onChange({ ...playlist, ducking: { ...playlist.ducking, amountDb: Number(e.currentTarget.value) } }, { transient: true }), [onChange, playlist]);
-  const handleDuckingAmountCommit = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => onChange({ ...playlist, ducking: { ...playlist.ducking, amountDb: Number(e.target.value) } }), [onChange, playlist]);
+  const handleDuckingAmountInput = useCallback((amountDb: number) => onChange({ ...playlist, ducking: { ...playlist.ducking, amountDb } }, { transient: true }), [onChange, playlist]);
+  const handleDuckingAmountCommit = useCallback((amountDb: number) => onChange({ ...playlist, ducking: { ...playlist.ducking, amountDb } }), [onChange, playlist]);
 
   return (
     <>
@@ -190,7 +191,7 @@ function MixMusicSection({ playlist, onChange }: {
           {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
           <label style={rowStyle}>
             {t('Crossfade between tracks')}: {t('{{seconds}}s', { seconds: playlist.crossfade.toFixed(1) })}<br />
-            <input type="range" min={0} max={10} step={0.5} style={{ width: '100%' }} value={playlist.crossfade} onInput={handleCrossfadeInput} onChange={handleCrossfadeCommit} />
+            <RangeInput min={0} max={10} step={0.5} style={{ width: '100%' }} value={playlist.crossfade} onInput={handleCrossfadeInput} onCommit={handleCrossfadeCommit} />
           </label>
 
           <div style={inlineRowStyle}>
@@ -205,7 +206,7 @@ function MixMusicSection({ playlist, onChange }: {
           {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
           <label style={{ ...rowStyle, opacity: playlist.ducking.enabled ? undefined : 0.5 }}>
             {t('Ducking amount')}: {t('{{db}} dB', { db: playlist.ducking.amountDb.toFixed(0) })}<br />
-            <input type="range" min={-30} max={-3} step={1} style={{ width: '100%' }} disabled={!playlist.ducking.enabled} value={playlist.ducking.amountDb} onInput={handleDuckingAmountInput} onChange={handleDuckingAmountCommit} />
+            <RangeInput min={-30} max={-3} step={1} style={{ width: '100%' }} disabled={!playlist.ducking.enabled} value={playlist.ducking.amountDb} onInput={handleDuckingAmountInput} onCommit={handleDuckingAmountCommit} />
             <div style={detailsStyle}>{t('The music comes back up smoothly in the silences.')}</div>
           </label>
         </>

@@ -246,6 +246,11 @@ export type MixAlwaysVisible = z.infer<typeof mixAlwaysVisibleSchema>;
 
 export const defaultAlwaysVisible: MixAlwaysVisible = { clipIds: [] };
 
+/** G2 (T52): see `MixSettings.planPriority`. */
+export const mixPlanPriorities = ['duration', 'fill'] as const;
+
+export type MixPlanPriority = (typeof mixPlanPriorities)[number];
+
 export const mixSettingsSchema = z.object({
   output: mixOutputSchema,
   encoder: mixEncoderSchema,
@@ -261,6 +266,12 @@ export const mixSettingsSchema = z.object({
    */
   reorderWindow: z.union([z.number().int().nonnegative(), z.literal('unlimited')]),
   order: z.object({ mode: z.enum(['list', 'random']), seed: z.number().int() }),
+  /**
+   * G2 (v6, T52): what makes a plan better when the planner compares its candidates (the safety net over reorder
+   * windows): `duration` = shorter video first, then less fill, list order, re-layouts; `fill` = less fill first, then
+   * shorter, list order, re-layouts. See 04-diseno §3.10.
+   */
+  planPriority: z.enum(mixPlanPriorities),
   /** Global transition; `duration` in seconds. */
   transition: z.object({ type: transitionTypeSchema, duration: z.number().nonnegative() }),
   /** Fade from/to black at the start/end of the video (video and audio). */
@@ -433,10 +444,11 @@ export type MixOverlayType = MixOverlay['type'];
 /**
  * v5 (T44). v1 → v2 (T19): overlays; v2 → v3 (T24): output, encoder, music playlist, text overlays, pinned and
  * grouped clips; v3 → v4 (T36): automatic clip links, `MixClip.link`, `settings.maxDuration`, `settings.alwaysVisible`;
- * v4 → v5 (T44): `MixClip.keyframes`, `MixSource.blackBars`, `settings.autoCropBlackBars`.
+ * v4 → v5 (T44): `MixClip.keyframes`, `MixSource.blackBars`, `settings.autoCropBlackBars`; v5 → v6 (T52):
+ * `settings.planPriority`.
  */
 export const mixProjectSchema = z.object({
-  version: z.literal(5),
+  version: z.literal(6),
   sources: mixSourceSchema.array(),
   /** Array order is the list order. */
   clips: mixClipSchema.array(),
@@ -449,7 +461,7 @@ export const mixProjectSchema = z.object({
 
 export type MixProject = z.infer<typeof mixProjectSchema>;
 
-export const MIX_PROJECT_VERSION = 5;
+export const MIX_PROJECT_VERSION = 6;
 
 export const defaultMixSettings: MixSettings = {
   output: { aspect: '16:9', resolution: '1080' },
@@ -461,6 +473,7 @@ export const defaultMixSettings: MixSettings = {
   gap: { width: 0, color: '#000000' },
   reorderWindow: 3,
   order: { mode: 'list', seed: 0 },
+  planPriority: 'duration',
   transition: { type: 'fade', duration: 0.5 },
   fadeInOut: true,
   links: defaultLinksSettings,

@@ -31,6 +31,8 @@ export function toPlannerSettings(settings: MixSettings): PlannerSettings {
     gap: settings.gap.width,
     reorderWindow: settings.reorderWindow,
     order: settings.order,
+    // G2 (T52)
+    priority: settings.planPriority,
     transitionDuration: settings.transition.duration,
     // E2/E5 (T38)
     linkTransition: settings.links.transition,

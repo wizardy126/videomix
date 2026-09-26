@@ -66,6 +66,7 @@ interface MixSettings {
   gap: { width: number, color: string },    // { 0, '#000000' }
   reorderWindow: number | 'unlimited',      // 3; E8 (T38c): entero ≥ 0 sin tope, o ilimitada (aditivo, sigue en v4)
   order: { mode: 'list' | 'random', seed: number },
+  planPriority: 'duration' | 'fill',        // v6 (G2, T52): 'duration'; criterio de la red de seguridad del planificador, §3.10
   transition: { type: TransitionType, duration: number },  // fade, 0.5
   fadeInOut: boolean,                       // true
   fill: { mode: 'blur' | 'color', color: string },          // blur, '#000000'
@@ -79,7 +80,7 @@ interface MixSettings {
 }
 
 interface MixProject {
-  version: 5,              // v1…v4 se migran al abrir (v4 → v5 es aditiva, T44), ver §8.1, §9 y §10
+  version: 6,              // v1…v5 se migran al abrir (v4 → v5 y v5 → v6 son aditivas, T44 y T52), ver §8.1, §9, §10 y §3.10
   sources: MixSource[],
   clips: MixClip[],        // el orden del array es el orden de la lista
   settings: MixSettings,
@@ -183,8 +184,8 @@ Detalle, validación y cambios de planes en las notas de [T44b](execution/T44b-v
 
 Carpeta: `src/renderer/src/videomix/planner/` (implementado en T10 y ajustado en T10b; detalles y justificación en [T10](execution/T10-planificador.md) y [T10b](execution/T10b-ajuste-planificador.md)).
 
-- **Entrada** (`PlanMixInput`): la lista ordenada de `PlannerClip = { id, duration, aspectRange, rects?, pinTime?, groupId? }`, `PlannerSettings = { width, height, maxColumns, gap, reorderWindow, order, transitionDuration, axis?, linkTransition?, maxDuration? }` y, desde T38, `chains?` (listas de ids) y `sequence?` (ids de la secuencia siempre visible). `getPlannerInput(project)` (`plannerInput.ts`) la construye desde `MixClip`/`MixSettings` (cadenas con `getClipChains` sobre los clips válidos); `rects` (máx./mín.) solo sirve para el aviso y la puntuación de upscale.
-- **Salida**: `MixPlan` (`planMix`). `validatePlan(plan, input)` comprueba las invariantes de §3.2 y devuelve la lista de problemas; `planMix` la ejecuta en desarrollo (`import.meta.env.DEV`). `formatPlan(plan)` da una vista textual compacta.
+- **Entrada** (`PlanMixInput`): la lista ordenada de `PlannerClip = { id, duration, aspectRange, rects?, pinTime?, groupId? }`, `PlannerSettings = { width, height, maxColumns, gap, reorderWindow, order, transitionDuration, axis?, linkTransition?, maxDuration?, priority?, bestOfWindows? }` (los dos últimos desde T52, §3.10) y, desde T38, `chains?` (listas de ids) y `sequence?` (ids de la secuencia siempre visible). `getPlannerInput(project)` (`plannerInput.ts`) la construye desde `MixClip`/`MixSettings` (cadenas con `getClipChains` sobre los clips válidos); `rects` (máx./mín.) solo sirve para el aviso y la puntuación de upscale.
+- **Salida**: `MixPlan` (`planMix`; `planMixBest` devuelve además la ventana elegida por la red de seguridad y la calidad del plan, §3.10). `validatePlan(plan, input)` comprueba las invariantes de §3.2 y devuelve la lista de problemas; `planMix` la ejecuta en desarrollo (`import.meta.env.DEV`). `formatPlan(plan)` da una vista textual compacta.
 
 ### 3.1 Salida: `MixPlan`
 
@@ -372,8 +373,36 @@ Detalle, mediciones y justificación en las notas de [T38c](execution/T38c-v3-re
   - **Coste de orden**: la distancia hacia delante, con tope en 10 posiciones; un clip que se ha quedado atrás cuesta 0. Así un clip que encaja puede venir de cualquier sitio a un precio acotado (unos 3 re-layouts), y el orden de la lista sigue desempatando entre opciones igual de buenas: el más antiguo gana los empates y un clip saltado vuelve en cuanto es tan bueno como los demás. La ventana (regla 5) sigue siendo un límite duro si es finita. La puntuación global (`PlanScore`) usa la misma medida.
   - **Poda por encaje**: si la ventana no cabe en `SUBSET_BUDGET`, los candidatos son, por prioridad, los que la ventana obliga a tomar, los más antiguos hasta `OLDEST_SHARE` = 75 % del cupo y, el resto, los que mejor **encajan** en el hueco (`getFitKey`): primero los que llenan el espacio libre sin relleno (columna liberada + relleno, solos o junto a los candidatos más antiguos), luego los que caben en una columna liberada o en un reparto a partes iguales del espacio, y después por cercanía (log del cociente de anchos); empates por antigüedad. Se devuelven en orden base y el resultado es determinista. En la fila inicial el espacio es el fotograma (menos los fijados en 0); en un cambio de cadena, lo que deja el clip de la cadena más el relleno.
   - La sustitución directa y las opciones "en su sitio" ya recorrían toda la ventana: con ventana ilimitada, la sustitución directa toma el primer clip de la lista (en cualquier posición) que encaja en el hueco.
+  - **Clips debidos** (G1, T52): ver §3.10.
 - **Cotas** (todas las ventanas): cada término del coste es ≥ 0, así que una opción de re-layout se descarta antes de construirla si su orden + re-layout + número de columnas + el relleno mínimo que dejan los máx. de su fila ya no mejora la mejor opción sin violación; y si los mín. de su fila no caben (como en `distributeWidths`). Es exacto: no cambia ningún plan. (T44b: con los anchos tolerados, §2.7.)
 - **Rendimiento** (200 clips, primera llamada, con la validación de desarrollo): < 1 s en todos los casos. Con ventana ilimitada, 90–210 ms sin fijados ni grupos y 140–590 ms con fijados, grupos, cadenas, secuencia y límite. El peor caso es 1:1 con 6 columnas, que planifica los dos ejes.
+
+### 3.10 Ventana ilimitada: clips debidos y red de seguridad (G1, G2, T52)
+
+Detalle, banco de pruebas y mediciones en las notas de [T52](execution/T52-v5-planificador.md).
+
+- **Causa** (G1): con una ventana grande el planificador sigue siendo voraz evento a evento. En cada hueco toma el clip que mejor encaja (a menudo por sustitución directa, que gana sin puntuar), venga de donde venga, y un clip saltado no cuesta nada (§3.9). Los clips que encajan mal con los demás (a menudo largos) se aplazan una y otra vez y se acumulan al final, donde ya no queda con quién acompañarlos: suenan solos o en pocas columnas, con el resto de la fila como relleno. El vídeo sale más largo y con más relleno. Ni la puntuación de cada evento ni `PlanScore` lo veían: no miden la duración y no cuentan como relleno las columnas vacías del final. Con ventana 3 o 10 la propia ventana obligaba a colocarlos antes.
+- **Arreglo: clips debidos** (solo con ventana > `LARGE_WINDOW`; hasta 10 el planificador no cambia). En cada evento normal (`getDueUnit`), un clip suelto es **debido** si su contenido `c` (con el resto de su cadena) cumple `c · (maxColumns − 1) · DUE_CONTENT_FACTOR ≥ resto`. `resto` es el contenido pendiente sin él: clips por empezar, fijados, cadenas y lo que le queda a la fila. `DUE_CONTENT_FACTOR` = 1: entra mientras las otras columnas aún tienen material para acompañarlo.
+  - Se toma el primero de la lista que lo cumple y que la ventana deja empezar.
+  - Ese evento solo admite opciones que lo empiecen: `getOrderCost` rechaza las demás, así que sustitución directa, "en su sitio" o re-layouts con él. Si no hay ninguna, el evento se resuelve como antes.
+  - No afecta a la fila inicial, a los cambios de cadena ni a los forzados (grupos, fijados).
+- **Red de seguridad** (`planMixBest`): el plan se calcula con la ventana del proyecto y con las menores de `SAFETY_NET_WINDOWS` = 10, 3 y 0 (`getSafetyNetWindows`). Gana el mejor según la prioridad del proyecto (`comparePlanQuality`) y, en empate, la ventana mayor.
+  - Todos los candidatos cumplen la ventana del proyecto. Los candidatos de una ventana incluyen los de cualquier ventana menor, así que **una ventana mayor nunca sale peor** según la prioridad.
+  - En 1:1, cada ventana elige su eje por `PlanScore`, como antes (T29).
+  - `bestOfWindows: false` desactiva la red. La previsualización renderizada usa la ventana y el eje que eligió el render final (`planRender`).
+- **Calidad** (`PlanQuality`, medida sobre el plan sin la ampliación de E7, como `PlanScore`):
+  - `duration`;
+  - `fill`: fracción del fotograma × s sin clip (relleno de la fila, barras de pillarbox/letterbox por su área y columnas vacías al final del vídeo);
+  - `order`: posiciones de desplazamiento respecto a la lista base, sin tope;
+  - `relayouts`: número de cambios de layout.
+- **Prioridad** (G2, `settings.planPriority` → `PlannerSettings.priority`, Ajustes → Orden → "Priorizar"):
+  - `duration` (por defecto): duración → relleno → orden → re-layouts;
+  - `fill`: relleno → duración → orden → re-layouts.
+  - Las duraciones se comparan en pasos de `DURATION_STEP` = 0,05 s y los rellenos en pasos de `FILL_STEP` = 0,01 (redondeados, no con tolerancia, para que la comparación sea un orden total).
+- **Coste**: con prioridad `duration` se abandona un candidato en cuanto seguro que dura más que el mejor. La cota (`getDurationBound`) es el máximo entre el fin de lo ya colocado y `t − D` + (lo que le queda a la fila + lo pendiente, menos un fundido por clip) / `maxColumns`. Es exacta: no cambia la elección.
+  - En proyectos realistas de 200 clips: 30–180 ms.
+  - En el peor caso sintético (1:1, 6 columnas, fijados, grupos, cadenas, secuencia y límite): unos 0,7 s, frente a unos 0,4 s con una sola ventana.
+- **Modelo**: v6, migración v5 → v6 aditiva (`planPriority` se rellena con `'duration'`).
 
 ## 4. Render de vídeo con ffmpeg
 
@@ -597,6 +626,8 @@ Recomendación original:
 - **Diálogo "Ajustes de montaje"** con todos los `MixSettings`.
 - **"Previsualizar"**:
   1. Se calcula el plan y se muestra el *Timeline del montaje*: carriles por columna a lo largo del tiempo, bloques con el color o nombre del clip, marcas de re-layout y zonas de relleno.
+     - **Filas compactas (G3, T53)**: el planificador da un id nuevo a cada columna que abre más tarde, así que las columnas que no coinciden en el tiempo comparten carril (`mixPlanLayout.getMixLanes`): tantos carriles como columnas a la vez. Una columna ocupa su carril desde que entra en el layout hasta que termina su último clip (una columna quitada por un re-layout lo sigue ocupando mientras encoge). Se asignan en orden de inicio (coloreado voraz de intervalos, óptimo); entre los carriles libres se elige el que queda entre los de sus vecinos en su primer *keyframe* (arriba = izquierda), y si no hay ninguno libre se inserta uno nuevo ahí. Una columna nunca cambia de carril, así que el orden arriba-abajo = izquierda-derecha se cumple "en lo posible" (≈ 91 % de los *keyframes* en los tests).
+     - **Zoom y scroll (A3, T53)**: `zoom` de sesión (no se guarda) en `MixPlanView`; los carriles miden `zoom` × el ancho visible dentro de un contenedor con scroll horizontal, así que todas las posiciones siguen siendo porcentajes de la duración. Eje de tiempo *sticky* encima de los carriles (solo dibuja las marcas visibles). Cálculos puros en `mixPlanZoom.ts`.
   2. Se renderiza a baja resolución (640×360, `ultrafast`, CRF alto) en un fichero temporal.
   3. Se reproduce en un diálogo.
 - **"Montar"**:

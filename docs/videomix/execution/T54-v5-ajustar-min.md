@@ -11,7 +11,8 @@
 
 1. Función pura `fitMinRectToFraction` (o ampliar la existente): con mín., ajusta su ancho en el eje principal (crece o encoge, centrado en el propio mín., dentro del máx.) para que el ancho más estrecho del clip (`min.w / max.h` escalado a la salida, ver `getAspectRange`) sea exactamente la fracción. Si el máx. no alcanza la fracción, ensanchar el máx. lo justo (centrado, dentro del fotograma, conteniendo al mín.); si no cabe en el fotograma, error con motivo. Tests (columnas, filas, giros).
 2. Los botones "Ajustar a" usan esa función cuando hay mín. (un paso de historial); el tooltip lo explica.
-3. i18n, manual, e2e.
+3. **Seguimiento de T51**: el campo numérico de separación (Ajustes → Composición) crea un paso de deshacer por cada dígito tecleado; agrupar la edición de un campo numérico en un paso (p. ej. transitorio mientras tiene el foco, commit al salir o con Intro), y aplicarlo a los demás campos numéricos de ajustes si tienen el mismo problema.
+4. i18n, manual, e2e.
 
 ## Criterios de aceptación
 

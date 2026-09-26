@@ -7,7 +7,7 @@ import { getColumnFit, getPlanWarnings } from './planWarnings';
 import { getPlanLinks, getPlanUnits } from './units';
 import { validatePlan } from './validatePlan';
 import { getDefaultAxis, getReorderWindowSize } from './types';
-import type { ColumnPlacement, LayoutKeyframe, MixPlan, PlanMixInput, PlannerClip } from './types';
+import type { ColumnPlacement, LayoutKeyframe, MixPlan, PlanMixInput, PlanPriority, PlannerClip, PlannerSettings } from './types';
 
 // Montage planner (04-diseno §3): an event simulation over "a column's clip ends" events. Each event is resolved by
 // scoring the options (direct substitution, in-place with fill, or a re-layout of the row) and taking the cheapest.
@@ -111,6 +111,15 @@ const LARGE_WINDOW = 10;
  * score (shares from 0.5 to 0.85 are alike; see T38c's notes).
  */
 const OLDEST_SHARE = 0.75;
+
+/**
+ * G1 (T52): with a large window, a clip becomes due (the next normal event must start it) when the content left to
+ * play besides it (clips to start, pins, chains, and what the row still plays) is no more than this many times what
+ * the other `maxColumns − 1` columns need to keep it company: `content(clip) × (maxColumns − 1) × factor ≥ rest`.
+ * Without it, a large window keeps taking the clips that fit best from anywhere and leaves the ones that fit badly
+ * (often long) for the end, where they play alone or in few columns: a longer video with more fill (04-diseno §3.10).
+ */
+const DUE_CONTENT_FACTOR = 1;
 
 const EPS = 1e-9;
 
@@ -273,8 +282,34 @@ export interface PlanScore {
   order: number,
 }
 
-/** {@link planMix} along a given main axis, with the plan's score. */
-export function planMixAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput, axis: LayoutAxis): { plan: MixPlan, score: PlanScore } {
+/**
+ * G1/G2 (T52): what the safety net compares plans by (see {@link comparePlanQuality}), measured on the plan the
+ * planner laid out (before E7's extension beyond the max):
+ * - `duration` (s);
+ * - `fill`: fraction of the frame × seconds without a clip: the row fill, the pillarbox/letterbox bars (by their area)
+ *   and, at the end of the video, the columns whose clips have ended;
+ * - `order`: positions away from the base list (single clips among themselves, groups among the ordered units),
+ *   without the cap of large windows;
+ * - `relayouts`: layout changes.
+ */
+export interface PlanQuality {
+  duration: number,
+  fill: number,
+  order: number,
+  relayouts: number,
+}
+
+interface AxisPlan {
+  plan: MixPlan,
+  score: PlanScore,
+  quality: PlanQuality,
+}
+
+/**
+ * The plan along `axis` with the settings' reorder window. With `abortAbove` (s), gives up (undefined) as soon as the
+ * plan is sure to last longer (see `getDurationBound`).
+ */
+function planAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput, axis: LayoutAxis, abortAbove?: number): AxisPlan | undefined {
   const { maxColumns, gap, transitionDuration: D } = settings;
   /** E8 (T38c): `Infinity` for an unlimited window. */
   const N = getReorderWindowSize(settings.reorderWindow);
@@ -288,7 +323,11 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
 
   if (rawClips.length === 0) {
     layouts.push({ time: 0, transitionDuration: 0, columns: [], fills: [{ x: 0, width: W }] });
-    return { plan: { ...output, duration: 0, placements, layouts, warnings: [] }, score: { total: 0, fill: 0, clips: 0, relayouts: 0, order: 0 } };
+    return {
+      plan: { ...output, duration: 0, placements, layouts, warnings: [] },
+      score: { total: 0, fill: 0, clips: 0, relayouts: 0, order: 0 },
+      quality: { duration: 0, fill: 0, order: 0, relayouts: 0 },
+    };
   }
 
   // E2/E5 (T38): chains and sequence, cleaned up (the sequence wins over pins and groups)
@@ -354,6 +393,8 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
   let lastStart = 0;
   /** End of the last layout animation: a new one can't start before. */
   let animationEnd = 0;
+  /** Latest end of the clips placed so far, with the rest of their chains: the plan lasts at least this. */
+  let plannedEnd = 0;
 
   const remainingClipCount = () => remaining.reduce((acc, unit) => acc + unit.clips.length, 0);
   const hasPendingPins = () => pins.length > 0 || overdue.length > 0;
@@ -382,6 +423,9 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
   };
 
   // --- helpers ---
+
+  /** G1 (T52): the single clip the current normal event must start (see {@link getDueUnit}), undefined otherwise. */
+  let dueUnit: Unit | undefined;
 
   /**
    * Order cost (before {@link ORDER_WEIGHT}) of starting the unit with base index `base` at order position `position`:
@@ -442,10 +486,12 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
   /**
    * Order cost of starting `atOnce` (together, sorted by base) and then `later` (one after the other) at the next
    * positions, or undefined if it breaks the reorder window: a single clip more than N positions away from its index,
-   * a group more than N positions early, or a single clip left behind that could no longer fit in its window.
+   * a group more than N positions early, a single clip left behind that could no longer fit in its window, or (G1)
+   * the due clip left out.
    * A group may start late (it waits for room), which costs like being away from its position.
    */
   function getOrderCost(atOnce: readonly Unit[], later: readonly Unit[] = []) {
+    if (dueUnit != null && !atOnce.includes(dueUnit) && !later.includes(dueUnit)) return undefined;
     let single = singlePosition;
     let unit = unitPosition;
     let cost = 0;
@@ -666,6 +712,7 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
   function place(column: number, clip: Clip, start: number, transitionIn: number, continuation = false) {
     placements.push({ clipId: clip.id, column, startTime: start, endTime: start + clip.duration, transitionIn });
     columns.set(column, { id: column, clip, end: start + clip.duration, active: true });
+    plannedEnd = Math.max(plannedEnd, start + clip.duration + clip.tail);
     // the next clip of a chain isn't a pick: it doesn't take part in the start order
     if (!continuation) lastStart = Math.max(lastStart, start);
   }
@@ -844,8 +891,30 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     ?? remaining.find((unit) => unit.started)
     ?? remaining.find((unit) => !isSingle(unit) && unitPosition >= unit.unitBase + N && !isWaitingChunk(unit));
 
+  /**
+   * G1 (T52): with a large window (E8), the single clip that can't wait any longer at an event at `time`: the earliest
+   * one in the list whose content (its chain included), kept company in the other `maxColumns − 1` columns, would use
+   * up the rest of the video's content (see {@link DUE_CONTENT_FACTOR}), among those the window allows to start now.
+   * Undefined with a window up to {@link LARGE_WINDOW} (the planner is unchanged there) or a single column.
+   */
+  function getDueUnit(time: number): Unit | undefined {
+    if (N <= LARGE_WINDOW || maxColumns < 2) return undefined;
+    const content = (clip: Clip) => clip.duration + clip.tail;
+    let total = 0;
+    [...remaining, ...pins, ...overdue].forEach((unit) => unit.clips.forEach((clip) => { total += content(clip); }));
+    order.forEach((id) => {
+      const col = columns.get(id)!;
+      if (col.active) total += Math.max(0, col.end + col.clip.tail - time);
+    });
+    return remaining.find((unit) => {
+      if (!isSingle(unit) || unit.started) return false;
+      const c = content(unit.clips[0]!);
+      return c * (maxColumns - 1) * DUE_CONTENT_FACTOR >= total - c - EPS && getOrderCost([unit]) != null;
+    });
+  }
+
   /** The usual options of an event (04-diseno §3.3), with groups and the pins' reserve. Undefined if there's none. */
-  function resolveNormalEvent(trigger: Column): Option | undefined {
+  function resolveNormalOptions(trigger: Column): Option | undefined {
     const { end: e1, clip: a1 } = trigger;
     const w1 = widthOf.get(trigger.id)!;
 
@@ -1100,6 +1169,21 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     return best;
   }
 
+  /**
+   * The usual options of an event (04-diseno §3.3), with groups and the pins' reserve. Undefined if there's none.
+   * G1 (T52): only options that start the due clip, if there is one (and any option if none of them is possible).
+   */
+  function resolveNormalEvent(trigger: Column): Option | undefined {
+    dueUnit = getDueUnit(trigger.end);
+    try {
+      const option = resolveNormalOptions(trigger);
+      if (option != null || dueUnit == null) return option;
+    } finally {
+      dueUnit = undefined;
+    }
+    return resolveNormalOptions(trigger);
+  }
+
   function resolveEvent(trigger: Column): Option {
     // A unit that can't wait goes in now if it can, else this column is removed to make room for it.
     const forced = getForcedUnit();
@@ -1321,6 +1405,22 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     }
   }
 
+  /**
+   * G1 (T52): the plan lasts at least this when the next event is at `time`: the clips placed so far end, and from
+   * `time - D` on (nothing starts earlier, but a pin whose time has come) the columns still have to play what the row
+   * has left plus every pending clip, less a crossfade each, in at most `maxColumns` columns at once.
+   */
+  const getDurationBound = (time: number) => {
+    const from = Math.min(time - D, pins[0]?.pinTime ?? Infinity);
+    let content = 0;
+    order.forEach((id) => {
+      const col = columns.get(id)!;
+      if (col.active) content += Math.max(0, col.end + col.clip.tail - from);
+    });
+    [...remaining, ...pins, ...overdue].forEach((unit) => unit.clips.forEach((clip) => { content += Math.max(0, clip.duration + clip.tail - D); }));
+    return Math.max(plannedEnd, from + content / maxColumns);
+  };
+
   while (remaining.length > 0 || hasPendingPins() || hasPendingChains()) {
     // with nothing else to start, only the chains go on (E2/E5): the other columns just run out
     const onlyChains = remaining.length === 0 && !hasPendingPins();
@@ -1330,6 +1430,7 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
       if (col.active && (!onlyChains || col.clip.next != null) && (trigger == null || col.end < trigger.end - EPS)) trigger = col;
     }
     invariant(trigger != null, 'No active column while clips remain');
+    if (abortAbove != null && getDurationBound(trigger.end) > abortAbove + EPS) return undefined;
 
     const pin = pins[0];
     updateLimitPressure(trigger.end);
@@ -1369,6 +1470,7 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     const fill = layout.fills.reduce((acc, f) => acc + f.width, 0);
     if (layout.columns.length > 0) score.fill += fillCost(fill, segmentEnd(i) - layout.time);
   });
+  const quality: PlanQuality = { duration, fill: 0, order: 0, relayouts: layouts.length - 1 };
   let singleIndex = 0;
   const startedUnits = new Set<number>();
   placements.forEach((placement) => {
@@ -1376,9 +1478,11 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
     if (clip.unitBase >= 0 && !startedUnits.has(clip.unitBase)) {
       if (clip.singleBase >= 0) {
         score.order += ORDER_WEIGHT * orderDistance(singleIndex, clip.singleBase);
+        quality.order += Math.abs(singleIndex - clip.singleBase);
         singleIndex += 1;
       } else {
         score.order += ORDER_WEIGHT * orderDistance(startedUnits.size, clip.unitBase);
+        quality.order += Math.abs(startedUnits.size - clip.unitBase);
       }
       startedUnits.add(clip.unitBase);
     }
@@ -1389,15 +1493,79 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
       const shown = Math.min(segmentEnd(i), placement.endTime) - Math.max(layout.time, placement.startTime);
       const col = layout.columns.find((c) => c.column === placement.column);
       if (shown <= EPS || col == null) return;
-      score.clips += (shown / seconds) * (columnCost(clip, col.width) + columnCountCost(layout.columns.length))
-        + misfitFillCost(clip, col.width, shown);
+      const misfit = misfitFillCost(clip, col.width, shown);
+      score.clips += (shown / seconds) * (columnCost(clip, col.width) + columnCountCost(layout.columns.length)) + misfit;
+      quality.fill += misfit / FILL_WEIGHT;
       letterboxed ||= getColumnFit(clip.range, col.width, H) === 'letterbox';
     });
     if (letterboxed) score.clips += LETTERBOX_WEIGHT;
   });
   score.total = score.fill + score.clips + score.relayouts + score.order;
 
-  return { plan, score };
+  // quality fill: the row fill, plus the time each column of a layout shows no clip (the end of the video)
+  const byColumn = new Map<number, ColumnPlacement[]>();
+  placements.forEach((placement) => byColumn.set(placement.column, [...(byColumn.get(placement.column) ?? []), placement]));
+  layouts.forEach((layout, i) => {
+    const [from, to] = [layout.time, segmentEnd(i)];
+    if (to - from <= EPS) return;
+    if (layout.columns.length > 0) quality.fill += (layout.fills.reduce((acc, f) => acc + f.width, 0) / W) * (to - from);
+    layout.columns.forEach(({ column, width }) => {
+      // placements of a column are in start order and only overlap in their crossfades
+      let shown = 0;
+      let reached = from;
+      (byColumn.get(column) ?? []).forEach(({ startTime, endTime }) => {
+        const [a, b] = [Math.max(reached, startTime), Math.min(to, endTime)];
+        if (b > a) {
+          shown += b - a;
+          reached = b;
+        }
+      });
+      quality.fill += (width / W) * Math.max(0, to - from - shown);
+    });
+  });
+
+  return { plan, score, quality };
+}
+
+/** {@link planMix} along a given main axis and with the settings' window (no safety net), with the plan's score. */
+export function planMixAxis(input: PlanMixInput, axis: LayoutAxis): AxisPlan {
+  const result = planAxis(input, axis);
+  invariant(result != null);
+  return result;
+}
+
+/**
+ * G2 (T52): {@link comparePlanQuality} compares durations in steps of this (s, under two frames at 30 fps), so plans
+ * that end almost together are compared by the next criterion.
+ */
+const DURATION_STEP = 0.05;
+/** G2 (T52): the same for fills (fraction of the frame × s). */
+const FILL_STEP = 0.01;
+/** G1 (T52): the smaller windows the safety net also plans with (those below the settings' window). */
+const SAFETY_NET_WINDOWS = [10, 3, 0];
+
+/**
+ * G2 (T52): compares two plans by the project's priority, < 0 when `a` is better, 0 when they are as good.
+ * `duration` (the default): shorter, then less fill, then closer to the list order, then fewer re-layouts. `fill`:
+ * less fill, then shorter, then order, then re-layouts. Durations and fills are rounded to {@link DURATION_STEP} and
+ * {@link FILL_STEP} (rounded, not within a tolerance, so the comparison stays a total order: the best of a set of
+ * plans is never worse than the best of a subset).
+ */
+export function comparePlanQuality(a: PlanQuality, b: PlanQuality, priority: PlanPriority = 'duration') {
+  const duration = Math.round(a.duration / DURATION_STEP) - Math.round(b.duration / DURATION_STEP);
+  const fill = Math.round(a.fill / FILL_STEP) - Math.round(b.fill / FILL_STEP);
+  const [first, second] = priority === 'fill' ? [fill, duration] : [duration, fill];
+  return Math.sign(first) || Math.sign(second) || Math.sign(a.order - b.order) || Math.sign(a.relayouts - b.relayouts);
+}
+
+/**
+ * G1 (T52): the reorder windows the safety net plans with: the settings' one first, then the smaller ones of
+ * {@link SAFETY_NET_WINDOWS}. Just the settings' one with `bestOfWindows: false`.
+ */
+export function getSafetyNetWindows({ reorderWindow, bestOfWindows = true }: Pick<PlannerSettings, 'reorderWindow' | 'bestOfWindows'>): PlannerSettings['reorderWindow'][] {
+  if (!bestOfWindows) return [reorderWindow];
+  const size = getReorderWindowSize(reorderWindow);
+  return [reorderWindow, ...SAFETY_NET_WINDOWS.filter((window) => window < size)];
 }
 
 /**
@@ -1405,23 +1573,55 @@ export function planMixAxis({ clips: rawClips, settings, chains, sequence }: Pla
  * Pure and deterministic. See 04-diseno §3 for the rules and invariants (checked by {@link validatePlan}).
  *
  * The main axis is `settings.axis`, or else follows the output (B5, {@link getDefaultAxis}): columns in landscape,
- * rows in portrait. A square output is planned both ways and the plan with the lower {@link PlanScore} total wins
- * (ties: columns), once for the whole project.
+ * rows in portrait. A square output is planned both ways with the settings' window and the plan with the lower
+ * {@link PlanScore} total wins (ties: columns), once for the whole project.
+ *
+ * G1 (T52, safety net): the plan is also made with the smaller windows of {@link getSafetyNetWindows} (each one
+ * picking its axis in a square output), and the best one by the settings' priority wins ({@link comparePlanQuality};
+ * ties: the larger window). They all respect the settings' window, and a window's candidates include those of every
+ * smaller one, so a larger window is never worse by that priority. With the `duration` priority, a plan is given up as
+ * soon as it is sure to last longer than the best one so far. Returns the plan and the window that made it, with its
+ * quality.
  */
-export function planMix(input: PlanMixInput): MixPlan {
-  const axis = input.settings.axis ?? getDefaultAxis(input.settings);
-  let plan: MixPlan;
-  if (axis != null) {
-    ({ plan } = planMixAxis(input, axis));
-  } else {
-    const columns = planMixAxis(input, 'columns');
-    const rows = planMixAxis(input, 'rows');
-    ({ plan } = rows.score.total < columns.score.total - EPS ? rows : columns);
+export function planMixBest(input: PlanMixInput): { plan: MixPlan, reorderWindow: PlannerSettings['reorderWindow'], quality: PlanQuality } {
+  const { settings } = input;
+  const priority = settings.priority ?? 'duration';
+  const axis = settings.axis ?? getDefaultAxis(settings);
+  let best: AxisPlan | undefined;
+  let bestWindow = settings.reorderWindow;
+  for (const reorderWindow of getSafetyNetWindows(settings)) {
+    const windowInput: PlanMixInput = { ...input, settings: { ...settings, reorderWindow } };
+    // with the duration priority, a plan sure to last longer than the best one can't win
+    const abortAbove = best != null && priority === 'duration' ? (Math.round(best.quality.duration / DURATION_STEP) + 0.5) * DURATION_STEP : undefined;
+    let candidate: AxisPlan | undefined;
+    if (axis != null) {
+      candidate = planAxis(windowInput, axis, abortAbove);
+    } else {
+      // square output: each window picks its axis by score, as without the safety net (T29). Only when both plans
+      // are given up can the window be skipped: with one of them, the score may still pick the other one.
+      let columns = planAxis(windowInput, 'columns', abortAbove);
+      let rows = planAxis(windowInput, 'rows', abortAbove);
+      if (columns != null || rows != null) {
+        columns ??= planMixAxis(windowInput, 'columns');
+        rows ??= planMixAxis(windowInput, 'rows');
+        candidate = rows.score.total < columns.score.total - EPS ? rows : columns;
+      }
+    }
+    if (candidate != null && (best == null || comparePlanQuality(candidate.quality, best.quality, priority) < 0)) {
+      best = candidate;
+      bestWindow = reorderWindow;
+    }
   }
+  invariant(best != null);
 
   if (import.meta.env.DEV) {
-    const issues = validatePlan(plan, input);
+    const issues = validatePlan(best.plan, input);
     if (issues.length > 0) console.error('Invalid montage plan', issues);
   }
-  return plan;
+  return { plan: best.plan, reorderWindow: bestWindow, quality: best.quality };
+}
+
+/** {@link planMixBest}'s plan. */
+export function planMix(input: PlanMixInput): MixPlan {
+  return planMixBest(input).plan;
 }

@@ -46,7 +46,8 @@ async function seekBy(page: Page, seconds: number) {
   const target = (await playerTime(page)) + seconds;
   await expect(async () => {
     const remaining = Math.round(target - (await playerTime(page)));
-    for (let i = 0; i < Math.abs(remaining); i += 1) await pressShortcut(page, remaining > 0 ? 'ArrowRight' : 'ArrowLeft');
+    // blur: a focused rect overlay (after a drag) takes the arrows as nudges, a focused field as the caret
+    for (let i = 0; i < Math.abs(remaining); i += 1) await pressShortcut(page, remaining > 0 ? 'ArrowRight' : 'ArrowLeft', { blur: true });
     await expect.poll(async () => playerTime(page), { timeout: 2000 }).toBeCloseTo(target, 1);
   }).toPass({ timeout: 15_000 });
 }
@@ -510,10 +511,19 @@ test.describe.serial('VideoMix (English UI)', () => {
     await preview.getByTitle('Play').click();
     let farFromKeyframe = 0;
     await expect.poll(async () => {
+      // G1 (T52): only the last 1.5 s of this 5 s mix is left after the seek, so a slow seek can reach the end
+      // (which pauses) before anything is heard: seek and play again (the decoded data is warm by then)
+      if (await preview.getByTitle('Play').isVisible()) {
+        await seekTo(0.7);
+        await preview.getByTitle('Play').click();
+      }
       farFromKeyframe = (await measurePeakRms(page, 1500)).peak;
       return farFromKeyframe;
     }, { timeout: 30_000 }).toBeGreaterThan(0.02);
-    await preview.getByTitle('Pause').click();
+    // G1 (T52): the safety net plays this mix in list order (5 s, the vertical clip alone for its last 1.5 s), so it
+    // may have ended during the measurement, which pauses it
+    await preview.getByTitle('Pause').click({ timeout: 2000 }).catch(() => undefined);
+    await expect(preview.getByTitle('Play')).toBeVisible();
     console.log('Live preview audio, normalized:', JSON.stringify({ twoClips, farFromKeyframe }));
 
     // T43: the Working overlay (here loading another source, with the Mix tab shown) is above the live preview. It's
@@ -1459,6 +1469,277 @@ test.describe('VideoMix (framing keyframes)', () => {
       await expect(animate).toHaveAttribute('aria-pressed', 'false');
       await expect(marks).toHaveCount(0);
       await expect(label).toContainText('Max 640×720');
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+test.describe('VideoMix (Mix view rows and zoom)', () => {
+  test('22. columns that don\'t coincide share a row, and the Mix view zooms and scrolls, following the cursor (G3, A3, T53)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    const workDir = mkdtempSync(join(tmpdir(), 'videomix-e2e-lanes-'));
+    try {
+      // a clip of each shape (square, vertical, horizontal), saved and multiplied in the file below
+      const files = ['sq-1080-6s.mp4', sourceFiles[2]!, sourceFiles[0]!];
+      await mockOpenDialog(ctx.app, files.map((f) => media(f)));
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(3);
+      await waitIdle(page);
+      for (const [i, file] of files.entries()) {
+        // eslint-disable-next-line no-await-in-loop
+        await activateSource(page, i, file);
+        // eslint-disable-next-line no-await-in-loop
+        await pressShortcut(page, 'n');
+        // eslint-disable-next-line no-await-in-loop
+        await expect(clipRows(page)).toHaveCount(i + 1);
+      }
+      const projectPath = join(workDir, 'lanes.vmx');
+      await mockSaveDialog(ctx.app, projectPath);
+      await pressShortcut(page, 'Control+s');
+      await expect(page).toHaveTitle(/^lanes - /);
+
+      // 12 clips whose plan re-lays out the columns several times: the planner opens a new column id each time (square,
+      // vertical and horizontal clips of 2–6 s; not linked, so each one is a clip of its own)
+      const saved = JSON5.parse(readFileSync(projectPath, 'utf8')) as { clips: (SavedProject['clips'][number] & { link?: string })[] };
+      const templates = { S: saved.clips[0]!, V: saved.clips[1]!, H: saved.clips[2]! };
+      const spec = ['V4', 'S2', 'V4', 'H4', 'V5', 'V3', 'V4', 'H6', 'V6', 'V3', 'V5', 'V5'];
+      saved.clips = spec.map((s, i) => ({ ...templates[s[0] as 'S' | 'V' | 'H'], id: `lane-clip-${i}`, name: `${s} #${i + 1}`, start: 0, end: Number(s.slice(1)), link: 'break' }));
+      writeFileSync(projectPath, JSON5.stringify(saved, null, 2));
+      await sendMenuAction(ctx.app, 'newProject');
+      await expect(page.getByTestId('source-row')).toHaveCount(0);
+      await mockOpenDialog(ctx.app, [projectPath]);
+      await sendMenuAction(ctx.app, 'openProject');
+      await expect.poll(async () => clipNames(page)).toHaveLength(12);
+      await waitIdle(page);
+
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      const blocks = page.getByTestId('mix-block');
+      await expect(blocks).toHaveCount(12);
+      const lanes = page.getByTestId('mix-lane');
+      const laneColumns = (await lanes.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset['columns']!.split(',')))) as string[][];
+      const columnIds = laneColumns.flat();
+      console.log('Mix view lanes (column ids):', JSON.stringify(laneColumns));
+      // before T53, a row per column id; now no more rows than the 3 columns shown at once
+      expect(new Set(columnIds).size).toBe(columnIds.length);
+      expect(columnIds.length).toBeGreaterThanOrEqual(5);
+      expect(laneColumns.length).toBeLessThanOrEqual(3);
+      // no two blocks of a row overlap (beyond a crossfade)
+      for (const lane of await lanes.all()) {
+        // eslint-disable-next-line no-await-in-loop
+        const spans = (await lane.getByTestId('mix-block').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return [r.left, r.right]; }))).sort((a, b) => a[0]! - b[0]!);
+        spans.slice(1).forEach(([left], i) => expect(left!).toBeGreaterThan(spans[i]![0]!));
+      }
+      // clicking a block of a shared row selects its clip
+      const sharedLane = lanes.nth(laneColumns.findIndex((c) => c.length > 1));
+      const lastBlock = sharedLane.getByTestId('mix-block').last();
+      const clipId = await lastBlock.getAttribute('data-clip-id');
+      await lastBlock.click();
+      await expect(blocks.and(page.locator(`[data-clip-id="${clipId}"]`))).toHaveAttribute('data-selected', 'true');
+      await screenshot(page, '22a-mix-view-compact-rows');
+
+      const scroller = page.getByTestId('mix-lanes-scroller');
+      const lanesArea = page.getByTestId('mix-lanes');
+      const zoomOf = async () => Number(await scroller.getAttribute('data-zoom'));
+      const widthRatio = async () => (await lanesArea.evaluate((el) => el.getBoundingClientRect().width)) / (await scroller.evaluate((el) => el.clientWidth));
+      const scrollLeft = async () => scroller.evaluate((el) => el.scrollLeft);
+      await expect(page.getByTestId('mix-zoom-fit')).toBeDisabled();
+      await expect(page.getByTestId('mix-zoom-out')).toBeDisabled();
+      expect(await widthRatio()).toBeCloseTo(1, 2);
+
+      // + twice: 1.5 × 1.5, around the middle of the view
+      await page.getByTestId('mix-zoom-in').click();
+      await page.getByTestId('mix-zoom-in').click();
+      await expect.poll(zoomOf).toBeCloseTo(2.25, 2);
+      expect(await widthRatio()).toBeCloseTo(2.25, 1);
+      const middleFraction = await scroller.evaluate((el) => (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth);
+      expect(middleFraction).toBeCloseTo(0.5, 2);
+      await screenshot(page, '22b-mix-view-zoomed');
+
+      // the wheel scrolls sideways
+      const box = (await scroller.boundingBox())!;
+      const mouse = { x: box.x + box.width * 0.3, y: box.y + 30 };
+      await page.mouse.move(mouse.x, mouse.y);
+      const before = await scrollLeft();
+      await page.mouse.wheel(0, 200);
+      await expect.poll(scrollLeft).toBeCloseTo(before + 200, 0);
+
+      // Ctrl + wheel zooms, keeping the time under the mouse
+      const fractionAtMouse = async () => lanesArea.evaluate((el, x) => { const r = el.getBoundingClientRect(); return (x - r.left) / r.width; }, mouse.x);
+      const fraction = await fractionAtMouse();
+      await page.keyboard.down('Control');
+      await page.mouse.wheel(0, -300);
+      await page.keyboard.up('Control');
+      await expect.poll(zoomOf).toBeGreaterThan(3.5);
+      expect(await fractionAtMouse()).toBeCloseTo(fraction, 2);
+      // and back out
+      await page.keyboard.down('Control');
+      await page.mouse.wheel(0, 300);
+      await page.keyboard.up('Control');
+      await expect.poll(zoomOf).toBeCloseTo(2.25, 1);
+
+      // the time axis and the lanes scroll together
+      const axisLeft = async () => page.getByTestId('mix-time-axis').evaluate((el) => el.getBoundingClientRect().left);
+      expect(await axisLeft()).toBeCloseTo(await lanesArea.evaluate((el) => el.getBoundingClientRect().left), 0);
+
+      // playing with zoom, the view follows the cursor: from the start, zoomed in to a few seconds
+      for (let i = 0; i < 4; i += 1) await page.getByTestId('mix-zoom-in').click(); // eslint-disable-line no-await-in-loop
+      await scroller.evaluate((el) => el.scrollTo({ left: 0 }));
+      const axis = page.getByTestId('mix-time-axis');
+      const axisBox = (await axis.boundingBox())!;
+      await page.mouse.click(axisBox.x + 2, axisBox.y + axisBox.height / 2);
+      await expect.poll(scrollLeft).toBe(0);
+      const preview = page.getByTestId('mix-live-preview');
+      await preview.getByTitle('Play').click();
+      await expect.poll(scrollLeft, { timeout: 20_000 }).toBeGreaterThan(0);
+      const cursorInView = async () => page.getByTestId('mix-cursor').evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const s = document.querySelector('[data-testid="mix-lanes-scroller"]')!.getBoundingClientRect();
+        return r.left >= s.left && r.left <= s.right;
+      });
+      expect(await cursorInView()).toBe(true);
+      await preview.getByTitle('Pause').click();
+      await screenshot(page, '22c-mix-view-following');
+
+      // Fit: the whole mix again
+      await page.getByTestId('mix-zoom-fit').click();
+      await expect.poll(zoomOf).toBe(1);
+      expect(await widthRatio()).toBeCloseTo(1, 2);
+      expect(await scrollLeft()).toBe(0);
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+});
+
+test.describe('VideoMix (shortcuts with the focus on a button)', () => {
+  test('21. Ctrl+Z / Ctrl+Shift+Z undo and redo right after clicking buttons: rect editor bar, keyframes, clip list and Mix view (G4, T51)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    try {
+      await mockOpenDialog(ctx.app, [media(sourceFiles[0]!)]); // 1920×1080
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await expect.poll(async () => page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).readyState)).toBeGreaterThanOrEqual(1);
+      await waitIdle(page);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(1);
+      const label = page.getByTestId('rect-label');
+      await expect(label).toContainText('Max 1920×1080');
+
+      // the editor bar: the clicked button keeps the focus (the bug: the shortcuts only worked on the body)
+      const fitHalf = page.getByTestId('fit-to-1-2');
+      await fitHalf.click();
+      await expect(label).toContainText('Max 960×1080');
+      await expect(fitHalf).toBeFocused();
+      await pressShortcut(page, 'Control+z');
+      await expect(label).toContainText('Max 1920×1080');
+      await pressShortcut(page, 'Control+Shift+z');
+      await expect(label).toContainText('Max 960×1080');
+      // Space on a focused button is the button's (here "Fit to 1/2" again, a no-op), not "play"
+      await expect(fitHalf).toBeFocused();
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(300);
+      expect(await page.locator('video').first().evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
+      // arrow key nudges of the focused rect overlay: one undo step
+      const handleX = async (handle: string) => {
+        const handleBox = (await page.getByTestId(`rect-handle-max-${handle}`).boundingBox())!;
+        return handleBox.x + handleBox.width / 2;
+      };
+      const westX = await handleX('w');
+      const northBox = (await page.getByTestId('rect-handle-max-n').boundingBox())!;
+      await page.mouse.click(northBox.x + northBox.width / 2, northBox.y + 60);
+      await expect(page.getByTestId('rect-overlay')).toBeFocused();
+      for (let i = 0; i < 3; i += 1) await page.keyboard.press('ArrowLeft');
+      await expect.poll(async () => handleX('w')).toBeLessThan(westX - 1);
+      await pressShortcut(page, 'Control+z');
+      await expect.poll(async () => handleX('w')).toBeCloseTo(westX, 0);
+      await pressShortcut(page, 'Control+z');
+      await expect(label).toContainText('Max 1920×1080');
+
+      await page.getByTestId('rotate-clip-cw').click();
+      await expect(page.getByTestId('clip-rotation')).toHaveText('90°');
+      await pressShortcut(page, 'Control+z');
+      await expect(page.getByTestId('clip-rotation')).toHaveCount(0);
+
+      // keyframes: "Animate", add and remove one, each undone with the focus on its button
+      const animate = page.getByTestId('animate-toggle');
+      const marks = page.getByTestId('clip-keyframe-mark');
+      await animate.click();
+      await expect(animate).toHaveAttribute('aria-pressed', 'true');
+      await expect(marks).toHaveCount(1);
+      await pressShortcut(page, 'Control+z');
+      await expect(animate).toHaveAttribute('aria-pressed', 'false');
+      await expect(marks).toHaveCount(0);
+      await pressShortcut(page, 'Control+Shift+z');
+      await expect(marks).toHaveCount(1);
+      await seekBy(page, 1);
+      await page.getByTestId('keyframe-add').click();
+      await expect(marks).toHaveCount(2);
+      await pressShortcut(page, 'Control+z');
+      await expect(marks).toHaveCount(1);
+      await pressShortcut(page, 'Control+Shift+z');
+      await expect(marks).toHaveCount(2);
+      await page.getByTestId('keyframe-remove').click();
+      await expect(marks).toHaveCount(1);
+      await pressShortcut(page, 'Control+z');
+      await expect(marks).toHaveCount(2);
+
+      // the clip list: mute (the focus stays on the clip's row)
+      const row = clipRows(page).first();
+      await row.getByRole('button', { name: 'Mute clip', exact: true }).click();
+      await expect(row.getByRole('button', { name: 'Unmute clip', exact: true })).toBeVisible();
+      await pressShortcut(page, 'Control+z');
+      await expect(row.getByRole('button', { name: 'Mute clip', exact: true })).toBeVisible();
+
+      // the Mix view: dragging a block pins its clip (the focus is on its lane)
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      const block = page.getByTestId('mix-block').first();
+      await expect(block).toBeVisible();
+      await expect(block).not.toHaveAttribute('title', /Pinned/);
+      const box = (await block.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width / 2 + 40, box.y + box.height / 2, { steps: 5 });
+      await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2, { steps: 5 });
+      await page.mouse.up();
+      await expect(block).toHaveAttribute('title', /Pinned/);
+      expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
+      await pressShortcut(page, 'Control+z');
+      await expect(block).not.toHaveAttribute('title', /Pinned/);
+      await pressShortcut(page, 'Control+Shift+z');
+      await expect(block).toHaveAttribute('title', /Pinned/);
+
+      // …and adding an overlay with its button
+      const planView = page.getByTestId('mix-plan-view');
+      await planView.getByRole('button', { name: 'Add countdown' }).click();
+      await expect(planView.getByTestId('overlay-block')).toHaveCount(1);
+      await pressShortcut(page, 'Control+z');
+      await expect(planView.getByTestId('overlay-block')).toHaveCount(0);
+
+      // a slider drag in the settings is one undo step (React's onChange fired, and committed, on every move)
+      await textButton(page, 'Settings').click();
+      const dialog = page.getByTestId('mix-settings');
+      const crfLabel = dialog.locator('label', { hasText: 'Quality (CRF)' });
+      const crfText = (await crfLabel.textContent())!;
+      const sliderBox = (await crfLabel.locator('input[type="range"]').boundingBox())!;
+      const sliderY = sliderBox.y + sliderBox.height / 2;
+      await page.mouse.move(sliderBox.x + sliderBox.width * 0.5, sliderY);
+      await page.mouse.down();
+      await page.mouse.move(sliderBox.x + sliderBox.width * 0.3, sliderY, { steps: 5 });
+      await page.mouse.move(sliderBox.x + sliderBox.width * 0.1, sliderY, { steps: 5 });
+      await page.mouse.up();
+      await expect(crfLabel).not.toHaveText(crfText);
+      await dialog.getByRole('button', { name: 'Close', exact: true }).first().click();
+      await expect(dialog).toBeHidden();
+      await pressShortcut(page, 'Control+z');
+      await textButton(page, 'Settings').click();
+      await expect(crfLabel).toHaveText(crfText);
+      await dialog.getByRole('button', { name: 'Close', exact: true }).first().click();
       expect(ctx.consoleErrors).toEqual([]);
     } finally {
       await ctx.close();

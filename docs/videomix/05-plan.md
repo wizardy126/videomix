@@ -88,9 +88,9 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T48 | v4: keyframes en render, previsualización y miniaturas (A9) | M11 | Opus | T44 | hecha |
 | T49 | v4: edición de keyframes (A9) | M11 | Opus | T44, T45, T48 | hecha |
 | T50 | v4: i18n, manual, e2e y cierre | M11 | Sonnet | T44–T49 | hecha |
-| T51 | v5: atajos con cualquier foco y deshacer (G4) | M12 | Opus | — | en curso |
-| T52 | v5: ventana de reorden ilimitada y criterio configurable (G1, G2) | M12 | Opus | — | en curso |
-| T53 | v5: filas compactas y zoom/scroll en la vista Mix (G3, A3) | M12 | Opus | — | en curso |
+| T51 | v5: atajos con cualquier foco y deshacer (G4) | M12 | Opus | — | hecha |
+| T52 | v5: ventana de reorden ilimitada y criterio configurable (G1, G2) | M12 | Opus | — | hecha |
+| T53 | v5: filas compactas y zoom/scroll en la vista Mix (G3, A3) | M12 | Opus | — | hecha |
 | T54 | v5: "Ajustar a" sobre el mín. (G5) | M12 | Sonnet | T51 | pendiente |
 | T55 | v5: manual, i18n y cierre | M12 | Sonnet | T51–T54 | pendiente |
 

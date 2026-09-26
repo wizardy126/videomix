@@ -41,7 +41,7 @@ const migratedSettings = (overrides: Partial<MixSettings> = {}): MixSettings => 
 describe('types', () => {
   test('createEmptyMixProject', () => {
     const project = createEmptyMixProject();
-    expect(project).toEqual({ version: 5, sources: [], clips: [], settings: defaultMixSettings, overlays: [] });
+    expect(project).toEqual({ version: 6, sources: [], clips: [], settings: defaultMixSettings, overlays: [] });
     // must not share nested objects with the defaults
     project.settings.gap.width = 10;
     project.settings.musicPlaylist.ducking.amountDb = 0;
@@ -129,7 +129,7 @@ describe('parseMixProject', () => {
     expect(overlays).toEqual([]);
     const v1 = { ...structuredClone(rest), version: 1, settings: { ...legacySettings, resolution: '2160p' }, loudnessCache: { k: { hasAudio: false } } };
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v1)));
-    expect(parsed).toEqual({ ...v1, version: 5, settings: migratedSettings({ output: { aspect: '16:9', resolution: '2160' } }), overlays: [] });
+    expect(parsed).toEqual({ ...v1, version: 6, settings: migratedSettings({ output: { aspect: '16:9', resolution: '2160' } }), overlays: [] });
   });
 
   test('migrates v2 to v3 without losing anything: 16:9, H.264, the music as a single track', () => {
@@ -144,7 +144,7 @@ describe('parseMixProject', () => {
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v2)));
     expect(parsed).toEqual({
       ...v2,
-      version: 5,
+      version: 6,
       settings: migratedSettings({
         output: { aspect: '16:9', resolution: '720' },
         musicPlaylist: { ...defaultMusicPlaylist, tracks: [{ id: MIGRATED_MUSIC_TRACK_ID, path: 'm.mp3', absolutePath: '/m.mp3', volumeDb: -6 }], loop: false },
@@ -167,7 +167,7 @@ describe('parseMixProject', () => {
     Reflect.deleteProperty(v3.settings, 'alwaysVisible');
     Reflect.deleteProperty(v3.settings, 'maxDuration');
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v3)));
-    expect(parsed).toEqual({ ...v3, version: 5, settings: { ...v3.settings, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible } });
+    expect(parsed).toEqual({ ...v3, version: 6, settings: { ...v3.settings, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible } });
     expect(parsed.settings.maxDuration).toBeUndefined();
   });
 
@@ -175,9 +175,20 @@ describe('parseMixProject', () => {
     const v4 = { ...structuredClone(makeProject([makeClip(), makeClip({ id: 'c2' })])), version: 4 };
     Reflect.deleteProperty(v4.settings, 'autoCropBlackBars');
     const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v4)));
-    expect(parsed).toEqual({ ...v4, version: 5, settings: { ...v4.settings, autoCropBlackBars: true } });
+    expect(parsed).toEqual({ ...v4, version: 6, settings: { ...v4.settings, autoCropBlackBars: true } });
     expect(parsed.clips.every((clip) => clip.keyframes == null)).toBe(true);
     expect(parsed.sources.every((source) => source.blackBars == null)).toBe(true);
+  });
+
+  test('migrates v5 to v6 additively: the plan priority is duration by default (T52)', () => {
+    const v5 = { ...structuredClone(makeProject([makeClip(), makeClip({ id: 'c2' })])), version: 5 };
+    Reflect.deleteProperty(v5.settings, 'planPriority');
+    const parsed = parseMixProject(JSON5.parse(JSON5.stringify(v5)));
+    expect(parsed).toEqual({ ...v5, version: 6, settings: { ...v5.settings, planPriority: 'duration' } });
+    // round trip, and only the known values
+    const fill = { ...structuredClone(parsed), settings: { ...parsed.settings, planPriority: 'fill' as const } };
+    expect(parseMixProject(JSON5.parse(JSON5.stringify(fill)))).toEqual(fill);
+    expect(() => parseMixProject({ ...fill, settings: { ...fill.settings, planPriority: 'order' } })).toThrow(ZodError);
   });
 
   test('round trip with keyframes and black bars (v5)', () => {
@@ -209,7 +220,7 @@ describe('parseMixProject', () => {
     const json = JSON5.parse(text);
     const { resolution, ...settings } = json.settings;
     expect(resolution).toBe('720p');
-    expect(parseMixProject(json)).toEqual({ ...json, version: 5, settings: { ...settings, output: { aspect: '16:9', resolution: '720' }, encoder: defaultMixSettings.encoder, musicPlaylist: defaultMusicPlaylist, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible, autoCropBlackBars: true }, overlays: [] });
+    expect(parseMixProject(json)).toEqual({ ...json, version: 6, settings: { ...settings, output: { aspect: '16:9', resolution: '720' }, encoder: defaultMixSettings.encoder, musicPlaylist: defaultMusicPlaylist, links: defaultLinksSettings, alwaysVisible: defaultAlwaysVisible, autoCropBlackBars: true, planPriority: 'duration' }, overlays: [] });
   });
 
   test('fills missing settings from defaults', () => {
@@ -237,7 +248,7 @@ describe('parseMixProject', () => {
     expect(() => parseMixProject({ sources: [] })).toThrow('missing version');
     expect(() => parseMixProject({ version: '1' })).toThrow('missing version');
     expect(() => parseMixProject({ version: 0 })).toThrow('missing version');
-    expect(() => parseMixProject({ ...createEmptyMixProject(), version: 6 })).toThrow('newer than supported');
+    expect(() => parseMixProject({ ...createEmptyMixProject(), version: 7 })).toThrow('newer than supported');
   });
 
   // Each case returns a copy of a valid project with one thing broken.

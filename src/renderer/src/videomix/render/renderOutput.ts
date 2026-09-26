@@ -1,5 +1,5 @@
 import { getPlannerInput } from '../planner/plannerInput';
-import { planMix } from '../planner/planMix';
+import { planMix, planMixBest } from '../planner/planMix';
 import { truncatePlan } from '../planner/truncatePlan';
 import { getDefaultAxis } from '../planner/types';
 import type { MixPlan } from '../planner/types';
@@ -109,7 +109,7 @@ export interface RenderPlan {
  * the output's aspect ({@link getPreviewSize}; ADR-001: the plan is always computed for the size it's rendered at)
  * with the gap scaled from the output resolution, so the layout matches the final one as closely as the rounding
  * allows. In 1:1 the axis (rows or columns) is the one the final render picks at the output resolution, so the preview
- * never shows the other one on a near-tie (T29).
+ * never shows the other one on a near-tie (T29); the same for the reorder window of the safety net (G1, T52).
  */
 export function planRender({ clips, settings, sources }: Pick<MixProject, 'clips' | 'settings'> & { sources: Pick<MixSource, 'id' | 'width' | 'height'>[] }, { preview = false }: { preview?: boolean } = {}): RenderPlan {
   // E7 (T38b): the source sizes bound the extension beyond the max; the preview extends by the same source pixels
@@ -121,9 +121,11 @@ export function planRender({ clips, settings, sources }: Pick<MixProject, 'clips
   const { width, height } = getPreviewSize(settings.output);
   const output = getOutputSize(settings.output);
   const gap = scaleGap(settings.gap.width, Math.min(output.width, output.height), Math.min(width, height));
-  const axis = getDefaultAxis(output) ?? planMix(input).axis;
+  // G1 (T52): and the reorder window the final render's safety net picks, so the preview plays the same order
+  const final = planMixBest(input);
+  const axis = getDefaultAxis(output) ?? final.plan.axis;
   return {
-    ...cut(planMix({ ...input, settings: { ...input.settings, width, height, gap, axis } })),
+    ...cut(planMix({ ...input, settings: { ...input.settings, width, height, gap, axis, reorderWindow: final.reorderWindow, bestOfWindows: false } })),
     settings: { ...settings, fps: getPreviewFps(settings.fps), gap: { ...settings.gap, width: gap } },
     encoding: PREVIEW_ENCODING,
   };

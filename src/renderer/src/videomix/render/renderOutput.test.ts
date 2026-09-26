@@ -2,6 +2,9 @@ import path from 'node:path';
 import { describe, test, expect } from 'vitest';
 
 import { getDefaultOutputPath, getOrphanTempEntries, getOverlayTimesPlan, getPartialOutputPath, ORPHAN_TEMP_MAX_AGE_MS, getPreviewFps, getPreviewOutputPath, getPreviewSize, getRenderWarnings, getRenderWorkDir, planRender, scaleGap, withOutputExtension } from './renderOutput';
+import { planMixBest } from '../planner/planMix';
+import { getPlannerInput } from '../planner/plannerInput';
+import type { MixPlan } from '../planner/types';
 import { createEmptyMixProject } from '../types';
 import type { MixClip, MixProject } from '../types';
 
@@ -138,6 +141,25 @@ describe('planRender', () => {
       const final = planRender(square).plan;
       expect(planRender(square, { preview: true }).plan).toMatchObject({ width: 360, height: 360, axis: final.axis });
     }
+  });
+
+  test('preview: same reorder window as the final render\'s safety net (T52), so the same order', () => {
+    const project = testProject();
+    const sizes = [[1080, 1920], [1920, 1080], [720, 1080], [1080, 1080], [608, 1080], [1280, 1080]] as const;
+    let smaller = 0;
+    for (let seed = 1; seed <= 12; seed += 1) {
+      const clips = Array.from({ length: 14 }, (_v, i) => {
+        const [width, height] = sizes[(i * seed + seed) % sizes.length]!;
+        return clip(`c${i}`, 's1', width, height, 3 + ((i * 7 + seed * 3) % 17));
+      });
+      const unlimited = { clips, sources: project.sources, settings: { ...project.settings, reorderWindow: 'unlimited' as const } };
+      const input = getPlannerInput(unlimited);
+      const { reorderWindow } = planMixBest(input);
+      if (reorderWindow !== 'unlimited') smaller += 1;
+      const order = (plan: MixPlan) => plan.placements.map((pl) => pl.clipId);
+      expect(order(planRender(unlimited, { preview: true }).plan)).toEqual(order(planRender(unlimited).plan));
+    }
+    expect(smaller).toBeGreaterThan(0);
   });
 
   test('a fill warning of a vertical plan is about the height', () => {

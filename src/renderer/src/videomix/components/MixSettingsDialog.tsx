@@ -1,4 +1,4 @@
-import type { ChangeEventHandler, FocusEventHandler, FormEventHandler, KeyboardEventHandler, ReactNode } from 'react';
+import type { ChangeEventHandler, FocusEventHandler, KeyboardEventHandler, ReactNode } from 'react';
 import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FaRandom } from 'react-icons/fa';
@@ -12,8 +12,9 @@ import { formatDuration, parseDuration } from '../../util/duration';
 import type { EditOptions } from '../hooks/useMixProject';
 import useEncoderAvailability from '../hooks/useEncoderAvailability';
 import { getOutputSize, mixEncoderCodecs, mixEncoderHardware, mixFpsValues, mixOutputAspects, mixOutputResolutions, mixPresets, transitionTypes } from '../types';
-import type { MixEncoderCodec, MixEncoderHardware, MixMusicPlaylist, MixOutput, MixOutputAspect, MixOutputResolution, MixSettings, TransitionType } from '../types';
+import type { MixEncoderCodec, MixEncoderHardware, MixMusicPlaylist, MixOutput, MixOutputAspect, MixOutputResolution, MixPlanPriority, MixSettings, TransitionType } from '../types';
 import MixMusicSection from './MixMusicSection';
+import { ColorInput, RangeInput } from './TransientInputs';
 
 // E4: sensible starting point when the switch is turned on with no previous value.
 const DEFAULT_MAX_DURATION = 60;
@@ -161,12 +162,12 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ fps: Number(e.target.value) as MixSettings['fps'] });
   }, [onChange]);
 
-  const handleCrfInput = useCallback<FormEventHandler<HTMLInputElement>>((e) => {
-    onChange({ crf: Number(e.currentTarget.value) }, { transient: true });
+  const handleCrfInput = useCallback((crf: number) => {
+    onChange({ crf }, { transient: true });
   }, [onChange]);
 
-  const handleCrfCommit = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    onChange({ crf: Number(e.target.value) });
+  const handleCrfCommit = useCallback((crf: number) => {
+    onChange({ crf });
   }, [onChange]);
 
   const handlePresetChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
@@ -181,16 +182,24 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ gap: { ...settings.gap, width: toEvenNonNegative(Number(e.target.value)) } });
   }, [onChange, settings.gap]);
 
-  const handleGapColorChange = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    onChange({ gap: { ...settings.gap, color: e.target.value } });
+  const handleGapColorInput = useCallback((color: string) => {
+    onChange({ gap: { ...settings.gap, color } }, { transient: true });
+  }, [onChange, settings.gap]);
+
+  const handleGapColorCommit = useCallback((color: string) => {
+    onChange({ gap: { ...settings.gap, color } });
   }, [onChange, settings.gap]);
 
   const handleFillModeChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
     onChange({ fill: { ...settings.fill, mode: e.target.value as MixSettings['fill']['mode'] } });
   }, [onChange, settings.fill]);
 
-  const handleFillColorChange = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    onChange({ fill: { ...settings.fill, color: e.target.value } });
+  const handleFillColorInput = useCallback((color: string) => {
+    onChange({ fill: { ...settings.fill, color } }, { transient: true });
+  }, [onChange, settings.fill]);
+
+  const handleFillColorCommit = useCallback((color: string) => {
+    onChange({ fill: { ...settings.fill, color } });
   }, [onChange, settings.fill]);
 
   // A7 (T47): on by default (01-requisitos §12)
@@ -227,6 +236,11 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ reorderWindow: checked === true ? 'unlimited' : lastReorderWindow });
   }, [lastReorderWindow, onChange]);
 
+  // G2 (T52): what makes a plan better when the planner compares its candidates
+  const handlePlanPriorityChange = useCallback<ChangeEventHandler<HTMLSelectElement>>((e) => {
+    onChange({ planPriority: e.target.value as MixPlanPriority });
+  }, [onChange]);
+
   // E2 (T39): automatic links between clips of a source. Local draft while the field is edited (it may be empty for a
   // moment); each valid number (≥ 0 s) is applied
   const [maxGapText, setMaxGapText] = useState<string>();
@@ -246,12 +260,12 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
     onChange({ transition: { ...settings.transition, type: e.target.value as TransitionType } });
   }, [onChange, settings.transition]);
 
-  const handleTransitionDurationInput = useCallback<FormEventHandler<HTMLInputElement>>((e) => {
-    onChange({ transition: { ...settings.transition, duration: Number(e.currentTarget.value) } }, { transient: true });
+  const handleTransitionDurationInput = useCallback((duration: number) => {
+    onChange({ transition: { ...settings.transition, duration } }, { transient: true });
   }, [onChange, settings.transition]);
 
-  const handleTransitionDurationCommit = useCallback<ChangeEventHandler<HTMLInputElement>>((e) => {
-    onChange({ transition: { ...settings.transition, duration: Number(e.target.value) } });
+  const handleTransitionDurationCommit = useCallback((duration: number) => {
+    onChange({ transition: { ...settings.transition, duration } });
   }, [onChange, settings.transition]);
 
   const handleFadeInOutChange = useCallback((checked: boolean) => {
@@ -300,7 +314,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
             {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
             <label style={rowStyle}>
               {t('Quality (CRF)')}: {settings.crf}<br />
-              <input type="range" min={0} max={51} step={1} style={{ width: '100%' }} value={settings.crf} onInput={handleCrfInput} onChange={handleCrfCommit} />
+              <RangeInput min={0} max={51} step={1} style={{ width: '100%' }} value={settings.crf} onInput={handleCrfInput} onCommit={handleCrfCommit} />
               <div style={detailsStyle}>{t('Lower is higher quality and a larger file. 18–23 is typically visually lossless.')}</div>
             </label>
 
@@ -381,7 +395,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
               {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
               <label>
                 {t('Gap color')}<br />
-                <input type="color" value={settings.gap.color} onChange={handleGapColorChange} />
+                <ColorInput value={settings.gap.color} onInput={handleGapColorInput} onCommit={handleGapColorCommit} />
               </label>
             </div>
 
@@ -397,7 +411,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
               {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
               <label>
                 {t('Fill color')}<br />
-                <input type="color" disabled={settings.fill.mode !== 'color'} value={settings.fill.color} onChange={handleFillColorChange} />
+                <ColorInput disabled={settings.fill.mode !== 'color'} value={settings.fill.color} onInput={handleFillColorInput} onCommit={handleFillColorCommit} />
               </label>
             </div>
 
@@ -442,6 +456,23 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
                   : t('How far a clip may move from its position in the list to fit the layout.')}
               </div>
             </div>
+
+            {/* G2 (T52) */}
+            <div style={rowStyle}>
+              {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
+              <label>
+                {t('Prioritize')}<br />
+                <Select value={settings.planPriority} onChange={handlePlanPriorityChange}>
+                  <option value="duration">{t('Shortest video')}</option>
+                  <option value="fill">{t('Least fill')}</option>
+                </Select>
+              </label>
+              <div style={detailsStyle}>
+                {settings.planPriority === 'fill'
+                  ? t('The plan with the least fill wins, then the shortest one, the one closest to the list order and the one with fewer layout changes. Plans with smaller reorder windows are tried too.')
+                  : t('The shortest plan wins, then the one with the least fill, the one closest to the list order and the one with fewer layout changes. Plans with smaller reorder windows are tried too.')}
+              </div>
+            </div>
           </Section>
 
           {/* E2 (T39) */}
@@ -480,7 +511,7 @@ function MixSettingsDialog({ open, onOpenChange, settings, onChange }: {
             {/* eslint-disable-next-line jsx-a11y/label-has-associated-control */}
             <label style={rowStyle}>
               {t('Transition duration')}: {t('{{seconds}}s', { seconds: settings.transition.duration.toFixed(1) })}<br />
-              <input type="range" min={0.1} max={2} step={0.1} style={{ width: '100%' }} value={settings.transition.duration} onInput={handleTransitionDurationInput} onChange={handleTransitionDurationCommit} />
+              <RangeInput min={0.1} max={2} step={0.1} style={{ width: '100%' }} value={settings.transition.duration} onInput={handleTransitionDurationInput} onCommit={handleTransitionDurationCommit} />
             </label>
 
             <div style={inlineRowStyle}>

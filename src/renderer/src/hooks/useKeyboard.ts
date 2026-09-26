@@ -4,12 +4,13 @@ import type { KeyBinding, KeyboardAction } from '../../../common/types';
 import { allModifiers, altModifiers, controlModifiers, metaModifiers, shiftModifiers } from '../util';
 import type { KeyboardLayoutMap } from '../types';
 import isDev from '../isDev';
+import { isShortcutKeptByFocus } from '../util/shortcutFocus';
 
 
 /* Keyboard testing points (when making large changes):
 - ctrl/cmd + c/v should work in inputs
-- Keyboard actions should not trigger when focus is inside a dialog, or when focusing inputs, switches etc.
-- Clicking on the video are or some empty portions of the app should focus the document body again (to allow keyboard shortcuts to work)
+- Keyboard actions should not trigger when focus is inside a dialog, or when focusing text inputs
+- Keyboard actions should trigger with the focus on a button, except Space/Enter, which activate the button (T51)
 - Test different keyboard layout: chinese, french. should work because the key code is the same.
 - Reset LosslessCut settings (delete config.json file to get the default keyboard layout)
 - Go to timecode (`g` shortcut): shouldn't insert the letter `g` into input box. This also applies to all the detect* actions
@@ -53,23 +54,12 @@ export default ({ keyBindings, keyUpActions, getKeyboardAction, closeExportConfi
       }
     }
 
-    // From now on, only handle key events when focus is on document body
-    // because we don't allow focus to anything else
-    // except for inputs, buttons, dialogs etc, which we want allowed to handle keys normally.
-    if (e.target !== document.body) {
+    // G4 (T51): handle key events with the focus anywhere (e.g. on a button that was just clicked), except where the
+    // focused element keeps the key for itself: text entry, dialogs, menus, Space/Enter on buttons… (see shortcutFocus.ts)
+    const { target } = e;
+    if ((target instanceof HTMLElement || target instanceof SVGElement) && isShortcutKeptByFocus(target, e)) {
       return;
     }
-    // Alternatively, this is how mousetrap does it:
-    // ignore when focus is inside inputs / textareas / selects / contentEditable,
-    // including elements inside shadow DOM. use composedPath() when available.
-    /* const path = (typeof e.composedPath === 'function' ? e.composedPath() : [e.target]) as EventTarget[];
-    const isEditableInPath = path.some((node) => {
-      if (!(node instanceof Element)) return false;
-      const tag = node.tagName;
-      return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || (node as HTMLElement).isContentEditable;
-    });
-    if (isEditableInPath) return;
-    */
 
     // run main actions
     const matchingFn = action && getKeyboardAction(action);

@@ -31,6 +31,8 @@ const settings = (overrides: Partial<PlannerSettings> = {}): PlannerSettings => 
   reorderWindow: 3,
   order: { mode: 'list', seed: 0 },
   transitionDuration: 0.5,
+  // T52: the planner with this one window (the safety net over several windows is tested in safetyNet.test.ts)
+  bestOfWindows: false,
   ...overrides,
 });
 

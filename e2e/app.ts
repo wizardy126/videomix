@@ -148,8 +148,12 @@ export async function screenshot(page: Page, name: string) {
   await page.screenshot({ path: join(screenshotsDir, `${name}.png`) });
 }
 
-/** Presses a key with the focus on the body, where the app's keyboard shortcuts are handled. */
-export async function pressShortcut(page: Page, key: string) {
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+/**
+ * Presses an app keyboard shortcut with the focus where it is, like a user would (G4, T51: the shortcuts work with the
+ * focus anywhere but in text fields, dialogs and menus). `blur` first moves the focus to the body: only for a key a
+ * focused element keeps for itself (Space/Enter on a button, arrows on a slider…).
+ */
+export async function pressShortcut(page: Page, key: string, { blur = false }: { blur?: boolean } = {}) {
+  if (blur) await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press(key);
 }

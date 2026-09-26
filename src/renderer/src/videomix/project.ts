@@ -37,6 +37,8 @@ const migrations: Record<number, (json: Record<string, unknown>) => Record<strin
   3: (json) => ({ ...json, version: 4 }),
   // v5 (T44): additive too (MixClip.keyframes, MixSource.blackBars, settings.autoCropBlackBars from the defaults: on)
   4: (json) => ({ ...json, version: 5 }),
+  // v6 (T52): additive (settings.planPriority from the defaults: duration)
+  5: (json) => ({ ...json, version: 6 }),
 };
 
 /**

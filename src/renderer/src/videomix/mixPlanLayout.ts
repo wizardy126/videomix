@@ -1,8 +1,8 @@
 import type { ColumnPlacement, MixPlan, PlanWarning } from './planner/types';
 
-// Pure layout helpers for the mix timeline view (T15, components/MixPlanView.tsx): which lane a column sits in, the
-// gaps in a lane's timeline that show as fill, time↔percent mapping for the time axis and hit testing. No React, so
-// they can be unit tested directly.
+// Pure layout helpers for the mix timeline view (T15, components/MixPlanView.tsx): which lane a column sits in (G3, T53:
+// columns that don't coincide in time share one), the gaps in a lane's timeline that show as fill, time↔percent mapping
+// for the time axis and hit testing. No React, so they can be unit tested directly.
 
 interface TimeSpan { from: number, to: number }
 
@@ -17,17 +17,6 @@ function mergeSpans(spans: TimeSpan[]): TimeSpan[] {
     else merged.push({ ...span });
   });
   return merged;
-}
-
-/** Column ids in top-to-bottom lane order: by the `x` of their first appearance in the plan's layouts. */
-export function getLaneColumns(plan: Pick<MixPlan, 'layouts'>): number[] {
-  const firstX = new Map<number, number>();
-  plan.layouts.forEach((layout) => {
-    layout.columns.forEach((c) => {
-      if (!firstX.has(c.column)) firstX.set(c.column, c.x);
-    });
-  });
-  return [...firstX.entries()].sort(([, ax], [, bx]) => ax - bx).map(([id]) => id);
 }
 
 /**
@@ -63,6 +52,70 @@ export function getColumnFillSpans(plan: Pick<MixPlan, 'layouts' | 'duration' | 
   return gaps;
 }
 
+/** Time span a column occupies in the view: while it's in the layout, and until its last clip ends (a removed column shrinks while its last clip plays). */
+function getColumnSpan(plan: Pick<MixPlan, 'layouts' | 'duration' | 'placements'>, column: number): TimeSpan | undefined {
+  const spans = [
+    ...getColumnExistenceSpans(plan, column),
+    ...plan.placements.filter((p) => p.column === column).map((p): TimeSpan => ({ from: p.startTime, to: p.endTime })),
+  ];
+  if (spans.length === 0) return undefined;
+  return { from: Math.min(...spans.map((s) => s.from)), to: Math.max(...spans.map((s) => s.to)) };
+}
+
+/**
+ * G3 (T53): the lanes of the Mix view, top to bottom, each with the column ids it shows. The planner gives a new id to
+ * every column it opens later, so a lane per id gave a lane per re-layout. Columns that don't coincide in time share a
+ * lane, so there are as many lanes as columns at once (greedy interval colouring in start order, which is optimal).
+ * Among the free lanes a new column takes one between the lanes of its neighbours at its first keyframe, so that at
+ * each instant the top lane is, as far as possible, the leftmost column (topmost row); a new lane is inserted there.
+ */
+export function getMixLanes(plan: Pick<MixPlan, 'layouts' | 'duration' | 'placements'>): number[][] {
+  // First keyframe (and x) of each column; columns that start together are taken left to right
+  const first = new Map<number, { layout: MixPlan['layouts'][number], x: number }>();
+  plan.layouts.forEach((layout) => layout.columns.forEach((c) => {
+    if (!first.has(c.column)) first.set(c.column, { layout, x: c.x });
+  }));
+  const columns = [...new Set([...first.keys(), ...plan.placements.map((p) => p.column)])].flatMap((column) => {
+    const span = getColumnSpan(plan, column);
+    return span != null ? [{ column, span, x: first.get(column)?.x ?? Infinity }] : [];
+  }).sort((a, b) => a.span.from - b.span.from || a.x - b.x || a.column - b.column);
+
+  // Lanes in their visual order, each with its columns and the end of its last one
+  const lanes: { columns: number[], to: number }[] = [];
+  const laneOfColumn = new Map<number, { columns: number[], to: number }>();
+
+  columns.forEach(({ column, span, x }) => {
+    const laneIndexOf = (other: number) => {
+      const lane = laneOfColumn.get(other);
+      return lane != null ? lanes.indexOf(lane) : -1;
+    };
+    // Neighbours: the columns beside it in its first keyframe that already have a lane
+    const neighbours = first.get(column)?.layout.columns.filter((c) => c.column !== column && laneOfColumn.has(c.column)) ?? [];
+    const above = Math.max(-1, ...neighbours.filter((c) => c.x < x).map((c) => laneIndexOf(c.column)));
+    const below = Math.min(lanes.length, ...neighbours.filter((c) => c.x > x).map((c) => laneIndexOf(c.column)));
+
+    const free = lanes.map((lane, i) => ({ lane, i })).filter(({ lane }) => lane.to <= span.from + EPS);
+    // distance to the range between its neighbours (0 inside it); the topmost lane on a tie
+    const distance = (i: number) => (i <= above ? above + 1 - i : (i >= below ? i - below + 1 : 0));
+    const best = free.sort((a, b) => distance(a.i) - distance(b.i) || a.i - b.i)[0];
+
+    let lane: { columns: number[], to: number };
+    if (best != null) {
+      ({ lane } = best);
+    } else {
+      // every lane is busy: a new one, right above the neighbour below (the columns being removed by this re-layout
+      // aren't in its keyframe: the new one goes below them)
+      lane = { columns: [], to: 0 };
+      lanes.splice(Math.max(above + 1, below), 0, lane);
+    }
+    lane.columns.push(column);
+    lane.to = Math.max(lane.to, span.to);
+    laneOfColumn.set(column, lane);
+  });
+
+  return lanes.map((lane) => lane.columns);
+}
+
 /** Percent (0–100) of `time` along `[0, duration]`, clamped. */
 export function timeToPercent(time: number, duration: number): number {
   if (duration <= 0) return 0;
@@ -83,9 +136,9 @@ export function getPlacementWarnings(plan: Pick<MixPlan, 'warnings'>, placement:
   });
 }
 
-/** Placement of `laneColumns[laneIndex]` active at `time`, if any (hit testing a click on the lanes area). */
-export function getPlacementAt(plan: Pick<MixPlan, 'placements'>, laneColumns: number[], laneIndex: number, time: number): ColumnPlacement | undefined {
-  const column = laneColumns[laneIndex];
-  if (column == null) return undefined;
-  return plan.placements.find((p) => p.column === column && time >= p.startTime && time < p.endTime);
+/** Placement of a column of `lanes[laneIndex]` active at `time`, if any (hit testing a click on the lanes area). */
+export function getPlacementAt(plan: Pick<MixPlan, 'placements'>, lanes: number[][], laneIndex: number, time: number): ColumnPlacement | undefined {
+  const columns = lanes[laneIndex];
+  if (columns == null) return undefined;
+  return plan.placements.find((p) => columns.includes(p.column) && time >= p.startTime && time < p.endTime);
 }

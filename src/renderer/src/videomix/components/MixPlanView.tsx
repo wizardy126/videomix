@@ -1,8 +1,8 @@
-import type { CSSProperties, MouseEventHandler, PointerEvent as ReactPointerEvent, PointerEventHandler, ReactNode } from 'react';
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, MouseEventHandler, PointerEvent as ReactPointerEvent, PointerEventHandler, ReactNode, RefObject } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { FaCut, FaExclamationTriangle, FaEye, FaFont, FaImage, FaLink, FaPlus, FaStopwatch, FaThumbtack, FaVolumeUp } from 'react-icons/fa';
+import { FaCut, FaExclamationTriangle, FaEye, FaFont, FaImage, FaLink, FaPlus, FaSearchMinus, FaSearchPlus, FaStopwatch, FaThumbtack, FaVolumeUp } from 'react-icons/fa';
 import { MdLinearScale, MdOpenInFull } from 'react-icons/md';
 
 import { useSegColors } from '../../contexts';
@@ -14,7 +14,8 @@ import { getCellRect } from '../geometry';
 import { getPlanAxis } from '../planner/types';
 import type { ColumnPlacement, MixPlan, PlanWarning } from '../planner/types';
 import { getColumnsAtFrame, getFillSpansAtFrame, getRenderTimeline } from '../render/renderTimeline';
-import { getColumnFillSpans, getLaneColumns, getPlacementAt, getPlacementWarnings, timeToPercent } from '../mixPlanLayout';
+import { getColumnFillSpans, getMixLanes, getPlacementAt, getPlacementWarnings, timeToPercent } from '../mixPlanLayout';
+import { clampMixZoom, getAnchoredScrollLeft, getFollowScrollLeft, getMaxMixZoom, getTimeTicks, getWheelPixels, getWheelZoomFactor, MIX_ZOOM_STEP } from '../mixPlanZoom';
 import type { UseMixOverlays } from '../hooks/useMixOverlays';
 import type { MissingOverlayFile } from '../projectFile';
 import type { DragHandle } from '../overlayMath';
@@ -37,10 +38,13 @@ const { pathToFileURL } = window.require('@electron/remote').require('./index.js
 // T22 adds the overlay lanes (images, countdowns/bars, sounds) with draggable blocks, the Mix view cursor where new
 // overlays are added, and the overlay boxes on the mini frame, which can be moved/resized there.
 // T26 adds the texts (in the countdowns/bars lane), drawn on the mini frame with their fades and entry animation.
+// T53: columns that don't coincide in time share a lane (G3), and the lanes zoom and scroll horizontally (A3), with a
+// time axis above them.
 
 const LANE_HEIGHT = 22;
 const OVERLAY_ROW_HEIGHT = 16;
 const MAX_LANES_HEIGHT = 170;
+const TIME_AXIS_HEIGHT = 14;
 /** The mini frame fits in this box with the output's aspect: 192×108 in 16:9, 84×150 in 9:16, 150×150 in 1:1. */
 const FRAME_MAX_WIDTH = 192;
 const FRAME_MAX_HEIGHT = 150;
@@ -63,6 +67,8 @@ const overlayColors: Record<MixOverlay['type'], string> = {
   sound: 'var(--purple-9)',
   text: 'var(--amber-9)',
 };
+
+const disabledButtonStyle: CSSProperties = { opacity: 0.5, cursor: 'default' };
 
 const toolbarButtonStyle: CSSProperties = { font: 'inherit', fontSize: '.75em', padding: '.1em .5em', border: '1px solid var(--gray-7)', borderRadius: '.3em', background: 'var(--gray-3)', color: 'var(--gray-12)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '.3em', whiteSpace: 'nowrap' };
 
@@ -150,6 +156,7 @@ const Block = memo(({ placement, clip, laneWidthPercent, color, name, thumbnailU
       data-clip-id={placement.clipId}
       data-sequence={sequenceIndex != null ? sequenceIndex + 1 : undefined}
       data-linked={linked || undefined}
+      data-selected={isSelected || undefined}
       title={[
         `${name}${pinned ? ` — ${t('Pinned')}` : ''}${warnings.length > 0 ? ` — ${warningTooltip(t, warnings, rows)}` : ''}`,
         ...(sequenceIndex != null ? [t('Always-visible sequence, number {{number}}', { number: sequenceIndex + 1 })] : []),
@@ -381,6 +388,55 @@ const FramePreview = memo(({ plan, tl, time, clipsById, getColor, children }: {
   );
 });
 
+/**
+ * Time axis above the lanes (A3, T53), with the cursor. Only the ticks of the visible range are drawn (a zoomed axis
+ * can be very wide), so it follows the scroller's scroll and size itself instead of re-rendering the whole view.
+ */
+// eslint-disable-next-line react/display-name
+const TimeAxis = memo(({ scrollerRef, duration, zoom, cursorTime, onPointerDown }: {
+  scrollerRef: RefObject<HTMLDivElement | null>,
+  duration: number,
+  zoom: number,
+  cursorTime: number,
+  onPointerDown: PointerEventHandler<HTMLDivElement>,
+}) => {
+  const [view, setView] = useState({ scrollLeft: 0, width: 0 });
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (el == null) return undefined;
+    const update = () => setView((v) => (v.scrollLeft === el.scrollLeft && v.width === el.clientWidth ? v : { scrollLeft: el.scrollLeft, width: el.clientWidth }));
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener('scroll', update);
+      observer.disconnect();
+    };
+  }, [scrollerRef]);
+
+  const pixelsPerSecond = duration > 0 ? (view.width * zoom) / duration : 0;
+  // a label starts at its tick: include the one just before the visible range
+  const { ticks } = getTimeTicks({ duration, pixelsPerSecond, from: pixelsPerSecond > 0 ? view.scrollLeft / pixelsPerSecond - 60 / pixelsPerSecond : 0, to: pixelsPerSecond > 0 ? (view.scrollLeft + view.width) / pixelsPerSecond : 0 });
+
+  return (
+    <div
+      role="presentation"
+      data-testid="mix-time-axis"
+      onPointerDown={onPointerDown}
+      className="no-user-select"
+      style={{ position: 'sticky', top: 0, zIndex: 2, height: TIME_AXIS_HEIGHT, background: controlsBackground, borderBottom: '1px solid var(--gray-6)', overflow: 'hidden', cursor: 'pointer' }}
+    >
+      {ticks.map((time) => (
+        <div key={time} data-testid="mix-time-tick" style={{ position: 'absolute', left: `${timeToPercent(time, duration)}%`, bottom: 0, height: TIME_AXIS_HEIGHT, borderLeft: '1px solid var(--gray-8)', paddingLeft: 2, fontSize: 9, lineHeight: `${TIME_AXIS_HEIGHT - 2}px`, color: 'var(--gray-11)', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+          {formatDuration({ seconds: time, shorten: true })}
+        </div>
+      ))}
+      <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${timeToPercent(cursorTime, duration)}%`, width: 1, background: 'var(--red-9)', pointerEvents: 'none' }} />
+    </div>
+  );
+});
+
 interface BlockDrag { pointerId: number, mode: BlockDragMode, startX: number, axisWidth: number, start: MixOverlay, rawStart: number, moved: boolean }
 interface BoxDrag { pointerId: number, handle: DragHandle, startX: number, startY: number, scale: number, start: Exclude<MixOverlay, { type: 'sound' }>, moved: boolean }
 
@@ -407,7 +463,8 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
   const clipsById = useMemo(() => new Map(clips.map((clip) => [clip.id, clip])), [clips]);
   const getColor = useCallback((clip: MixClip) => getSegColor({ segColorIndex: clip.color }).desaturate(0.1).lightness(darkMode ? 40 : 55).string(), [darkMode, getSegColor]);
 
-  const laneColumns = useMemo(() => (plan != null ? getLaneColumns(plan) : []), [plan]);
+  // G3 (T53): columns that don't coincide in time share a lane
+  const lanes = useMemo(() => (plan != null ? getMixLanes(plan) : []), [plan]);
   const relayouts = useMemo(() => (plan != null ? plan.layouts.filter((l) => l.transitionDuration > 0) : []), [plan]);
 
   // E4 (T39): the plan is cut at the maximum duration
@@ -482,9 +539,9 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
       justDraggedRef.current = false;
       return;
     }
-    const placement = getPlacementAt(plan, laneColumns, laneIndex, timeAtClientX(e.clientX));
+    const placement = getPlacementAt(plan, lanes, laneIndex, timeAtClientX(e.clientX));
     if (placement != null) onSelect(placement.clipId, getClipSelectModifiers(e));
-  }, [laneColumns, onSelect, plan, timeAtClientX]);
+  }, [lanes, onSelect, plan, timeAtClientX]);
 
   const handleOverlayLaneClick = useCallback(() => setSelectedOverlayId(undefined), [setSelectedOverlayId]);
 
@@ -578,11 +635,79 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
     if (drag.moved) cancelTransient();
   }, [cancelTransient]);
 
+  // A3 (T53): zoom (session only, not in the project) and horizontal scroll. The lanes (`lanesRef`) are `zoom` times
+  // as wide as the scroller, so every position stays a percentage of the duration and the hit testing/drags don't change.
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const duration = plan?.duration ?? 0;
+  const [zoomState, setZoom] = useState(1);
+  const zoom = clampMixZoom(zoomState, duration);
+  const maxZoom = getMaxMixZoom(duration);
+  /** Time to keep under `anchorX` (px from the scroller's left) once the new zoom is laid out. */
+  const zoomAnchorRef = useRef<{ time: number, anchorX: number }>(undefined);
+
+  const zoomBy = useCallback((factor: number, clientX?: number) => {
+    const el = scrollerRef.current;
+    if (el == null) return;
+    const newZoom = clampMixZoom(zoom * factor, duration);
+    if (newZoom === zoom) return;
+    const rect = el.getBoundingClientRect();
+    // centred on the mouse, or on the middle of the view (buttons)
+    const anchorX = clientX != null ? clientX - rect.left : el.clientWidth / 2;
+    zoomAnchorRef.current = { time: timeAtClientX(rect.left + anchorX), anchorX };
+    setZoom(newZoom);
+  }, [duration, timeAtClientX, zoom]);
+
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current;
+    const el = scrollerRef.current;
+    const lanesEl = lanesRef.current;
+    zoomAnchorRef.current = undefined;
+    if (anchor == null || el == null || lanesEl == null) return;
+    el.scrollLeft = getAnchoredScrollLeft({ ...anchor, duration, contentWidth: lanesEl.offsetWidth, viewportWidth: el.clientWidth });
+  }, [duration, zoom]);
+
+  const handleZoomIn = useCallback(() => zoomBy(MIX_ZOOM_STEP), [zoomBy]);
+  const handleZoomOut = useCallback(() => zoomBy(1 / MIX_ZOOM_STEP), [zoomBy]);
+  const handleZoomFit = useCallback(() => setZoom(1), []);
+
+  // Ctrl + wheel zooms on the mouse; the wheel (or Shift + wheel) scrolls sideways once zoomed. Not zoomed, the wheel
+  // keeps its default (the lanes' vertical scroll). A native listener: React's wheel listeners are passive.
+  const hasPlan = plan != null;
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (el == null) return undefined;
+    const handleWheel = (e: WheelEvent) => {
+      const { x, y } = getWheelPixels(e);
+      if (e.ctrlKey) {
+        e.preventDefault();
+        zoomBy(getWheelZoomFactor(y), e.clientX);
+        return;
+      }
+      if (el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollLeft += x + y;
+    };
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheel);
+  }, [hasPlan, zoomBy]);
+
+  // Zoomed, the view follows the cursor when it moves out of sight (playing the live preview moves it)
+  const followedCursorRef = useRef(cursorTime);
+  useLayoutEffect(() => {
+    if (followedCursorRef.current === cursorTime) return;
+    followedCursorRef.current = cursorTime;
+    const el = scrollerRef.current;
+    const lanesEl = lanesRef.current;
+    if (el == null || lanesEl == null) return;
+    const scrollLeft = getFollowScrollLeft({ time: cursorTime, duration, contentWidth: lanesEl.offsetWidth, viewportWidth: el.clientWidth, scrollLeft: el.scrollLeft });
+    if (scrollLeft != null) el.scrollLeft = scrollLeft;
+  }, [cursorTime, duration]);
+
   const frameTime = hoverTime ?? cursorTime;
   const frameBoxes = useMemo(() => getOverlayFrameBoxes(overlays, resolved, frameTime, selectedOverlayId), [frameTime, overlays, resolved, selectedOverlayId]);
   const selectedFrameBox = frameBoxes.find((b) => b.overlay.id === selectedOverlayId);
 
-  const clipLanesHeight = Math.max(LANE_HEIGHT, laneColumns.length * LANE_HEIGHT);
+  const clipLanesHeight = Math.max(LANE_HEIGHT, lanes.length * LANE_HEIGHT);
   // Overlay lanes go below the clip lanes, each as tall as its rows (+1 px border)
   const overlayLaneTops = overlayLanes.map((_, i) => clipLanesHeight + overlayLanes.slice(0, i).reduce((acc, lane) => acc + lane.rows * OVERLAY_ROW_HEIGHT + 1, 0));
   const overlayLanesHeight = overlayLanes.reduce((acc, lane) => acc + lane.rows * OVERLAY_ROW_HEIGHT + 1, 0);
@@ -654,119 +779,132 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
           <span style={{ fontSize: '.7em', opacity: 0.7, marginLeft: truncated != null ? undefined : 'auto' }} title={t('New overlays are added at the cursor. Click on the lanes to move it.')}>
             {t('Cursor: {{time}}', { time: formatDuration({ seconds: cursorTime, shorten: true }) })}
           </span>
+          {/* A3 (T53) */}
+          <span style={{ display: 'inline-flex', gap: '.2em' }}>
+            <button type="button" data-testid="mix-zoom-out" style={{ ...toolbarButtonStyle, ...(zoom <= 1 && disabledButtonStyle) }} disabled={zoom <= 1} onClick={handleZoomOut} title={t('Zoom out (Ctrl + mouse wheel)')}><FaSearchMinus /></button>
+            <button type="button" data-testid="mix-zoom-in" style={{ ...toolbarButtonStyle, ...(zoom >= maxZoom && disabledButtonStyle) }} disabled={zoom >= maxZoom} onClick={handleZoomIn} title={t('Zoom in (Ctrl + mouse wheel)')}><FaSearchPlus /></button>
+            <button type="button" data-testid="mix-zoom-fit" style={{ ...toolbarButtonStyle, ...(zoom <= 1 && disabledButtonStyle) }} disabled={zoom <= 1} onClick={handleZoomFit} title={t('Fit the whole mix in the view')}>{t('Fit')}</button>
+          </span>
         </div>
 
-        <div style={{ overflowY: 'auto', maxHeight: MAX_LANES_HEIGHT }} className="consistent-scrollbar">
-          <div
-            ref={lanesRef}
-            role="presentation"
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-            onPointerDown={handleLanesPointerDown}
-            style={{ position: 'relative', height: clipLanesHeight + overlayLanesHeight, background: timelineBackground }}
-          >
-            {relayouts.map((layout) => (
-              <div
-                key={layout.time}
-                style={{ ...relayoutBandStyle, height: clipLanesHeight, left: `${timeToPercent(layout.time, plan.duration)}%`, width: `${timeToPercent(layout.time + layout.transitionDuration, plan.duration) - timeToPercent(layout.time, plan.duration)}%` }}
-              />
-            ))}
-
-            {laneColumns.map((column, laneIndex) => (
-              <div
-                key={column}
-                role="button"
-                tabIndex={-1}
-                onClick={handleLaneClick(laneIndex)}
-                style={{ position: 'absolute', top: laneIndex * LANE_HEIGHT, left: 0, right: 0, height: LANE_HEIGHT, borderBottom: '1px solid var(--gray-6)', cursor: 'pointer' }}
-              >
-                {getColumnFillSpans(plan, column).map((span) => (
-                  <div
-                    key={`${span.from}-${span.to}`}
-                    style={{ ...fillStyle, left: `${timeToPercent(span.from, plan.duration)}%`, width: `${timeToPercent(span.to, plan.duration) - timeToPercent(span.from, plan.duration)}%` }}
-                  />
-                ))}
-
-                {plan.placements.filter((p) => p.column === column).map((placement) => {
-                  const clip = clipsById.get(placement.clipId);
-                  const dragging = clipDrag?.clipId === placement.clipId;
-                  // a dragged block follows the pointer (it may go past the end of the video)
-                  const start = dragging ? clipDrag.time : placement.startTime;
-                  const left = timeToPercent(start, plan.duration);
-                  const width = (Math.max(0, placement.endTime - placement.startTime) / Math.max(plan.duration, 1e-9)) * 100;
-                  return (
-                    <Block
-                      key={placement.clipId}
-                      placement={placement}
-                      clip={clip}
-                      laneWidthPercent={{ left, width }}
-                      color={clip != null ? getColor(clip) : 'var(--gray-8)'}
-                      name={clip?.name ?? placement.clipId}
-                      thumbnailUrl={thumbnailUrls.get(placement.clipId)}
-                      warnings={getPlacementWarnings(plan, placement)}
-                      isSelected={clipPins.selectedClipIds.has(placement.clipId)}
-                      rows={getPlanAxis(plan) === 'rows'}
-                      pinned={clipPins.pinTimes.has(placement.clipId)}
-                      groupColor={clip?.groupId != null ? clipPins.groupColors.get(clip.groupId) : undefined}
-                      linked={clipPins.linkInfos.get(placement.clipId)?.linked === true}
-                      sequenceIndex={clipPins.sequenceIndexes.get(placement.clipId)}
-                      dragging={dragging}
-                      openClipMenu={clipPins.openClipMenu}
-                      onPointerDown={handleClipPointerDown}
-                      onPointerMove={handleClipPointerMove}
-                      onPointerUp={handleClipPointerUp}
-                      onPointerCancel={handleClipPointerCancel}
-                    />
-                  );
-                })}
-              </div>
-            ))}
-
-            {overlayLanes.map((lane, laneIndex) => {
-              const top = overlayLaneTops[laneIndex] ?? 0;
-              const height = lane.rows * OVERLAY_ROW_HEIGHT;
-              return (
+        <div ref={scrollerRef} data-testid="mix-lanes-scroller" data-zoom={zoom} style={{ overflow: 'auto', maxHeight: MAX_LANES_HEIGHT + TIME_AXIS_HEIGHT }} className="consistent-scrollbar">
+          <div style={{ width: `${zoom * 100}%` }}>
+            <TimeAxis scrollerRef={scrollerRef} duration={plan.duration} zoom={zoom} cursorTime={cursorTime} onPointerDown={handleLanesPointerDown} />
+            <div
+              ref={lanesRef}
+              data-testid="mix-lanes"
+              role="presentation"
+              onMouseMove={handleMouseMove}
+              onMouseLeave={handleMouseLeave}
+              onPointerDown={handleLanesPointerDown}
+              // blocks past the end (an overlay outside the video, a dragged clip) don't widen the scrolled area
+              style={{ position: 'relative', height: clipLanesHeight + overlayLanesHeight, background: timelineBackground, overflow: 'hidden' }}
+            >
+              {relayouts.map((layout) => (
                 <div
-                  key={lane.lane}
+                  key={layout.time}
+                  style={{ ...relayoutBandStyle, height: clipLanesHeight, left: `${timeToPercent(layout.time, plan.duration)}%`, width: `${timeToPercent(layout.time + layout.transitionDuration, plan.duration) - timeToPercent(layout.time, plan.duration)}%` }}
+                />
+              ))}
+
+              {lanes.map((columns, laneIndex) => (
+                <div
+                  key={columns[0]}
                   role="button"
                   tabIndex={-1}
-                  onClick={handleOverlayLaneClick}
-                  style={{ position: 'absolute', top, left: 0, right: 0, height, borderBottom: '1px solid var(--gray-6)', background: 'var(--gray-a2)' }}
+                  data-testid="mix-lane"
+                  data-columns={columns.join(',')}
+                  onClick={handleLaneClick(laneIndex)}
+                  style={{ position: 'absolute', top: laneIndex * LANE_HEIGHT, left: 0, right: 0, height: LANE_HEIGHT, borderBottom: '1px solid var(--gray-6)', cursor: 'pointer' }}
                 >
-                  <div className="no-user-select" style={{ position: 'absolute', left: '.3em', top: 0, height: OVERLAY_ROW_HEIGHT, display: 'flex', alignItems: 'center', fontSize: '.65em', color: 'var(--gray-11)', pointerEvents: 'none', opacity: 0.8 }}>
-                    {getOverlayLaneLabel(lane.lane)}
-                  </div>
-                  {lane.items.map((item) => {
-                    const overlay = overlaysById.get(item.overlayId);
-                    if (overlay == null) return null;
-                    const warnings = resolved.get(overlay.id)?.warnings ?? [];
-                    const missing = missingOverlayIds.has(overlay.id);
-                    const tooltipLines = [overlay.name, ...(missing ? [t('File not found')] : []), ...warnings.map((w) => getOverlayTimeWarningText(w))];
-                    // a bar linked to a countdown takes its times from it
-                    const linked = getLinkedCountdown(overlay, overlaysById) != null;
+                  {columns.flatMap((column) => getColumnFillSpans(plan, column)).map((span) => (
+                    <div
+                      key={`${span.from}-${span.to}`}
+                      style={{ ...fillStyle, left: `${timeToPercent(span.from, plan.duration)}%`, width: `${timeToPercent(span.to, plan.duration) - timeToPercent(span.from, plan.duration)}%` }}
+                    />
+                  ))}
+
+                  {plan.placements.filter((p) => columns.includes(p.column)).map((placement) => {
+                    const clip = clipsById.get(placement.clipId);
+                    const dragging = clipDrag?.clipId === placement.clipId;
+                    // a dragged block follows the pointer (it may go past the end of the video)
+                    const start = dragging ? clipDrag.time : placement.startTime;
+                    const left = timeToPercent(start, plan.duration);
+                    const width = (Math.max(0, placement.endTime - placement.startTime) / Math.max(plan.duration, 1e-9)) * 100;
                     return (
-                      <OverlayBlock
-                        key={overlay.id}
-                        overlay={overlay}
-                        item={item}
-                        duration={plan.duration}
-                        isSelected={overlay.id === selectedOverlayId}
-                        canMove={!linked}
-                        canResize={!linked && overlay.type !== 'sound'}
-                        tooltip={tooltipLines.join('\n')}
-                        hasWarning={missing || warnings.length > 0}
-                        onPointerDown={handleBlockPointerDown}
-                        onPointerMove={handleBlockPointerMove}
-                        onPointerUp={handleBlockPointerUp}
-                        onPointerCancel={handleBlockPointerCancel}
+                      <Block
+                        key={placement.clipId}
+                        placement={placement}
+                        clip={clip}
+                        laneWidthPercent={{ left, width }}
+                        color={clip != null ? getColor(clip) : 'var(--gray-8)'}
+                        name={clip?.name ?? placement.clipId}
+                        thumbnailUrl={thumbnailUrls.get(placement.clipId)}
+                        warnings={getPlacementWarnings(plan, placement)}
+                        isSelected={clipPins.selectedClipIds.has(placement.clipId)}
+                        rows={getPlanAxis(plan) === 'rows'}
+                        pinned={clipPins.pinTimes.has(placement.clipId)}
+                        groupColor={clip?.groupId != null ? clipPins.groupColors.get(clip.groupId) : undefined}
+                        linked={clipPins.linkInfos.get(placement.clipId)?.linked === true}
+                        sequenceIndex={clipPins.sequenceIndexes.get(placement.clipId)}
+                        dragging={dragging}
+                        openClipMenu={clipPins.openClipMenu}
+                        onPointerDown={handleClipPointerDown}
+                        onPointerMove={handleClipPointerMove}
+                        onPointerUp={handleClipPointerUp}
+                        onPointerCancel={handleClipPointerCancel}
                       />
                     );
                   })}
                 </div>
-              );
-            })}
+              ))}
 
-            <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${timeToPercent(cursorTime, plan.duration)}%`, width: 1, background: 'var(--red-9)', pointerEvents: 'none' }} />
+              {overlayLanes.map((lane, laneIndex) => {
+                const top = overlayLaneTops[laneIndex] ?? 0;
+                const height = lane.rows * OVERLAY_ROW_HEIGHT;
+                return (
+                  <div
+                    key={lane.lane}
+                    role="button"
+                    tabIndex={-1}
+                    onClick={handleOverlayLaneClick}
+                    style={{ position: 'absolute', top, left: 0, right: 0, height, borderBottom: '1px solid var(--gray-6)', background: 'var(--gray-a2)' }}
+                  >
+                    <div className="no-user-select" style={{ position: 'absolute', left: '.3em', top: 0, height: OVERLAY_ROW_HEIGHT, display: 'flex', alignItems: 'center', fontSize: '.65em', color: 'var(--gray-11)', pointerEvents: 'none', opacity: 0.8 }}>
+                      {getOverlayLaneLabel(lane.lane)}
+                    </div>
+                    {lane.items.map((item) => {
+                      const overlay = overlaysById.get(item.overlayId);
+                      if (overlay == null) return null;
+                      const warnings = resolved.get(overlay.id)?.warnings ?? [];
+                      const missing = missingOverlayIds.has(overlay.id);
+                      const tooltipLines = [overlay.name, ...(missing ? [t('File not found')] : []), ...warnings.map((w) => getOverlayTimeWarningText(w))];
+                      // a bar linked to a countdown takes its times from it
+                      const linked = getLinkedCountdown(overlay, overlaysById) != null;
+                      return (
+                        <OverlayBlock
+                          key={overlay.id}
+                          overlay={overlay}
+                          item={item}
+                          duration={plan.duration}
+                          isSelected={overlay.id === selectedOverlayId}
+                          canMove={!linked}
+                          canResize={!linked && overlay.type !== 'sound'}
+                          tooltip={tooltipLines.join('\n')}
+                          hasWarning={missing || warnings.length > 0}
+                          onPointerDown={handleBlockPointerDown}
+                          onPointerMove={handleBlockPointerMove}
+                          onPointerUp={handleBlockPointerUp}
+                          onPointerCancel={handleBlockPointerCancel}
+                        />
+                      );
+                    })}
+                  </div>
+                );
+              })}
+
+              <div data-testid="mix-cursor" style={{ position: 'absolute', top: 0, bottom: 0, left: `${timeToPercent(cursorTime, plan.duration)}%`, width: 1, background: 'var(--red-9)', pointerEvents: 'none' }} />
+            </div>
           </div>
         </div>
       </div>
