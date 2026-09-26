@@ -126,11 +126,40 @@ describe('save / load', () => {
     expect(json.sources[0].path).toBe('media/a.mp4');
     expect(json.sources[0].absolutePath).toBe(path.join(tmpDir, 'media', 'a.mp4'));
 
-    expect(json.version).toBe(6);
+    expect(json.version).toBe(7);
     expect(json.overlays[0].path).toBe('img/logo.png');
     expect(json.settings.musicPlaylist.tracks[1].path).toBe('audio/music2.mp3');
 
     expect(await loadMixProject(deps, vmxPath)).toEqual({ project, missingSourceIds: [], missingMusicTrackIds: [], missingOverlayFiles: [] });
+  });
+
+  test('block members\' files (T56): relative when saved, resolved when loaded, missing ones reported with their definition', async () => {
+    const project: MixProject = {
+      ...makeProject(tmpDir),
+      blockDefs: [{
+        id: 'D',
+        name: 'Block',
+        color: 1,
+        members: [
+          createImageOverlay({ id: 'm1', name: 'Logo', filePath: path.join(tmpDir, 'blocks', 'logo.png') }),
+          { ...createTextOverlay({ id: 'm2', name: 'Title', text: '{{who}}' }), font: { path: path.join(tmpDir, 'blocks', 'gone.ttf'), absolutePath: path.join(tmpDir, 'blocks', 'gone.ttf') } },
+        ],
+      }],
+      blocks: [{ id: 'B', defId: 'D', anchor: { kind: 'absolute', time: 1 }, variables: { who: 'Ana' }, locked: true }],
+    };
+    await touch(path.join(tmpDir, 'blocks', 'logo.png'));
+    const vmxPath = path.join(tmpDir, 'p.vmx');
+    await saveMixProject(deps, vmxPath, project);
+    const json = JSON5.parse(await fs.readFile(vmxPath, 'utf8'));
+    expect(json.version).toBe(7);
+    expect(json.blockDefs[0].members[0].path).toBe('blocks/logo.png');
+    expect(json.blockDefs[0].members[1].font.path).toBe('blocks/gone.ttf');
+    expect(json.blocks).toEqual(project.blocks);
+
+    const loaded = await loadMixProject(deps, vmxPath);
+    expect(loaded.project.blockDefs).toEqual(project.blockDefs);
+    expect(loaded.project.blocks).toEqual(project.blocks);
+    expect(loaded.missingOverlayFiles.filter((m) => m.blockDefId != null)).toEqual([{ overlayId: 'm2', kind: 'font', blockDefId: 'D' }]);
   });
 
   test('project moved together with its media: relative path wins', async () => {
@@ -183,7 +212,7 @@ describe('save / load', () => {
     await touch(path.join(tmpDir, 'music.mp3'));
     await fs.writeFile(vmxPath, JSON5.stringify({ ...toSavedMixProject(path, vmxPath, { ...v1, settings, overlays: [] }), settings: legacySettings(), version: 1, overlays: undefined }));
     const loaded = await loadMixProject(deps, vmxPath);
-    expect(loaded.project).toMatchObject({ version: 6, overlays: [], clips: v1.clips });
+    expect(loaded.project).toMatchObject({ version: 7, overlays: [], clips: v1.clips });
     expect(loaded.project.settings.output).toEqual({ aspect: '16:9', resolution: '720' });
     expect(loaded.project.settings.musicPlaylist).toMatchObject({ tracks: [{ path: path.join(tmpDir, 'music.mp3'), volumeDb: -6 }], loop: true });
     expect(loaded.missingOverlayFiles).toEqual([]);
@@ -197,7 +226,7 @@ describe('save / load', () => {
     const saved = toSavedMixProject(path, vmxPath, { ...project, overlays: project.overlays.filter((o) => o.type !== 'text') });
     await fs.writeFile(vmxPath, JSON5.stringify({ ...saved, settings: legacySettings(), version: 2 }));
     const loaded = await loadMixProject(deps, vmxPath);
-    expect(loaded.project.version).toBe(6);
+    expect(loaded.project.version).toBe(7);
     expect(loaded.project.overlays).toHaveLength(5);
     const [track] = loaded.project.settings.musicPlaylist.tracks;
     expect(track).toMatchObject({ path: path.join(tmpDir, 'music.mp3'), absolutePath: path.join(tmpDir, 'music.mp3'), volumeDb: -6 });

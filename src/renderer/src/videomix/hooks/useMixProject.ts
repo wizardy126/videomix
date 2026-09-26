@@ -19,6 +19,7 @@ import { deleteRecoveryFile, deleteRecoveryFilePath, findRecoverableProjects, ge
 import type { RecoverableProject } from '../projectRecovery';
 import { askForUnsavedChanges } from '../dialogs';
 import { prepareOverlayRemoval } from '../overlayRemoval';
+import { expandBlocks } from '../blocks/expandBlocks';
 import { getKnownSoundDurations } from './useOverlaySoundDurations';
 import getSwal from '../../swal';
 
@@ -86,10 +87,13 @@ export default function useMixProject() {
   const dispatch = useCallback((action: MixProjectAction, { transient }: EditOptions = {}) => {
     // T22: every removal (clip, source, overlay; also inside batches from the timeline sync) gets the overlay times
     // resolved before it, so the overlays anchored to what's removed become absolute at their current start (01-requisitos §9.2)
-    const { action: prepared, detached } = prepareOverlayRemoval(historyRef.current.present, action, getKnownSoundDurations(historyRef.current.present.overlays));
+    // T56: blocks too (and the times grouping overlays into a block needs); sound durations by expanded overlay id
+    const { present } = historyRef.current;
+    const { action: prepared, detached, detachedBlocks } = prepareOverlayRemoval(present, action, getKnownSoundDurations(expandBlocks(present).all));
     setHistory((h) => history.applyEdit(h, (p) => mixProjectReducer(p, prepared), { transient }));
-    if (detached.length > 0) {
-      getSwal().toast.fire({ icon: 'info', timer: 6000, title: i18n.t('{{count}} overlay(s) anchored to what was removed now start at a fixed time', { count: detached.length }) });
+    const count = detached.length + detachedBlocks.length;
+    if (count > 0) {
+      getSwal().toast.fire({ icon: 'info', timer: 6000, title: i18n.t('{{count}} overlay(s) anchored to what was removed now start at a fixed time', { count }) });
     }
   }, [setHistory]);
 

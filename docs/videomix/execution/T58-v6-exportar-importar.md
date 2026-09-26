@@ -1,6 +1,6 @@
 # T58 · v6: exportar, importar y biblioteca de plantillas (H2, H3, H4, H7)
 
-- **Hito**: M13 · **Modelo**: Opus · **Depende de**: T56 · **Estado**: pendiente
+- **Hito**: M13 · **Modelo**: Opus · **Depende de**: T56 · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 

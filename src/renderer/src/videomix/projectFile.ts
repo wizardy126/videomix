@@ -79,6 +79,8 @@ export function toSavedMixProject(path: PathApi, projectFilePath: string, projec
     ...project,
     sources: project.sources.map((source) => ({ ...source, path: toProjectRelativePath(path, baseDir, source.path) })),
     overlays: project.overlays.map((overlay) => mapOverlayFilesSync(overlay, (file) => ({ ...file, path: toProjectRelativePath(path, baseDir, file.path) }))),
+    // T56: the files of the blocks' members, like the loose overlays'
+    blockDefs: project.blockDefs.map((def) => ({ ...def, members: def.members.map((member) => mapOverlayFilesSync(member, (file) => ({ ...file, path: toProjectRelativePath(path, baseDir, file.path) }))) })),
     settings: {
       ...project.settings,
       musicPlaylist: { ...musicPlaylist, tracks: musicPlaylist.tracks.map((track) => ({ ...track, path: toProjectRelativePath(path, baseDir, track.path) })) },
@@ -86,7 +88,11 @@ export function toSavedMixProject(path: PathApi, projectFilePath: string, projec
   };
 }
 
-export interface MissingOverlayFile { overlayId: string, kind: OverlayFileKind }
+/**
+ * A file of a loose overlay (`overlayId`) or, with `blockDefId` (T56), of member `overlayId` of that block definition
+ * (every instance of the block uses it).
+ */
+export interface MissingOverlayFile { overlayId: string, kind: OverlayFileKind, blockDefId?: string | undefined }
 
 /**
  * Resolve the stored paths of a loaded project: the relative path first, then the absolute fallback.
@@ -118,10 +124,21 @@ export async function resolveMixProjectPaths({ path, fs }: NodeDeps, baseDir: st
     return { overlay: resolved, missing };
   }));
 
+  const resolvedDefs = await Promise.all(project.blockDefs.map(async (def) => {
+    const missing: MissingOverlayFile[] = [];
+    const members = await Promise.all(def.members.map(async (member) => mapOverlayFiles(member, async (file, kind) => {
+      const ret = await resolveFile(file);
+      if (!ret.found) missing.push({ overlayId: member.id, kind, blockDefId: def.id });
+      return ret.file;
+    })));
+    return { def: { ...def, members }, missing };
+  }));
+
   const resolvedProject: MixProject = {
     ...project,
     sources: resolvedSources.map(({ file }) => file),
     overlays: resolvedOverlays.map(({ overlay }) => overlay),
+    blockDefs: resolvedDefs.map(({ def }) => def),
     settings: {
       ...project.settings,
       musicPlaylist: { ...musicPlaylist, tracks: resolvedTracks.map(({ file }) => file) },
@@ -133,8 +150,11 @@ export async function resolveMixProjectPaths({ path, fs }: NodeDeps, baseDir: st
     missingSourceIds: resolvedSources.filter(({ found }) => !found).map(({ file }) => file.id),
     /** In play order. Relink with `relinkMusicTrack` (useMixProject). */
     missingMusicTrackIds: resolvedTracks.filter(({ found }) => !found).map(({ file }) => file.id),
-    /** In layer order. Relink with `relinkOverlayFile` (useMixProject). */
-    missingOverlayFiles: resolvedOverlays.flatMap(({ missing }) => missing),
+    /**
+     * In layer order (loose overlays, then the block definitions' members, T56). Relink a loose one with
+     * `relinkOverlayFile` (useMixProject); a member's with an `updateBlockMember` action.
+     */
+    missingOverlayFiles: [...resolvedOverlays.flatMap(({ missing }) => missing), ...resolvedDefs.flatMap(({ missing }) => missing)],
   };
 }
 

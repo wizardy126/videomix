@@ -80,13 +80,15 @@ interface MixSettings {
 }
 
 interface MixProject {
-  version: 6,              // v1…v5 se migran al abrir (v4 → v5 y v5 → v6 son aditivas, T44 y T52), ver §8.1, §9, §10 y §3.10
+  version: 7,              // v1…v6 se migran al abrir (v4 → v5, v5 → v6 y v6 → v7 son aditivas, T44, T52 y T56), ver §8.1, §9, §10, §3.10 y §11
   sources: MixSource[],
   clips: MixClip[],        // el orden del array es el orden de la lista
   settings: MixSettings,
   // cache de análisis de sonoridad, por clave (ver §5.1)
   loudnessCache?: Record<string, LoudnessMeasurement> | undefined,
   overlays: MixOverlay[],  // desde v2 (§8.1); el orden es el orden de capas
+  blockDefs: MixBlockDef[],  // v7 (H1, T56): contenido de los bloques de overlays, ver §11
+  blocks: MixBlock[],        // v7: instancias, dibujadas encima de los overlays sueltos
 }
 ```
 
@@ -838,3 +840,52 @@ interface BlackBarsDetection {
 - `cropDetectToDisplayRect`: píxeles codificados (tras el autorotate de ffmpeg) → visualización: eje estirado × SAR, redondeo hacia fuera, dentro del fotograma; `turn` opcional si se analizó sin autorotate.
 - `getPictureRect`: ignora bandas < 4 px (`BLACK_BARS_MIN_SIZE`), bordes pares hacia dentro. `getNewClipMaxRect`: máx. inicial de un clip nuevo (con `autoCropBlackBars` y detección válida para el tamaño). `removeBlackBarsFromRects`: botón "Quitar bandas negras" (recorta el máx., nunca lo agranda, y el mín. con él).
 - Caché por fuente en `MixSource.blackBars`; `isBlackBarsDetectionValid` la invalida si cambia el tamaño de visualización o la identidad del fichero (tamaño, mtime).
+
+## 11. Bloques de overlays y plantillas (v6, T56)
+
+Requisitos: [01-requisitos §14](01-requisitos.md) (H1–H8). Decisión: **[ADR-004](decisiones/ADR-004-bloques-overlays.md)**. Modelo y lógica pura en T56 (`videomix/blocks/`; contratos para T57 y T58 en las notas de [T56](execution/T56-v6-bloques-modelo.md)); UI en T57; exportar, importar y biblioteca en T58.
+
+### 11.1 Modelo v7
+
+Migración v6 → v7 **aditiva** (`blockDefs: []`, `blocks: []`).
+
+```ts
+interface MixBlockDef {       // contenido, compartido por todas sus instancias (H5)
+  id: string, name: string,
+  color: number,              // índice de la paleta de segmentos, como MixClip.color
+  members: MixOverlay[],      // orden de capas dentro del bloque; ids únicos en la definición, sin "/"
+}
+// En un miembro: anchor 'absolute' = segundos desde el inicio del bloque; 'element' y linkedCountdownId = otro miembro.
+// Un ancla a un clip o una referencia fuera del bloque se avisa y se expande como relativa en max(0, offset) / desvinculada.
+
+interface MixBlock {          // instancia
+  id: string, defId: string,
+  anchor: OverlayAnchor,      // absoluta, a un clip o a un elemento (overlay suelto, otro bloque o miembro de otro bloque)
+  variables?: Record<string, string>,   // H4
+  hidden?: true, locked?: true, collapsed?: true,   // H8 y plegado; solo se guardan si son true
+}
+```
+
+### 11.2 Expansión (`blocks/expandBlocks.ts`)
+
+- `expandBlocks(project) → { all, visible, origins, anchors }`: los overlays sueltos (con sus anclas a bloques compuestas) y los miembros de cada instancia con id **`bloque/miembro`** (`getBlockMemberOverlayId`), en orden de capas. `all` incluye los bloques ocultos (resolución de tiempos); `visible` no (render, audio, previsualización). **Sin bloques devuelve `project.overlays` tal cual.**
+- Un miembro con tiempo relativo `r` recibe el ancla (compuesta) del bloque desplazada `r`; las anclas y `linkedCountdownId` internos se remapean a los ids de la instancia; los textos sustituyen `{{nombre}}` / `{{nombre|defecto}}` (`blockVariables.ts`: valor de la instancia → defecto del marcador → defecto dado en otro texto del bloque → se deja el marcador, con aviso).
+- **Anclas a un bloque** (`element` con el id del bloque): ancla compuesta del bloque + desfase (+ su duración si es el fin). Cadenas de bloques anclados entre sí se componen; los ciclos pasan a absolutos en `max(0, offset)` con aviso (`composeBlockAnchors`, `findBlockCycleIds`).
+- **Duración** (`getBlockDefDuration`): fin más tardío de los miembros sin la cola de los sonidos. `getBlockDefTimes` da los tiempos relativos de cada miembro. `resolveBlockTimes(project, plan, resolved)` da `{ start, end, rawStart, rawEnd, contentEnd, warnings }` por instancia.
+- Consumidores: `useMixRender` (validación, ficheros, tiempos, grafo y audio con `visible`; tiempos con `all`), `useMixOverlays` (`resolved` sobre `all`, más `expanded` y `blockTimes`), `useMixLivePreview` (`visible`), `useMixProject.dispatch` y `overlayRemoval` (tiempos de todo: `resolveProjectTimes`), `validateMixProject`.
+
+### 11.3 Operaciones (`blocks/blockOperations.ts`, acciones del reducer)
+
+- **Agrupar** (`groupOverlays` / `groupOverlaysIntoBlock`): el bloque empieza en el primer overlay por tiempo y **hereda su ancla** (empate: uno no anclado a otro seleccionado, luego orden de capas; ancla rota o en ciclo → absoluta en su inicio; barra vinculada a un contador de fuera → anclado al inicio de ese contador). Los miembros conservan ids, orden y relaciones internas; el resto pasa a relativo. Lo que dependía de un miembro apunta a su id expandido. **Todos los tiempos quedan idénticos** (test).
+- **Desagrupar** (`ungroupBlock`): los miembros vuelven a sueltos con el ancla del bloque desplazada (siguen a su clip), ids originales si están libres, variables fijadas en el texto; encima de los sueltos. Tiempos idénticos (test).
+- **Duplicar** (copia independiente), **desvincular** (clona la definición), **repetir** (H5: `interval` = ancla desplazada `i·X`; `clips` = inicio de cada clip; instancias enlazadas), **estirar** (H6: escala tiempos, desfases internos y duraciones; fundidos, entradas y sonidos fijos), **adaptar a otra proporción** (H7: tamaño relativo a la altura y centro, dentro del fotograma; si no cabe a lo ancho se reduce entero; `fontSize` con la caja), **borrar** un bloque o un miembro (lo anclado pasa a absoluto en su inicio actual), capas entre bloques, editar instancia, definición o miembro.
+
+### 11.4 Fichero `.vmxblock` (`blocks/vmxBlockFile.ts`)
+
+- JSON indentado al escribir, JSON5 al leer; `{ $schema?, format: 'videomix-block', version: 1, name, color?, aspect, originalStart, clipAnchor?, variables?, members }`. Miembros como en §11.1 pero sin anclas a clips y con ficheros `{ path }` relativos al `.vmxblock` (o absolutos), sin `absolutePath`.
+- Errores legibles (`VmxBlockParseError.issues`: `{ path: 'members[2].box.width', message }`); sintaxis JSON5 con línea y columna; referencias entre miembros comprobadas.
+- **JSON Schema** (draft-07) generado desde zod: [`vmxblock.schema.json`](vmxblock.schema.json); un test comprueba que coincide (`VIDEOMIX_UPDATE_VMXBLOCK_SCHEMA=1` lo regenera).
+
+### 11.5 Validación
+
+Errores: `duplicate-block-id`, `duplicate-block-def-id`, `block-unknown-def`, `duplicate-block-member-id`, `invalid-block-member-id` y los de contenido de cada miembro (una vez por definición, con `blockDefId` + `overlayId`). Avisos: `block-def-unused`, `block-empty`, `block-member-invalid-reference`, `block-broken-reference`, `block-cycle`, `block-missing-variable`. `MixProjectIssue` gana `blockId` y `blockDefId`.

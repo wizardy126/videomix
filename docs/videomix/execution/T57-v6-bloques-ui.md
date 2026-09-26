@@ -1,6 +1,6 @@
 # T57 · v6: bloques en la interfaz (H1, H5, H6, H8)
 
-- **Hito**: M13 · **Modelo**: Opus · **Depende de**: T56 · **Estado**: pendiente
+- **Hito**: M13 · **Modelo**: Opus · **Depende de**: T56 · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 
@@ -15,7 +15,8 @@
 4. **Estirar** (H6): "Duración del bloque…".
 5. **Ocultar / bloquear** (H8).
 6. **Variables** (H4): editar los valores de una instancia en su panel.
-7. Deshacer en un paso por acción; i18n (en + es); e2e.
+7. **Pendientes de T56**: orden de capas de los bloques ("Traer al frente / Enviar atrás", `moveBlockLayer`); desagrupar un bloque oculto (avisar o impedir); respetar `locked` (no mover ni editar); reajustar las imágenes de los bloques al cambiar la proporción de salida en Ajustes, igual que las sueltas; destinos de ancla que conozcan los bloques (`canOverlayDependOn`); traducción de los códigos `block-*` de validación; mostrar ficheros de miembros que faltan.
+8. Deshacer en un paso por acción; i18n (en + es); e2e.
 
 ## Criterios de aceptación
 

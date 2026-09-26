@@ -20,6 +20,8 @@ import { createCountdownOverlay, createImageOverlay, createProgressBarOverlay, c
 import { getImageBox } from '../overlayTimeline';
 import { getDuplicateClipName, getNextNumberedName } from '../clips';
 import { getOverlayTypeLabel } from '../overlayTexts';
+import { expandBlocks, resolveBlockTimes } from '../blocks/expandBlocks';
+import type { ResolvedBlockTime } from '../blocks/expandBlocks';
 
 const { basename, dirname } = window.require('node:path');
 
@@ -61,12 +63,22 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
   /** Before the cut: E3's estimate shows its whole duration. */
   const fullPlan: MixPlan | undefined = renderPlan?.fullPlan;
 
-  const soundDurations = useOverlaySoundDurations(overlays);
+  // T56: blocks of overlays expanded into concrete overlays (the same `overlays` array without blocks). `resolved` has
+  // the times of all of them (hidden blocks too, so what's anchored to them keeps its times); the lanes below still
+  // list the loose overlays only (blocks in the Mix view: T57).
+  const { blocks, blockDefs } = project;
+  const expanded = useMemo(() => expandBlocks({ overlays, blocks, blockDefs }), [blockDefs, blocks, overlays]);
+  const soundDurations = useOverlaySoundDurations(expanded.all);
 
   // Not debounced: overlay edits don't change the plan, and resolving is O(n), so blocks follow a drag immediately
   const resolved = useMemo<ResolvedOverlayTimes>(
-    () => (renderPlan != null ? resolveOverlayTimes(project, getOverlayTimesPlan(renderPlan), { soundDurations }) : new Map()),
-    [renderPlan, project, soundDurations],
+    () => (renderPlan != null ? resolveOverlayTimes({ overlays: expanded.all, clips: project.clips }, getOverlayTimesPlan(renderPlan), { soundDurations }) : new Map()),
+    [renderPlan, expanded, project.clips, soundDurations],
+  );
+  /** T56: start/end of each block instance (see `resolveBlockTimes`). */
+  const blockTimes = useMemo<Map<string, ResolvedBlockTime>>(
+    () => (renderPlan != null && blocks.length > 0 ? resolveBlockTimes({ overlays, blocks, blockDefs, clips: project.clips }, getOverlayTimesPlan(renderPlan), resolved, expanded) : new Map()),
+    [blockDefs, blocks, expanded, overlays, project.clips, renderPlan, resolved],
   );
 
   const [selectedId, setSelectedOverlayId] = useState<string>();
@@ -172,6 +184,9 @@ export default function useMixOverlays({ mixProject, enabled, withErrorHandling,
     plan,
     fullPlan,
     resolved,
+    /** T56: the project's overlays with its blocks expanded (`all` to resolve, `visible` to draw and play). */
+    expanded,
+    blockTimes,
     soundDurations,
     outputSize,
     selectedOverlay,

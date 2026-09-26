@@ -1,0 +1,859 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "For editors (autocompletion); ignored by VideoMix",
+      "type": "string"
+    },
+    "format": {
+      "type": "string",
+      "const": "videomix-block"
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "color": {
+      "description": "Index into the segment color palette (default 0)",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "aspect": {
+      "type": "string",
+      "enum": [
+        "16:9",
+        "9:16",
+        "1:1"
+      ],
+      "description": "Output aspect the block was made for (VideoMix offers to adapt it to another one)"
+    },
+    "originalStart": {
+      "type": "number",
+      "description": "Start of the block in the video it was exported from (s)"
+    },
+    "clipAnchor": {
+      "description": "Informative: the block was anchored to this clip of the project it was exported from",
+      "type": "object",
+      "properties": {
+        "clipName": {
+          "type": "string"
+        },
+        "edge": {
+          "type": "string",
+          "enum": [
+            "start",
+            "end"
+          ]
+        },
+        "offset": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "clipName",
+        "edge",
+        "offset"
+      ]
+    },
+    "variables": {
+      "description": "Values of the text variables ({{name}}), offered when importing",
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "members": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "anchor": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "absolute"
+                      },
+                      "time": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Seconds from the start of the block"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "time"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "element"
+                      },
+                      "elementId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Id of another member of the block"
+                      },
+                      "edge": {
+                        "type": "string",
+                        "enum": [
+                          "start",
+                          "end"
+                        ]
+                      },
+                      "offset": {
+                        "type": "number",
+                        "description": "Seconds, may be negative"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "elementId",
+                      "edge",
+                      "offset"
+                    ]
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "const": "image"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Relative to the .vmxblock file (with \"/\" separators), or absolute"
+              },
+              "duration": {
+                "type": "number"
+              },
+              "box": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number"
+                  },
+                  "height": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ]
+              },
+              "fadeIn": {
+                "type": "number",
+                "minimum": 0
+              },
+              "fadeOut": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "anchor",
+              "type",
+              "path",
+              "duration",
+              "box",
+              "fadeIn",
+              "fadeOut"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "anchor": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "absolute"
+                      },
+                      "time": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Seconds from the start of the block"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "time"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "element"
+                      },
+                      "elementId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Id of another member of the block"
+                      },
+                      "edge": {
+                        "type": "string",
+                        "enum": [
+                          "start",
+                          "end"
+                        ]
+                      },
+                      "offset": {
+                        "type": "number",
+                        "description": "Seconds, may be negative"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "elementId",
+                      "edge",
+                      "offset"
+                    ]
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "const": "countdown"
+              },
+              "duration": {
+                "type": "number"
+              },
+              "box": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number"
+                  },
+                  "height": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ]
+              },
+              "align": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "center",
+                  "right"
+                ]
+              },
+              "decimals": {
+                "type": "number",
+                "enum": [
+                  0,
+                  1,
+                  2,
+                  3
+                ]
+              },
+              "leadingZeros": {
+                "type": "boolean"
+              },
+              "color": {
+                "type": "string",
+                "pattern": "^#[\\da-f]{6}([\\da-f]{2})?$"
+              },
+              "font": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Relative to the .vmxblock file (with \"/\" separators), or absolute"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "border": {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[\\da-f]{6}([\\da-f]{2})?$"
+                  }
+                },
+                "required": [
+                  "width",
+                  "color"
+                ]
+              },
+              "shadow": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[\\da-f]{6}([\\da-f]{2})?$"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "color"
+                ]
+              },
+              "fadeOut": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "anchor",
+              "type",
+              "duration",
+              "box",
+              "align",
+              "decimals",
+              "leadingZeros",
+              "color",
+              "border",
+              "fadeOut"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "anchor": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "absolute"
+                      },
+                      "time": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Seconds from the start of the block"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "time"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "element"
+                      },
+                      "elementId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Id of another member of the block"
+                      },
+                      "edge": {
+                        "type": "string",
+                        "enum": [
+                          "start",
+                          "end"
+                        ]
+                      },
+                      "offset": {
+                        "type": "number",
+                        "description": "Seconds, may be negative"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "elementId",
+                      "edge",
+                      "offset"
+                    ]
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "const": "progressBar"
+              },
+              "duration": {
+                "type": "number"
+              },
+              "linkedCountdownId": {
+                "description": "Id of a countdown member: the bar takes its start and duration",
+                "type": "string",
+                "minLength": 1
+              },
+              "box": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number"
+                  },
+                  "height": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ]
+              },
+              "fillColor": {
+                "type": "string",
+                "pattern": "^#[\\da-f]{6}([\\da-f]{2})?$"
+              },
+              "backgroundColor": {
+                "type": "string",
+                "pattern": "^#[\\da-f]{6}([\\da-f]{2})?$"
+              },
+              "border": {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[\\da-f]{6}([\\da-f]{2})?$"
+                  }
+                },
+                "required": [
+                  "width",
+                  "color"
+                ]
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "ltr",
+                  "rtl",
+                  "btt",
+                  "ttb"
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "fill",
+                  "empty"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "anchor",
+              "type",
+              "duration",
+              "box",
+              "fillColor",
+              "backgroundColor",
+              "border",
+              "direction",
+              "mode"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "anchor": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "absolute"
+                      },
+                      "time": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Seconds from the start of the block"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "time"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "element"
+                      },
+                      "elementId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Id of another member of the block"
+                      },
+                      "edge": {
+                        "type": "string",
+                        "enum": [
+                          "start",
+                          "end"
+                        ]
+                      },
+                      "offset": {
+                        "type": "number",
+                        "description": "Seconds, may be negative"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "elementId",
+                      "edge",
+                      "offset"
+                    ]
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "const": "sound"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Relative to the .vmxblock file (with \"/\" separators), or absolute"
+              },
+              "gainDb": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "anchor",
+              "type",
+              "path",
+              "gainDb"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string"
+              },
+              "anchor": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "absolute"
+                      },
+                      "time": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Seconds from the start of the block"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "time"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "element"
+                      },
+                      "elementId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "Id of another member of the block"
+                      },
+                      "edge": {
+                        "type": "string",
+                        "enum": [
+                          "start",
+                          "end"
+                        ]
+                      },
+                      "offset": {
+                        "type": "number",
+                        "description": "Seconds, may be negative"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "elementId",
+                      "edge",
+                      "offset"
+                    ]
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "const": "text"
+              },
+              "text": {
+                "type": "string"
+              },
+              "duration": {
+                "type": "number"
+              },
+              "box": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "width": {
+                    "type": "number"
+                  },
+                  "height": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "width",
+                  "height"
+                ]
+              },
+              "fontSize": {
+                "type": "number"
+              },
+              "align": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "center",
+                  "right"
+                ]
+              },
+              "color": {
+                "type": "string",
+                "pattern": "^#[\\da-f]{6}([\\da-f]{2})?$"
+              },
+              "font": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Relative to the .vmxblock file (with \"/\" separators), or absolute"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              "border": {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[\\da-f]{6}([\\da-f]{2})?$"
+                  }
+                },
+                "required": [
+                  "width",
+                  "color"
+                ]
+              },
+              "shadow": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  },
+                  "color": {
+                    "type": "string",
+                    "pattern": "^#[\\da-f]{6}([\\da-f]{2})?$"
+                  }
+                },
+                "required": [
+                  "x",
+                  "y",
+                  "color"
+                ]
+              },
+              "lineSpacing": {
+                "type": "number",
+                "minimum": 0
+              },
+              "fadeIn": {
+                "type": "number",
+                "minimum": 0
+              },
+              "fadeOut": {
+                "type": "number",
+                "minimum": 0
+              },
+              "entry": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "slide",
+                      "typewriter"
+                    ]
+                  },
+                  "from": {
+                    "type": "string",
+                    "enum": [
+                      "left",
+                      "right",
+                      "top",
+                      "bottom"
+                    ]
+                  },
+                  "duration": {
+                    "type": "number",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "kind",
+                  "duration"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "anchor",
+              "type",
+              "text",
+              "duration",
+              "box",
+              "align",
+              "color",
+              "border",
+              "lineSpacing",
+              "fadeIn",
+              "fadeOut",
+              "entry"
+            ]
+          }
+        ]
+      },
+      "description": "Overlays of the block, in layer order (the last one on top). Ids only need to be unique inside the file"
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "name",
+    "aspect",
+    "originalStart",
+    "members"
+  ],
+  "title": "VideoMix block (.vmxblock)",
+  "description": "A block of overlays exported from VideoMix, to import into another project. Times are relative to the start of the block."
+}

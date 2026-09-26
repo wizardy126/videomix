@@ -442,13 +442,59 @@ export type MixOverlay = z.infer<typeof mixOverlaySchema>;
 export type MixOverlayType = MixOverlay['type'];
 
 /**
- * v5 (T44). v1 → v2 (T19): overlays; v2 → v3 (T24): output, encoder, music playlist, text overlays, pinned and
+ * H1 (v7, T56): the content of a block of overlays, shared by all its instances (`MixBlock`, H5 linked repetitions).
+ * See blocks/expandBlocks.ts and 04-diseno §11.
+ *
+ * `members` are ordinary overlays (layer order inside the block, the last on top) whose times are relative to the
+ * block's start:
+ * - `anchor.kind: 'absolute'`: `time` = seconds from the block's start;
+ * - `anchor.kind: 'element'`: another member (by its member id), like between loose overlays;
+ * - `linkedCountdownId`: another member (a countdown).
+ * Member ids only need to be unique inside the definition (and can't contain `/`, see `getBlockMemberOverlayId`).
+ * Anything else (a clip anchor, a reference outside the block) is reported by validateMixProject and expanded as
+ * relative at `max(0, offset)` / unlinked.
+ */
+export const mixBlockDefSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  /** Index into the segment color palette, like `MixClip.color`. */
+  color: z.number().int().nonnegative(),
+  members: mixOverlaySchema.array(),
+});
+
+export type MixBlockDef = z.infer<typeof mixBlockDefSchema>;
+
+/**
+ * H1 (v7, T56): an instance of a block definition, placed on the video by its own `anchor` (like an overlay's: absolute,
+ * clip or element; an `element` may be a loose overlay, another block or a member of another block). Loose overlays
+ * and other blocks can be anchored to a block by its id (`element`), and to one of its members by
+ * `getBlockMemberOverlayId(blockId, memberId)`.
+ * Optional flags are only stored when `true`.
+ */
+export const mixBlockSchema = z.object({
+  id: z.string().min(1),
+  defId: z.string().min(1),
+  anchor: overlayAnchorSchema,
+  /** H4: values of the `{{name}}` variables of the texts, by name. Missing → the default in the text (`{{name|default}}`). */
+  variables: z.record(z.string(), z.string()).optional(),
+  /** H8: not drawn or played (preview and render), but it keeps its place and what's anchored to it keeps its times. */
+  hidden: z.boolean().optional(),
+  /** H8: can't be moved or edited until unlocked (enforced by the UI, not by the reducer). */
+  locked: z.boolean().optional(),
+  /** Mix view: its lane shows the block as a single piece, without its members. */
+  collapsed: z.boolean().optional(),
+});
+
+export type MixBlock = z.infer<typeof mixBlockSchema>;
+
+/**
+ * v7 (T56). v1 → v2 (T19): overlays; v2 → v3 (T24): output, encoder, music playlist, text overlays, pinned and
  * grouped clips; v3 → v4 (T36): automatic clip links, `MixClip.link`, `settings.maxDuration`, `settings.alwaysVisible`;
  * v4 → v5 (T44): `MixClip.keyframes`, `MixSource.blackBars`, `settings.autoCropBlackBars`; v5 → v6 (T52):
- * `settings.planPriority`.
+ * `settings.planPriority`; v6 → v7 (T56): `blockDefs`, `blocks`.
  */
 export const mixProjectSchema = z.object({
-  version: z.literal(6),
+  version: z.literal(7),
   sources: mixSourceSchema.array(),
   /** Array order is the list order. */
   clips: mixClipSchema.array(),
@@ -457,11 +503,18 @@ export const mixProjectSchema = z.object({
   loudnessCache: z.record(z.string(), loudnessMeasurementSchema).optional(),
   /** Array order is the layer order: the last one is drawn on top. */
   overlays: mixOverlaySchema.array(),
+  /** H1 (v7): block definitions (content), see `mixBlockDefSchema`. */
+  blockDefs: mixBlockDefSchema.array(),
+  /**
+   * H1 (v7): block instances. They're drawn above all the loose `overlays`, in this order (the last one on top), each
+   * with its members in their order.
+   */
+  blocks: mixBlockSchema.array(),
 });
 
 export type MixProject = z.infer<typeof mixProjectSchema>;
 
-export const MIX_PROJECT_VERSION = 6;
+export const MIX_PROJECT_VERSION = 7;
 
 export const defaultMixSettings: MixSettings = {
   output: { aspect: '16:9', resolution: '1080' },
@@ -490,5 +543,7 @@ export function createEmptyMixProject(): MixProject {
     clips: [],
     settings: structuredClone(defaultMixSettings),
     overlays: [],
+    blockDefs: [],
+    blocks: [],
   };
 }

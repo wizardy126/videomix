@@ -88,7 +88,7 @@ describe('overlay removal', () => {
     const action: MixProjectAction = { type: 'removeClip', clipId: 'c3' };
     expect(prepareOverlayRemoval(project, action, {}).action).toBe(action);
     const noOverlays = { ...project, overlays: [] };
-    expect(prepareOverlayRemoval(noOverlays, { type: 'removeClip', clipId: 'c2' }, {})).toEqual({ action: { type: 'removeClip', clipId: 'c2' }, detached: [] });
+    expect(prepareOverlayRemoval(noOverlays, { type: 'removeClip', clipId: 'c2' }, {})).toEqual({ action: { type: 'removeClip', clipId: 'c2' }, detached: [], detachedBlocks: [] });
   });
 
   test('a bar linked to a removed countdown keeps its start and duration', () => {

@@ -28,7 +28,7 @@ const musicDurationByPath = new Map<string, number | null>();
 
 export default function useMixLivePreview({ mixProject, mixOverlays, enabled, volume, customOutDir }: {
   mixProject: UseMixProject,
-  mixOverlays: Pick<UseMixOverlays, 'plan' | 'resolved' | 'cursorTime' | 'setCursorTime'>,
+  mixOverlays: Pick<UseMixOverlays, 'plan' | 'resolved' | 'expanded' | 'cursorTime' | 'setCursorTime'>,
   /** VideoMix mode with the Mix tab shown: otherwise the engine stops and frees its media elements. */
   enabled: boolean,
   /** The app's playback volume (0..1). */
@@ -37,8 +37,10 @@ export default function useMixLivePreview({ mixProject, mixOverlays, enabled, vo
   customOutDir: string | undefined,
 }) {
   const { project } = mixProject;
-  const { plan, resolved, cursorTime, setCursorTime } = mixOverlays;
-  const { settings, clips, sources, overlays } = project;
+  const { plan, resolved, expanded, cursorTime, setCursorTime } = mixOverlays;
+  const { settings, clips, sources } = project;
+  // T56: what's drawn and played, blocks expanded (hidden ones left out); `project.overlays` itself without blocks
+  const overlays = expanded.visible;
 
   const [engine] = useState(() => new PreviewEngine({
     getFileUrl: (path) => pathToFileURL(path).href,
@@ -67,6 +69,8 @@ export default function useMixLivePreview({ mixProject, mixOverlays, enabled, vo
   const [loudness, setLoudness] = useState<Record<string, LoudnessMeasurement>>({});
   const projectRef = useRef(project);
   useEffect(() => { projectRef.current = project; }, [project]);
+  const overlaysRef = useRef(overlays);
+  useEffect(() => { overlaysRef.current = overlays; }, [overlays]);
   const { loudnessCache } = project;
   const soundsKey = useMemo(() => overlays.flatMap((o) => (o.type === 'sound' ? [`${o.id}:${o.absolutePath}`] : [])).join('\n'), [overlays]);
   const tracksKey = settings.musicPlaylist.tracks.map((track) => `${track.id}:${track.absolutePath}`).join('\n');
@@ -77,7 +81,7 @@ export default function useMixLivePreview({ mixProject, mixOverlays, enabled, vo
     getCachedLoudness({
       project: { ...p, loudnessCache },
       musicTracks: p.settings.musicPlaylist.tracks,
-      sounds: p.overlays.flatMap((o) => (o.type === 'sound' ? [o] : [])),
+      sounds: overlaysRef.current.flatMap((o) => (o.type === 'sound' ? [o] : [])),
     }).then((result) => {
       if (current) setLoudness(result);
     }, (err) => console.warn('Cannot read the cached loudness', err));

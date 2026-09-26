@@ -3,6 +3,9 @@ import type { MixClip, MixOverlay, MixProject, MixSettings, Rect } from './types
 import { rectContains } from './geometry';
 import { getClipFrame } from './clipRotation';
 import { findOverlayCycleIds, getOverlaysById } from './overlays/anchors';
+import { BLOCK_MEMBER_ID_SEPARATOR, expandBlocks, isInvalidMemberReference } from './blocks/expandBlocks';
+import type { ExpandedOverlays } from './blocks/expandBlocks';
+import { getMissingVariables } from './blocks/blockVariables';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v != null && !Array.isArray(v);
 
@@ -39,6 +42,8 @@ const migrations: Record<number, (json: Record<string, unknown>) => Record<strin
   4: (json) => ({ ...json, version: 5 }),
   // v6 (T52): additive (settings.planPriority from the defaults: duration)
   5: (json) => ({ ...json, version: 6 }),
+  // v7 (T56): blocks of overlays (H1), none in older projects
+  6: (json) => ({ ...json, version: 7, blockDefs: [], blocks: [] }),
 };
 
 /**
@@ -101,7 +106,19 @@ export type MixProjectIssueCode =
   | 'duplicate-always-visible-id'
   | 'clip-in-sequence-and-group'
   // v5 (T44)
-  | 'invalid-keyframes';
+  | 'invalid-keyframes'
+  // v7 (T56): blocks of overlays
+  | 'duplicate-block-id'
+  | 'duplicate-block-def-id'
+  | 'block-unknown-def'
+  | 'block-def-unused'
+  | 'block-empty'
+  | 'duplicate-block-member-id'
+  | 'invalid-block-member-id'
+  | 'block-member-invalid-reference'
+  | 'block-broken-reference'
+  | 'block-cycle'
+  | 'block-missing-variable';
 
 /** A problem found by {@link validateMixProject}. `message` is English for logs; the UI should map `code` to a translated text. */
 export interface MixProjectIssue {
@@ -114,6 +131,10 @@ export interface MixProjectIssue {
   /** Music playlist track. */
   trackId?: string | undefined,
   groupId?: string | undefined,
+  /** v7 (T56): block instance. With `overlayId`, the issue is about that expanded member of the block. */
+  blockId?: string | undefined,
+  /** v7 (T56): block definition. With `overlayId`, the issue is about that member (its member id). */
+  blockDefId?: string | undefined,
 }
 
 export const getClipDuration = (clip: Pick<MixClip, 'start' | 'end'>) => clip.end - clip.start;
@@ -197,19 +218,60 @@ const overlayColors = (overlay: MixOverlay): string[] => {
   }
 };
 
+type AddOverlayIssue = (level: MixProjectIssue['level'], code: MixProjectIssueCode, message: string) => void;
+
+/** Checks of an overlay on its own (box, duration, fades, text, colors), for loose overlays and block members alike. */
+function validateOverlayContent(overlay: MixOverlay, add: AddOverlayIssue) {
+  const overlayId = overlay.id;
+  if (overlay.type === 'sound') return;
+
+  const { box } = overlay;
+  const inRange = (v: number) => Number.isFinite(v) && v >= -BOX_EPSILON && v <= 1 + BOX_EPSILON;
+  if (![box.x, box.y, box.width, box.height, box.x + box.width, box.y + box.height].every((v) => inRange(v)) || box.width <= 0 || box.height <= 0) {
+    add('error', 'overlay-box-out-of-range', `Overlay ${overlayId} box is outside the frame or empty`);
+  }
+
+  // A linked bar's own duration is not used
+  const linked = overlay.type === 'progressBar' && overlay.linkedCountdownId != null;
+  if (!linked && !(Number.isFinite(overlay.duration) && overlay.duration > 0)) {
+    add('error', 'overlay-invalid-duration', `Overlay ${overlayId} has invalid duration ${overlay.duration}`);
+  } else {
+    const fades = overlay.type === 'image' || overlay.type === 'text' ? overlay.fadeIn + overlay.fadeOut : (overlay.type === 'countdown' ? overlay.fadeOut : 0);
+    if (fades > overlay.duration) add('warning', 'overlay-fades-too-long', `Overlay ${overlayId} fades are longer than its duration`);
+    if (overlay.type === 'text' && overlay.entry.kind !== 'none' && overlay.entry.duration > overlay.duration) {
+      add('warning', 'overlay-entry-too-long', `Text ${overlayId} entry animation is longer than its duration`);
+    }
+  }
+
+  if (overlay.type === 'text') {
+    // Renders nothing: probably left empty by mistake
+    if (overlay.text.trim() === '') add('warning', 'overlay-empty-text', `Text ${overlayId} is empty`);
+    if (overlay.entry.kind === 'slide' && overlay.entry.from == null) add('error', 'overlay-invalid-entry', `Text ${overlayId} slides in from no side`);
+    if (overlay.fontSize != null && !(Number.isFinite(overlay.fontSize) && overlay.fontSize > 0)) {
+      add('error', 'overlay-invalid-font-size', `Text ${overlayId} has invalid font size ${overlay.fontSize}`);
+    }
+  }
+
+  if (overlayColors(overlay).some((color) => !OVERLAY_COLOR_REGEX.test(color))) {
+    add('error', 'overlay-invalid-color', `Overlay ${overlayId} has an invalid color`);
+  }
+}
+
 /**
  * Broken references and cycles are warnings: resolveOverlayTimes falls back to an absolute time, so the project still renders.
  * Boxes, durations and colors are errors, as the render relies on them.
+ * v7 (T56): references are checked against the expanded overlays (a loose overlay may be anchored to a block or to a
+ * block's member); the members themselves are checked by validateBlocks.
  */
-function validateOverlays({ overlays }: MixProject, clipIds: ReadonlySet<string>): MixProjectIssue[] {
+function validateOverlays({ overlays, blocks }: MixProject, clipIds: ReadonlySet<string>, expanded: ExpandedOverlays, cycleIds: ReadonlySet<string>): MixProjectIssue[] {
   const issues: MixProjectIssue[] = [];
-  const byId = getOverlaysById(overlays);
-  const cycleIds = findOverlayCycleIds(overlays, byId);
+  const byId = getOverlaysById(expanded.all);
+  const blockIds = new Set(blocks.map((b) => b.id));
 
   const seen = new Set<string>();
   overlays.forEach((overlay) => {
     const overlayId = overlay.id;
-    const add = (level: MixProjectIssue['level'], code: MixProjectIssueCode, message: string) => issues.push({ level, code, message, overlayId });
+    const add: AddOverlayIssue = (level, code, message) => issues.push({ level, code, message, overlayId });
 
     if (seen.has(overlayId)) add('error', 'duplicate-overlay-id', `Duplicate overlay id ${overlayId}`);
     seen.add(overlayId);
@@ -218,7 +280,7 @@ function validateOverlays({ overlays }: MixProject, clipIds: ReadonlySet<string>
     if (anchor.kind === 'clip' && !clipIds.has(anchor.clipId)) {
       add('warning', 'overlay-broken-reference', `Overlay ${overlayId} is anchored to unknown clip ${anchor.clipId}`);
     }
-    if (anchor.kind === 'element' && !byId.has(anchor.elementId)) {
+    if (anchor.kind === 'element' && !byId.has(anchor.elementId) && !blockIds.has(anchor.elementId)) {
       add('warning', 'overlay-broken-reference', `Overlay ${overlayId} is anchored to unknown overlay ${anchor.elementId}`);
     }
     if (overlay.type === 'progressBar' && overlay.linkedCountdownId != null && byId.get(overlay.linkedCountdownId)?.type !== 'countdown') {
@@ -226,37 +288,74 @@ function validateOverlays({ overlays }: MixProject, clipIds: ReadonlySet<string>
     }
     if (cycleIds.has(overlayId)) add('warning', 'overlay-cycle', `Overlay ${overlayId} is part of an anchor cycle`);
 
-    if (overlay.type === 'sound') return;
+    validateOverlayContent(overlay, add);
+  });
 
-    const { box } = overlay;
-    const inRange = (v: number) => Number.isFinite(v) && v >= -BOX_EPSILON && v <= 1 + BOX_EPSILON;
-    if (![box.x, box.y, box.width, box.height, box.x + box.width, box.y + box.height].every((v) => inRange(v)) || box.width <= 0 || box.height <= 0) {
-      add('error', 'overlay-box-out-of-range', `Overlay ${overlayId} box is outside the frame or empty`);
-    }
+  return issues;
+}
 
-    // A linked bar's own duration is not used
-    const linked = overlay.type === 'progressBar' && overlay.linkedCountdownId != null;
-    if (!linked && !(Number.isFinite(overlay.duration) && overlay.duration > 0)) {
-      add('error', 'overlay-invalid-duration', `Overlay ${overlayId} has invalid duration ${overlay.duration}`);
-    } else {
-      const fades = overlay.type === 'image' || overlay.type === 'text' ? overlay.fadeIn + overlay.fadeOut : (overlay.type === 'countdown' ? overlay.fadeOut : 0);
-      if (fades > overlay.duration) add('warning', 'overlay-fades-too-long', `Overlay ${overlayId} fades are longer than its duration`);
-      if (overlay.type === 'text' && overlay.entry.kind !== 'none' && overlay.entry.duration > overlay.duration) {
-        add('warning', 'overlay-entry-too-long', `Text ${overlayId} entry animation is longer than its duration`);
+/**
+ * Blocks of overlays (H1, v7, T56). Errors: duplicate ids, an instance of an unknown definition (it's left out),
+ * member ids that are repeated or contain the expanded ids' separator, and the members' own content errors (like loose
+ * overlays, reported once per definition with `blockDefId` + `overlayId` = member id). Warnings (all have a fallback):
+ * unused or empty definitions, member references outside the block, broken block anchors, anchor cycles through a
+ * block, and text variables with neither value nor default.
+ */
+function validateBlocks(project: MixProject, clipIds: ReadonlySet<string>, expanded: ExpandedOverlays, cycleIds: ReadonlySet<string>): MixProjectIssue[] {
+  const issues: MixProjectIssue[] = [];
+  const { blockDefs, blocks, overlays } = project;
+  const byId = getOverlaysById(expanded.all);
+  const blockIds = new Set(blocks.map((b) => b.id));
+  const usedDefIds = new Set(blocks.map((b) => b.defId));
+
+  const defsById = new Map<string, MixProject['blockDefs'][number]>();
+  blockDefs.forEach((def) => {
+    const blockDefId = def.id;
+    const add = (level: MixProjectIssue['level'], code: MixProjectIssueCode, message: string, overlayId?: string) => issues.push({ level, code, message, blockDefId, ...(overlayId != null && { overlayId }) });
+    if (defsById.has(blockDefId)) add('error', 'duplicate-block-def-id', `Duplicate block definition id ${blockDefId}`);
+    defsById.set(blockDefId, def);
+    if (!usedDefIds.has(blockDefId)) add('warning', 'block-def-unused', `Block definition ${blockDefId} has no instances`);
+    if (def.members.length === 0) add('warning', 'block-empty', `Block definition ${blockDefId} has no overlays`);
+
+    const memberIds = new Set<string>();
+    def.members.forEach((member) => {
+      if (memberIds.has(member.id)) add('error', 'duplicate-block-member-id', `Duplicate member id ${member.id} in block definition ${blockDefId}`, member.id);
+      if (member.id.includes(BLOCK_MEMBER_ID_SEPARATOR)) add('error', 'invalid-block-member-id', `Member id ${member.id} of block definition ${blockDefId} contains "${BLOCK_MEMBER_ID_SEPARATOR}"`, member.id);
+      memberIds.add(member.id);
+    });
+    def.members.forEach((member) => {
+      if (isInvalidMemberReference(member, memberIds)) {
+        add('warning', 'block-member-invalid-reference', `Member ${member.id} of block definition ${blockDefId} refers to something outside the block`, member.id);
       }
-    }
+      validateOverlayContent(member, (level, code, message) => add(level, code, message, member.id));
+    });
+  });
 
-    if (overlay.type === 'text') {
-      // Renders nothing: probably left empty by mistake
-      if (overlay.text.trim() === '') add('warning', 'overlay-empty-text', `Text ${overlayId} is empty`);
-      if (overlay.entry.kind === 'slide' && overlay.entry.from == null) add('error', 'overlay-invalid-entry', `Text ${overlayId} slides in from no side`);
-      if (overlay.fontSize != null && !(Number.isFinite(overlay.fontSize) && overlay.fontSize > 0)) {
-        add('error', 'overlay-invalid-font-size', `Text ${overlayId} has invalid font size ${overlay.fontSize}`);
-      }
-    }
+  const looseIds = new Set(overlays.map((o) => o.id));
+  const seen = new Set<string>();
+  blocks.forEach((block) => {
+    const blockId = block.id;
+    const add = (level: MixProjectIssue['level'], code: MixProjectIssueCode, message: string) => issues.push({ level, code, message, blockId, blockDefId: block.defId });
+    if (seen.has(blockId) || looseIds.has(blockId)) add('error', 'duplicate-block-id', `Duplicate block id ${blockId}`);
+    seen.add(blockId);
 
-    if (overlayColors(overlay).some((color) => !OVERLAY_COLOR_REGEX.test(color))) {
-      add('error', 'overlay-invalid-color', `Overlay ${overlayId} has an invalid color`);
+    const def = defsById.get(block.defId);
+    if (def == null) add('error', 'block-unknown-def', `Block ${blockId} uses unknown definition ${block.defId}`);
+
+    const { anchor } = block;
+    if (anchor.kind === 'clip' && !clipIds.has(anchor.clipId)) {
+      add('warning', 'block-broken-reference', `Block ${blockId} is anchored to unknown clip ${anchor.clipId}`);
+    }
+    if (anchor.kind === 'element' && !byId.has(anchor.elementId) && !blockIds.has(anchor.elementId)) {
+      add('warning', 'block-broken-reference', `Block ${blockId} is anchored to unknown overlay ${anchor.elementId}`);
+    }
+    const inCycle = expanded.anchors.get(blockId)?.cycle === true
+      || [...expanded.origins].some(([id, origin]) => origin.blockId === blockId && cycleIds.has(id));
+    if (inCycle) add('warning', 'block-cycle', `Block ${blockId} is part of an anchor cycle`);
+
+    if (def != null) {
+      const missing = getMissingVariables(def, block.variables);
+      if (missing.length > 0) add('warning', 'block-missing-variable', `Block ${blockId} has no value for ${missing.map((name) => `{{${name}}}`).join(', ')}`);
     }
   });
 
@@ -404,7 +503,9 @@ export function validateMixProject(project: MixProject, { sourceDurations = {}, 
     issues.push({ level: 'warning', code: 'odd-gap', message: 'Odd gap width can leave a 1px fill column (yuv420p needs even widths)' });
   }
 
-  issues.push(...validateOverlays(project, clipIds));
+  const expanded = expandBlocks(project);
+  const cycleIds = findOverlayCycleIds(expanded.all);
+  issues.push(...validateOverlays(project, clipIds, expanded, cycleIds), ...validateBlocks(project, clipIds, expanded, cycleIds));
 
   return issues;
 }

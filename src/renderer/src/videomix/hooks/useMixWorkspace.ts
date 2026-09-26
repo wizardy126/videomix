@@ -61,10 +61,11 @@ export default function useMixWorkspace({ mixProject, filePath, ffprobeMeta, loa
   const currentSource = useMemo(() => (filePath != null ? project.sources.find((s) => s.path === filePath) : undefined), [filePath, project.sources]);
   const currentSourceId = currentSource?.id;
 
-  // T22: the list isn't pruned when an overlay is removed (T19), so only report the files of overlays that still exist
+  // T22: the list isn't pruned when an overlay is removed (T19), so only report the files of overlays that still exist.
+  // T56: only loose overlays for now (the files of the blocks' members carry `blockDefId`; showing them is T57/T58's)
   const existingMissingOverlayFiles = useMemo(() => {
     const ids = new Set(project.overlays.map((o) => o.id));
-    return missingOverlayFiles.filter((m) => ids.has(m.overlayId));
+    return missingOverlayFiles.filter((m) => m.blockDefId == null && ids.has(m.overlayId));
   }, [missingOverlayFiles, project.overlays]);
 
   const clipCountBySource = useMemo(() => countClipsBySource(project.clips), [project.clips]);

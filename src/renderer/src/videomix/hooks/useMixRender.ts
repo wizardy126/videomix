@@ -18,6 +18,7 @@ import { getOverlayFiles } from '../projectFile';
 import { getUsedSources, refreshSourcesMeta } from '../workspace';
 import { ensureLoudness, getSoundDurations } from '../loudness';
 import type { LoudnessMeasurement } from '../types';
+import { expandBlocks } from '../blocks/expandBlocks';
 import { resolveOverlayTimes } from '../overlays/resolveOverlayTimes';
 import { getOverlayTimeWarningText } from '../overlayTexts';
 import { getKnownSoundDurations } from './useOverlaySoundDurations';
@@ -210,11 +211,14 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     const currentProject = getProject();
 
     const clipNameById = new Map(currentProject.clips.map((clip) => [clip.id, clip.name]));
-    const overlayNameById = new Map(currentProject.overlays.map((overlay) => [overlay.id, overlay.name]));
+    // T56: blocks expanded into concrete overlays (`all` to resolve times, `visible` to draw and play)
+    const expanded = expandBlocks(currentProject);
+    const overlayNameById = new Map(expanded.all.map((overlay) => [overlay.id, overlay.name]));
+    const memberName = (defId: string, memberId: string) => currentProject.blockDefs.find((def) => def.id === defId)?.members.find((m) => m.id === memberId)?.name;
     const issueText = (issue: MixProjectIssue) => getIssueText(
       issue,
       issue.clipId != null ? clipNameById.get(issue.clipId) : undefined,
-      issue.overlayId != null ? overlayNameById.get(issue.overlayId) : undefined,
+      issue.overlayId != null ? ((issue.blockDefId != null ? memberName(issue.blockDefId, issue.overlayId) : undefined) ?? overlayNameById.get(issue.overlayId)) : undefined,
     );
     const issues = validateMixProject(currentProject);
     const errors = issues.filter((issue) => issue.level === 'error');
@@ -225,9 +229,9 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       ...currentProject.sources.filter((source) => usedSourceIds.has(source.id)).map((source) => ({ name: source.name, filePath: source.absolutePath })),
       ...currentProject.settings.musicPlaylist.tracks.map((track) => ({ name: path.basename(track.absolutePath), filePath: track.absolutePath })),
       // overlay images, sounds and countdown fonts (T20)
-      ...currentProject.overlays.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => ({ name: overlay.name, filePath: file.absolutePath }))),
+      ...expanded.visible.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => ({ name: overlay.name, filePath: file.absolutePath }))),
       // the bundled font, if used (a broken install would otherwise fail inside ffmpeg)
-      ...(currentProject.overlays.some((overlay) => (overlay.type === 'countdown' || overlay.type === 'text') && overlay.font == null) ? [{ name: 'OpenSans-Bold.ttf', filePath: getDefaultOverlayFontPath() }] : []),
+      ...(expanded.visible.some((overlay) => (overlay.type === 'countdown' || overlay.type === 'text') && overlay.font == null) ? [{ name: 'OpenSans-Bold.ttf', filePath: getDefaultOverlayFontPath() }] : []),
     ];
     const missing = (await Promise.all(filesToCheck.map(async (file) => ((await mainApi.pathExists(file.filePath)) ? undefined : file)))).filter((file) => file != null);
 
@@ -247,8 +251,8 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     // sound durations already known to the UI (T22's useOverlaySoundDurations): the render itself re-resolves them
     // with the exact durations from the loudness analysis (T21), so this is only for the confirmation's wording.
     // E4 (T39): on the placements of the whole plan, cut to the maximum duration (getOverlayTimesPlan)
-    const overlayTimes = resolveOverlayTimes(currentProject, getOverlayTimesPlan(renderPlan), { soundDurations: getKnownSoundDurations(currentProject.overlays) });
-    const overlayTimeWarningLines = currentProject.overlays.flatMap((overlay) => {
+    const overlayTimes = resolveOverlayTimes({ overlays: expanded.all, clips: currentProject.clips }, getOverlayTimesPlan(renderPlan), { soundDurations: getKnownSoundDurations(expanded.all) });
+    const overlayTimeWarningLines = expanded.visible.flatMap((overlay) => {
       const warnings = overlayTimes.get(overlay.id)?.warnings ?? [];
       return warnings.map((warning) => i18n.t('Overlay "{{overlay}}": {{warning}}', { overlay: overlay.name, warning: getOverlayTimeWarningText(warning) }));
     });
@@ -274,8 +278,10 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
     // re-render.
     const currentProject = getProject();
     const abortController = new AbortController();
+    // T56: blocks expanded into concrete overlays; hidden blocks (H8) are resolved but neither drawn nor played
+    const expanded = expandBlocks(currentProject);
     // Sound overlays (T21): measured and mixed in alongside the clips
-    const soundOverlays = currentProject.overlays.filter((overlay) => overlay.type === 'sound');
+    const soundOverlays = expanded.visible.filter((overlay) => overlay.type === 'sound');
 
     // T41: the working state carries what the render progress dialog shows; the elapsed time counts from here
     const renderText = preview ? i18n.t('Rendering preview') : i18n.t('Rendering mix');
@@ -319,7 +325,11 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
 
       startPhase(renderText, 'render');
       const { plan, settings, encoding } = renderPlan;
-      const overlayTimes = resolveOverlayTimes(currentProject, getOverlayTimesPlan(renderPlan), { soundDurations: getSoundDurations(loudness, soundOverlays) });
+      // The sounds of hidden blocks aren't measured: their duration known to the UI, if any, only matters to what's
+      // anchored to their end (without hidden blocks, `all` is `visible` and this is empty)
+      const visibleIds = new Set(expanded.visible.map((overlay) => overlay.id));
+      const hiddenSoundDurations = Object.fromEntries(Object.entries(getKnownSoundDurations(expanded.all)).filter(([id]) => !visibleIds.has(id)));
+      const overlayTimes = resolveOverlayTimes({ overlays: expanded.all, clips: currentProject.clips }, getOverlayTimesPlan(renderPlan), { soundDurations: { ...hiddenSoundDurations, ...getSoundDurations(loudness, soundOverlays) } });
 
       // T25: 'auto'/a specific choice resolved against what actually works on this machine (main's detectEncoders,
       // cached for the session); a manual choice that isn't available (e.g. a project made on another machine)
@@ -334,7 +344,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
       const fileIdentities = cacheMaxBytes > 0 ? await getFileIdentities([
         ...Object.values(sourcePaths),
         ...currentProject.settings.musicPlaylist.tracks.map((track) => track.absolutePath),
-        ...currentProject.overlays.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => file.absolutePath)),
+        ...expanded.visible.flatMap((overlay) => getOverlayFiles(overlay).map(({ file }) => file.absolutePath)),
         getDefaultOverlayFontPath(),
       ]) : {};
 
@@ -354,7 +364,7 @@ export default function useMixRender({ mixProject, workingRef, setWorking, setPr
           buildAudioGraph: (input) => buildAudioGraph({ ...input, clips: currentProject.clips, loudness, overlays: soundOverlays, overlayTimes }),
           join: path.join,
           // images, countdowns and progress bars (T20)
-          overlays: { overlays: currentProject.overlays, times: overlayTimes, defaultFontPath: getDefaultOverlayFontPath() },
+          overlays: { overlays: expanded.visible, times: overlayTimes, defaultFontPath: getDefaultOverlayFontPath() },
         });
         // T41: the first ffmpeg starts the timed work, for the remaining time estimate: the cached blocks, which count
         // as done at once, come before it
