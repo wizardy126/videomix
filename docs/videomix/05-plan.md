@@ -26,6 +26,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M10 · Render y conversiones** | Modal de progreso del render, vídeos convertidos en la caché del proyecto | T41–T43 |
 | **M11 · Mejoras v4** | F1, F2, A5, A7, A9 | T44, T44b, T45–T50 |
 | **M12 · Mejoras v5 y correcciones** | G1–G5, A3 | T51–T55 |
+| **M13 · Bloques de overlays y plantillas** | H1–H8 | T56–T59 |
 
 ## Tareas
 
@@ -93,6 +94,10 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T53 | v5: filas compactas y zoom/scroll en la vista Mix (G3, A3) | M12 | Opus | — | hecha |
 | T54 | v5: "Ajustar a" sobre el mín. (G5) | M12 | Sonnet | T51 | hecha |
 | T55 | v5: manual, i18n y cierre | M12 | Sonnet | T51–T54 | hecha |
+| T56 | v6: modelo de bloques, plantillas y lógica pura | M13 | Opus | — | en curso |
+| T57 | v6: bloques en la interfaz (H1, H5, H6, H8) | M13 | Opus | T56 | pendiente |
+| T58 | v6: exportar, importar y biblioteca (H2, H3, H4, H7) | M13 | Opus | T56 | pendiente |
+| T59 | v6: manual, i18n y cierre | M13 | Sonnet | T56–T58 | pendiente |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 
@@ -160,6 +165,12 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 1. T51 ∥ T52 ∥ T53.
 2. T54.
 3. T55.
+
+## Oleadas de M13
+
+1. T56.
+2. T57 ∥ T58.
+3. T59.
 
 ## Pendientes al integrar en la rama por defecto
 

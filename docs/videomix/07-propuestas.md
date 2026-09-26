@@ -66,3 +66,4 @@ Propuestas hechas al usuario tras M7 (overlays), con su estado. El usuario elige
 - M10: modal de progreso del render y vídeos convertidos en la caché. ✅
 - v4 (§12): F1 indicador de encaje en fracciones y F2 imán / "Ajustar a". ✅ (T44, T44b, T45)
 - v5 (§13): G1–G5 (correcciones del planificador, la vista Mix, los atajos y "Ajustar a"). ✅ (T51–T54)
+- v6 (§14): H1–H8, bloques de overlays y plantillas (incluye las ideas E1–E6 de esa propuesta, distintas de las E del catálogo). 🚧

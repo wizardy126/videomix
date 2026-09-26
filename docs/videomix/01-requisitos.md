@@ -229,7 +229,20 @@ Además, en M10 (sin ID): **modal de progreso del render** (fase, barra, transcu
 | G5 | **"Ajustar a" con mín.** | Si hay mín., se ajusta **el mín.**: su ancho (alto en filas) crece o encoge, centrado en el propio mín., para que el ancho más estrecho del clip sea exactamente la fracción. Si el máx. no llega a la fracción, se **ensancha lo justo** (centrado, dentro del fotograma); si no cabe, aviso. Sin mín., se ajusta el máx. como hasta ahora. |
 | A3 | **Zoom y scroll horizontal en la vista Mix** | Por defecto, todo el vídeo ajustado al ancho (como ahora). **Ctrl + rueda**: zoom centrado en el ratón; rueda o Mayús + rueda: desplazamiento horizontal. Botones **+ / − / Ajustar** en la cabecera. Con zoom, al reproducir, la vista **sigue al cursor**. El zoom no se guarda en el proyecto. |
 
-## 14. Fuera de alcance (backlog)
+## 14. Bloques de overlays y plantillas (v6, decidido con el usuario)
+
+| ID | Mejora | Decisiones |
+|---|---|---|
+| H1 | **Bloques de overlays** | Un bloque agrupa overlays (contadores, barras, imágenes, textos, sonidos) con **nombre y color** y se mueve como **una sola pieza** en la vista Mix. Tiene su propia **ancla** (absoluta, a un clip o a otro overlay/bloque); los miembros guardan tiempos **relativos al inicio del bloque** y conservan sus relaciones internas (anclas entre ellos, barra vinculada a contador). **Selección múltiple** de overlays (Ctrl/Mayús+clic) y "Agrupar en bloque": el bloque **hereda el ancla** de su primer overlay (si estaba anclado a un clip, el bloque sigue al clip) y todo queda exactamente donde estaba. Desagrupar, duplicar, renombrar, editar un miembro dentro del bloque, plegar su pista. Cada acción, un paso de deshacer. |
+| H2 | **Exportar e importar bloques (plantillas)** | Fichero **`.vmxblock`**: JSON indentado, legible y editable a mano (se lee como JSON5: admite comentarios y comas finales; se escribe JSON estricto), con `format`, `version`, tiempos relativos al inicio del bloque y `originalStart`. **JSON Schema** para autocompletar y validar en editores. Las anclas a clips del proyecto de origen se convierten a tiempos relativos (el nombre del clip queda como referencia informativa). También **"Exportar selección"** de overlays sueltos. Ficheros (PNG, sonidos, fuentes): casilla **"Incluir ficheros"**: sin ella, rutas relativas al `.vmxblock`; con ella, se copian a una carpeta junto al `.vmxblock`. **Importar** con vista previa y colocación: **tiempos originales**, **desplazar** ± s, **en el cursor** o **anclado a un clip** (inicio/fin + desfase). Ids nuevas siempre (se puede importar varias veces); ficheros que faltan → localizarlos; errores de validación claros, sin importar a medias. Se importa como bloque, con opción de desagrupar. |
+| H3 | **Biblioteca de plantillas** (E1) | Carpeta global de la app con `.vmxblock`; menú **"Insertar bloque"** con nombre, duración y miniatura; guardar un bloque en la biblioteca; abrir la carpeta. |
+| H4 | **Variables de texto** (E2) | Marcadores **`{{nombre}}`** en los textos (con valor por defecto opcional `{{nombre\|valor}}`); al importar o insertar se pide su valor en un formulario; cada instancia guarda sus valores y se pueden editar después. |
+| H5 | **Repetir un bloque** (E3) | Insertar **N veces cada X s** o **al inicio de cada clip de una selección** (anclado a cada clip). Las repeticiones son **instancias enlazadas**: comparten el contenido (editar una cambia todas); cada una tiene su ancla y sus valores de variables; **"Desvincular"** convierte una instancia en bloque independiente. |
+| H6 | **Estirar la duración** (E4) | Escalar los tiempos del bloque para que dure X s; fundidos y animaciones de entrada se mantienen. |
+| H7 | **Adaptar a otra proporción** (E5) | Si el bloque se hizo para otra proporción de salida, el diálogo de importación ofrece **"Adaptar"** (marcado por defecto): conserva el tamaño relativo a la altura y recoloca las cajas dentro del fotograma nuevo. |
+| H8 | **Ocultar y bloquear** (E6) | Ocultar un bloque (no sale en previsualización ni render, sin borrarlo) y bloquearlo (no se puede mover ni editar sin desbloquear). |
+
+## 15. Fuera de alcance (backlog)
 
 - Notas en los clips.
 - Resolución libre.

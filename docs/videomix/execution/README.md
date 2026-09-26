@@ -106,3 +106,7 @@
 | T53 | [T53-v5-vista-mix.md](T53-v5-vista-mix.md) |
 | T54 | [T54-v5-ajustar-min.md](T54-v5-ajustar-min.md) |
 | T55 | [T55-v5-cierre.md](T55-v5-cierre.md) |
+| T56 | [T56-v6-bloques-modelo.md](T56-v6-bloques-modelo.md) |
+| T57 | [T57-v6-bloques-ui.md](T57-v6-bloques-ui.md) |
+| T58 | [T58-v6-exportar-importar.md](T58-v6-exportar-importar.md) |
+| T59 | [T59-v6-cierre.md](T59-v6-cierre.md) |
