@@ -1,0 +1,67 @@
+// Ejemplo de .vmxblock escrito a mano (H2, 01-requisitos §14): un "rótulo de ejercicio" con dos textos y dos
+// variables ({{exercise}} y {{reps}}), para copiar y adaptar a tu propio catálogo de ejercicios.
+//
+// Este fichero se puede editar con cualquier editor de texto: como se lee con JSON5, admite estos comentarios y
+// comas finales. VideoMix siempre lo vuelve a escribir como JSON estricto (sin comentarios) al exportar desde la
+// aplicación, así que si lo abres después de guardarlo desde ahí no los encontrarás.
+//
+// "$schema" es solo para el autocompletado y la validación en el editor (VS Code, por ejemplo); VideoMix lo ignora.
+{
+  "$schema": "../vmxblock.schema.json",
+  "format": "videomix-block",
+  "version": 1,
+  "name": "Rótulo de ejercicio",
+  "color": 3,
+  // Proporción de salida para la que se pensó el bloque; si lo importas en un proyecto con otra, el diálogo de
+  // importación ofrece "Adaptar" (H7): conserva el tamaño relativo a la altura y recoloca las cajas.
+  "aspect": "9:16",
+  // Instante (s) en el vídeo del que se exportó: lo usa la opción de importar "Tiempos originales".
+  "originalStart": 0,
+  // Valores por defecto de las variables al importar (además del "|valor" de cada texto, más abajo).
+  "variables": {
+    "exercise": "Sentadillas",
+    "reps": "3 series x 12",
+  },
+  "members": [
+    {
+      "id": "title",
+      "name": "Ejercicio",
+      "type": "text",
+      // "absolute": segundos desde el INICIO DEL BLOQUE (no del vídeo). En un bloque exportado, 0 = donde empezaba.
+      "anchor": { "kind": "absolute", "time": 0 },
+      // {{nombre}} pide su valor al importar/insertar; {{nombre|valor}} lleva un valor por defecto si no se rellena.
+      "text": "{{exercise|Sentadillas}}",
+      "duration": 4,
+      // Caja en fracción del fotograma (0–1): x, y = esquina superior izquierda; width, height = tamaño.
+      "box": { "x": 0.1, "y": 0.62, "width": 0.8, "height": 0.09 },
+      "fontSize": 0.07,
+      "align": "center",
+      "color": "#ffffff",
+      "border": { "width": 4, "color": "#000000" },
+      "lineSpacing": 0.2,
+      "fadeIn": 0.3,
+      "fadeOut": 0.3,
+      // Animación de entrada: desliza desde abajo en 0.4 s (además del fundido de entrada).
+      "entry": { "kind": "slide", "from": "bottom", "duration": 0.4 },
+    },
+    {
+      "id": "subtitle",
+      "name": "Repeticiones",
+      "type": "text",
+      // Ancla a OTRO MIEMBRO del bloque (por su "id"): aquí, el mismo instante en que empieza "title". Si "title" se
+      // borrara o cambiara de sitio, la referencia rota se detecta al importar/exportar y al construir el vídeo.
+      "anchor": { "kind": "element", "elementId": "title", "edge": "start", "offset": 0.2 },
+      "text": "{{reps}}",
+      "duration": 3.5,
+      "box": { "x": 0.15, "y": 0.72, "width": 0.7, "height": 0.05 },
+      "fontSize": 0.04,
+      "align": "center",
+      "color": "#ffe08a",
+      "border": { "width": 2, "color": "#000000" },
+      "lineSpacing": 0.15,
+      "fadeIn": 0.3,
+      "fadeOut": 0.3,
+      "entry": { "kind": "none", "duration": 0 },
+    },
+  ],
+}

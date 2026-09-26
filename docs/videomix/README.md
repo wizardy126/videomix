@@ -14,6 +14,9 @@ VideoMix es un fork de [LosslessCut](https://github.com/mifi/lossless-cut) (GPL-
 | [06-entorno-desarrollo.md](06-entorno-desarrollo.md) | Puesta en marcha, comandos, ffmpeg y vídeos de prueba |
 | [07-propuestas.md](07-propuestas.md) | Catálogo de propuestas de mejora y su estado |
 | [manual-usuario.md](manual-usuario.md) | Manual de usuario de VideoMix |
+| [guia-vmxblock.md](guia-vmxblock.md) | Guía del formato `.vmxblock` (plantillas de bloques de overlays) para editarlo a mano |
+| [vmxblock.schema.json](vmxblock.schema.json) | JSON Schema de `.vmxblock`, para autocompletar y validar en editores |
+| [ejemplos/](ejemplos) | Plantillas `.vmxblock` de ejemplo, comentadas |
 | [execution/](execution/README.md) | Proceso de ejecución y task-docs de cada tarea |
 
 ## Glosario
@@ -26,3 +29,5 @@ VideoMix es un fork de [LosslessCut](https://github.com/mifi/lossless-cut) (GPL-
 - **Plan de montaje (MixPlan)**: resultado del algoritmo de montaje: qué clip va en qué columna, cuándo, con qué recorte y con qué transiciones.
 - **Re-layout**: cambio de anchos de las columnas mientras hay clips en curso, animado de forma suave.
 - **Proyecto (`.vmx`)**: fichero que guarda fuentes, clips y ajustes de salida.
+- **Bloque**: grupo de overlays (v6, 01-requisitos §14) que se mueve como una sola pieza, con su propia ancla; sus miembros guardan tiempos relativos al inicio del bloque.
+- **Plantilla (`.vmxblock`)**: fichero con el contenido de un bloque, exportado desde un proyecto para importarlo en otro (o editado a mano); ver [guia-vmxblock.md](guia-vmxblock.md).

@@ -1777,6 +1777,10 @@ test.describe('VideoMix (shortcuts with the focus on a button)', () => {
       // a slider drag in the settings is one undo step (React's onChange fired, and committed, on every move)
       await textButton(page, 'Settings').click();
       const dialog = page.getByTestId('mix-settings');
+      await expect(dialog).toBeVisible();
+      // wait for the dialog's open animation (Dialog.module.css `contentShow`, 150 ms) to finish, or the slider's
+      // bounding box is read mid-animation (still scaling/translating) and the drag below lands on the wrong spot
+      await dialog.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
       const crfLabel = dialog.locator('label', { hasText: 'Quality (CRF)' });
       const crfText = (await crfLabel.textContent())!;
       const sliderBox = (await crfLabel.locator('input[type="range"]').boundingBox())!;

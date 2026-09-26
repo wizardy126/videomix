@@ -1,0 +1,78 @@
+// Ejemplo de .vmxblock escrito a mano (H2, 01-requisitos §14): un "descanso" con una cuenta atrás, una barra de
+// progreso VINCULADA a ella (toma su mismo inicio y duración), un texto y un pitido al llegar a 0 (mismo patrón que
+// el ejemplo de la sección 7 del manual de usuario, pero como plantilla reutilizable).
+{
+  "$schema": "../vmxblock.schema.json",
+  "format": "videomix-block",
+  "version": 1,
+  "name": "Descanso",
+  "color": 5,
+  "aspect": "16:9",
+  "originalStart": 0,
+  "members": [
+    {
+      "id": "label",
+      "name": "Descanso",
+      "type": "text",
+      "anchor": { "kind": "absolute", "time": 0 },
+      "text": "Descanso",
+      "duration": 15,
+      "box": { "x": 0.3, "y": 0.08, "width": 0.4, "height": 0.09 },
+      "fontSize": 0.06,
+      "align": "center",
+      "color": "#ffffff",
+      "border": { "width": 4, "color": "#000000" },
+      "lineSpacing": 0.2,
+      "fadeIn": 0.3,
+      "fadeOut": 0.3,
+      "entry": { "kind": "none", "duration": 0 },
+    },
+    {
+      "id": "cd",
+      "name": "Cuenta atrás",
+      "type": "countdown",
+      "anchor": { "kind": "absolute", "time": 0 },
+      // 15 s de descanso: como dura 60 s o más se mostraría "M:SS"; aquí, al ser menos, se muestra en "SS".
+      "duration": 15,
+      "box": { "x": 0.4, "y": 0.2, "width": 0.2, "height": 0.14 },
+      "align": "center",
+      "decimals": 0,
+      "leadingZeros": false,
+      "color": "#ffffff",
+      "border": { "width": 4, "color": "#000000" },
+      "fadeOut": 0.5,
+      // "font" es opcional: sin él se usa la fuente por defecto de VideoMix. Si lo pones, "path" es relativo a este
+      // fichero (con "/") o absoluto; con "Incluir ficheros" al exportar desde la app, la app la copia y ajusta la
+      // ruta sola.
+    },
+    {
+      "id": "bar",
+      "name": "Barra",
+      "type": "progressBar",
+      "anchor": { "kind": "absolute", "time": 0 },
+      // Con "linkedCountdownId" la barra toma el inicio y la duración de "cd": este "duration" se ignora, pero el
+      // campo es obligatorio en el fichero (deja el mismo valor que el de la cuenta atrás vinculada).
+      "duration": 15,
+      "linkedCountdownId": "cd",
+      "box": { "x": 0.03, "y": 0.94, "width": 0.94, "height": 0.03 },
+      "fillColor": "#7CFC98",
+      "backgroundColor": "#00000080",
+      "border": { "width": 2, "color": "#000000" },
+      "direction": "ltr",
+      "mode": "fill",
+    },
+    {
+      "id": "beep",
+      "name": "Pitido",
+      "type": "sound",
+      // Ancla al FIN de la cuenta atrás "cd" (T19 §9.2): sonará justo cuando llegue a 0. Para oírse entero, el vídeo
+      // debe durar hasta ese instante más la duración del fichero de sonido.
+      "anchor": { "kind": "element", "elementId": "cd", "edge": "end", "offset": 0 },
+      // Ruta relativa a este fichero (con "/") o absoluta; pon aquí tu propio pitido, o usa "Incluir ficheros" al
+      // exportar un bloque similar desde la app para no depender de dónde esté el original.
+      "path": "sounds/beep.wav",
+      // 0 dB = tan fuerte como los clips ya normalizados (−16 LUFS); ajusta según el pitido que uses.
+      "gainDb": 0,
+    },
+  ],
+}

@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FaObjectGroup, FaTimes, FaTrash } from 'react-icons/fa';
+import { FaFileExport, FaObjectGroup, FaTimes, FaTrash } from 'react-icons/fa';
 
 import { controlsBackground, darkModeTransition } from '../../colors';
 import type { MixClip } from '../types';
@@ -9,6 +9,7 @@ import type { MissingOverlayFile, OverlayFileKind } from '../projectFile';
 import { getBlockDefTimes } from '../blocks/expandBlocks';
 import { getAnchorTargets, getBlockLabel, isBlockDefLocked } from '../blocks/blockUi';
 import type { UseMixOverlays } from '../hooks/useMixOverlays';
+import type { UseBlockTemplates } from '../hooks/useBlockTemplates';
 import OverlayPanel from './OverlayPanel';
 import BlockPanel from './BlockPanel';
 
@@ -18,7 +19,7 @@ import BlockPanel from './BlockPanel';
 const iconButtonStyle: CSSProperties = { font: 'inherit', fontSize: '.8em', padding: '.2em .4em', border: '1px solid var(--gray-7)', borderRadius: '.3em', background: 'var(--gray-3)', color: 'var(--gray-12)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '.3em' };
 
 // eslint-disable-next-line react/display-name
-const MultiSelectionPanel = memo(({ width, mixOverlays }: { width: number, mixOverlays: UseMixOverlays }) => {
+const MultiSelectionPanel = memo(({ width, mixOverlays, blockTemplates }: { width: number, mixOverlays: UseMixOverlays, blockTemplates: Pick<UseBlockTemplates, 'userExportBlock'> }) => {
   const { t } = useTranslation();
   const { project, selectedIds, selectedLooseOverlayIds, selectedBlockIds, clearOverlaySelection, userGroupSelection, userRemoveSelection } = mixOverlays;
   const names = useMemo(() => selectedIds.map((id) => {
@@ -40,6 +41,7 @@ const MultiSelectionPanel = memo(({ width, mixOverlays }: { width: number, mixOv
       </ul>
       <div style={{ display: 'flex', gap: '.3em', flexWrap: 'wrap' }}>
         <button type="button" data-testid="group-overlays" style={{ ...iconButtonStyle, ...(!canGroup && { opacity: 0.5, cursor: 'default' }) }} disabled={!canGroup} title={canGroup ? t('They move as one piece and keep their times') : t('Only loose overlays can be grouped (a block can\'t contain blocks)')} onClick={userGroupSelection}><FaObjectGroup />{t('Group into block')}</button>
+        <button type="button" data-testid="export-selection" style={{ ...iconButtonStyle, ...(!canGroup && { opacity: 0.5, cursor: 'default' }) }} disabled={!canGroup} title={canGroup ? t('Export selection as a block') : t('Only loose overlays can be exported (select a single block from its own panel instead)')} onClick={() => blockTemplates.userExportBlock({ overlayIds: selectedLooseOverlayIds })}><FaFileExport />{t('Export selection…')}</button>
         <button type="button" style={iconButtonStyle} onClick={userRemoveSelection} title={t('Locked blocks are kept')}><FaTrash />{t('Delete')}</button>
       </div>
       <div style={{ fontSize: '.7em', opacity: 0.7, marginTop: '.5em' }}>{t('Ctrl+click adds or removes an overlay or block from the selection, Shift+click adds it.')}</div>
@@ -47,7 +49,7 @@ const MultiSelectionPanel = memo(({ width, mixOverlays }: { width: number, mixOv
   );
 });
 
-function OverlaySelectionPanel({ width, clips, selectedClipIds, missingOverlayFiles, mixOverlays, onLocate }: {
+function OverlaySelectionPanel({ width, clips, selectedClipIds, missingOverlayFiles, mixOverlays, onLocate, blockTemplates }: {
   width: number,
   clips: MixClip[],
   /** For "Repeat… at the start of each selected clip". */
@@ -56,6 +58,8 @@ function OverlaySelectionPanel({ width, clips, selectedClipIds, missingOverlayFi
   mixOverlays: UseMixOverlays,
   /** `blockDefId` for a member of a block (`overlayId` is then its member id). */
   onLocate: (overlayId: string, kind: OverlayFileKind, blockDefId?: string | undefined) => void,
+  /** For "Export selection…" on a multi-selection of loose overlays (T58's "Export selection" of H2). */
+  blockTemplates: Pick<UseBlockTemplates, 'userExportBlock'>,
 }) {
   const { project, plan, resolved, selectedOverlay, selectedBlock, selectedMember, selectedIds } = mixOverlays;
 
@@ -125,7 +129,7 @@ function OverlaySelectionPanel({ width, clips, selectedClipIds, missingOverlayFi
       />
     );
   }
-  if (selectedIds.length > 1) return <MultiSelectionPanel width={width} mixOverlays={mixOverlays} />;
+  if (selectedIds.length > 1) return <MultiSelectionPanel width={width} mixOverlays={mixOverlays} blockTemplates={blockTemplates} />;
   return null;
 }
 

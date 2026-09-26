@@ -1,6 +1,6 @@
 # Manual de usuario de VideoMix
 
-VideoMix crea un vídeo final combinando fragmentos ("clips") de varios vídeos, mostrados uno junto a otro en columnas (o en filas, en salida vertical). Este manual cubre el flujo completo: crear un proyecto, añadir fuentes, definir clips, ajustar el montaje (incluida la salida vertical o cuadrada y los codificadores por hardware), añadir elementos superpuestos (imágenes, textos, cuentas atrás, barras y sonidos) con miniaturas y estilos guardados, la música de fondo con lista de reproducción y *ducking*, fijar y agrupar clips, previsualizar en vivo, previsualizar por render y renderizar.
+VideoMix crea un vídeo final combinando fragmentos ("clips") de varios vídeos, mostrados uno junto a otro en columnas (o en filas, en salida vertical). Este manual cubre el flujo completo: crear un proyecto, añadir fuentes, definir clips, ajustar el montaje (incluida la salida vertical o cuadrada y los codificadores por hardware), añadir elementos superpuestos (imágenes, textos, cuentas atrás, barras y sonidos) con miniaturas y estilos guardados, agruparlos en **bloques** reutilizables como plantillas (`.vmxblock`), la música de fondo con lista de reproducción y *ducking*, fijar y agrupar clips, previsualizar en vivo, previsualizar por render y renderizar.
 
 ## 1. Crear un proyecto
 
@@ -182,7 +182,7 @@ En 1:1 el montaje decide, proyecto a proyecto, si sale mejor en columnas o en fi
 
 Junto a los botones **Ajustes**, **Vista previa** y **Renderizar** de la barra inferior (en ambas pestañas, **Fuente** y **Montaje**) se muestra siempre la **duración estimada** del montaje actual ("≈ m:ss"), calculada con el planificador real (con un pequeño retardo tras cada cambio) para tener en cuenta clips, cadenas, secuencia y ajustes.
 
-El interruptor **Limitar la duración del vídeo** de la sección **Salida** (desactivado por defecto) fija una **duración máxima**. Si el montaje calculado dura más, el vídeo final se **corta en ese límite** aplicando el *fade* de salida global (vídeo y audio) en el corte; el indicador de duración estimada se resalta en ese caso y muestra a qué instante se recorta (`→ cortado en m:ss`). El aviso también aparece en la confirmación previa a previsualizar o renderizar (§8). Con un límite activo, el planificador **favorece disposiciones con más columnas o filas** para que quepa más contenido antes del corte.
+El interruptor **Limitar la duración del vídeo** de la sección **Salida** (desactivado por defecto) fija una **duración máxima**. Si el montaje calculado dura más, el vídeo final se **corta en ese límite** aplicando el *fade* de salida global (vídeo y audio) en el corte; el indicador de duración estimada se resalta en ese caso y muestra a qué instante se recorta (`→ cortado en m:ss`). El aviso también aparece en la confirmación previa a previsualizar o renderizar (§9). Con un límite activo, el planificador **favorece disposiciones con más columnas o filas** para que quepa más contenido antes del corte.
 
 ### 5.1 Música: lista de reproducción y *ducking*
 
@@ -217,7 +217,7 @@ El nivel de zoom **no se guarda** en el proyecto: siempre se empieza ajustado al
 
 El área donde normalmente se ve el vídeo de la fuente activa se sustituye, en la pestaña **Montaje**, por una previsualización en vivo: reproduce el montaje completo (columnas, transiciones, overlays, música y efectos, con su volumen aproximado) directamente en la ventana, sin generar ningún fichero. Tiene sus propios controles (reproducir/pausar, tiempo, barra de búsqueda) y muestra los fotogramas por segundo que consigue dibujar en este equipo.
 
-Es una **aproximación**: algunas transiciones con geometría (barridos, deslizamientos, círculo...) se ven como un fundido simple, y los volúmenes no están normalizados hasta que una previsualización o un render calculan la sonoridad real de los clips y la música (se avisa mientras tanto). El aviso "Previsualización en vivo aproximada: el render es la referencia" recuerda que el resultado final puede variar ligeramente. Para un resultado exacto (incluidas las transiciones con geometría), usa **Previsualizar el montaje** (§8), que genera un render rápido de verdad.
+Es una **aproximación**: algunas transiciones con geometría (barridos, deslizamientos, círculo...) se ven como un fundido simple, y los volúmenes no están normalizados hasta que una previsualización o un render calculan la sonoridad real de los clips y la música (se avisa mientras tanto). El aviso "Previsualización en vivo aproximada: el render es la referencia" recuerda que el resultado final puede variar ligeramente. Para un resultado exacto (incluidas las transiciones con geometría), usa **Previsualizar el montaje** (§9), que genera un render rápido de verdad.
 
 ## 7. Elementos superpuestos: imágenes, cuentas atrás, barras y sonidos
 
@@ -278,11 +278,85 @@ Un elemento puede mostrar un aviso ▲, tanto en su bloque como en el panel:
 - **Sus anclajes forman un ciclo**, **el clip/elemento al que está anclado ya no existe** o **la cuenta atrás vinculada ya no existe**: el elemento sigue con un tiempo de respaldo (su tiempo actual, en absoluto).
 - **Fichero no encontrado**: al abrir un proyecto cuyo PNG, sonido o fuente no se encuentra, aparece un aviso con **Localizar...** para indicar su nueva ubicación (también hay un aviso general al abrir el proyecto si falta algún fichero de este tipo). El botón **Reemplazar…** del panel, para cambiar el fichero de una imagen o un sonido por otro, también hace desaparecer este aviso.
 
-Estos avisos (recortado, fuera del vídeo, ciclo, referencia rota) se repiten, si los hay, en la confirmación previa a previsualizar o renderizar (§8), con la opción de continuar de todos modos.
+Estos avisos (recortado, fuera del vídeo, ciclo, referencia rota) se repiten, si los hay, en la confirmación previa a previsualizar o renderizar (§9), con la opción de continuar de todos modos.
 
 **Borrar un clip o un elemento** del que dependen otros elementos anclados los convierte en anclaje absoluto (conservan su tiempo actual) y avisa con un mensaje; deshacer restaura también el anclaje.
 
-## 8. Previsualizar y renderizar
+## 8. Bloques de overlays y plantillas
+
+Varios elementos superpuestos se pueden agrupar en un **bloque**: se mueven, se ocultan y se bloquean como una sola pieza, conservando sus relaciones internas (anclajes entre ellos, una barra vinculada a su cuenta atrás). Un bloque se puede **repetir** con copias enlazadas, **estirar** para que dure otro tiempo, llevar **variables de texto** para personalizarlo cada vez y **exportarse** a un fichero `.vmxblock` para reutilizarlo en otro proyecto o guardarlo en una biblioteca de plantillas.
+
+### Seleccionar varios elementos y agruparlos
+
+En los carriles de la pestaña **Montaje** (o sobre sus cajas en la miniatura del fotograma), **Ctrl/Cmd+clic** añade o quita un elemento de la selección y **Mayús+clic** lo añade; un clic sin modificador selecciona solo ese elemento. Con dos o más seleccionados, el panel de la derecha muestra la lista de lo elegido y el botón **Agrupar en bloque** (solo si todo lo seleccionado son elementos sueltos: un bloque no puede contener otro bloque). El nuevo bloque:
+
+- se llama "Bloque #n" y toma el color menos usado de la paleta (se pueden cambiar después);
+- **hereda el ancla** del primer elemento seleccionado por tiempo (si ese elemento estaba anclado a un clip, el bloque sigue a ese clip; si estaba anclado a otro elemento de fuera de la selección, el bloque se ancla a él);
+- deja **exactamente donde estaban** todos los elementos agrupados, con sus tiempos ahora relativos al inicio del bloque.
+
+El botón **Borrar** de la selección múltiple quita lo seleccionado (los bloques bloqueados se conservan). **Desagrupar** (desde el panel del bloque, más abajo) hace lo contrario: los miembros vuelven a ser elementos sueltos, en el mismo sitio.
+
+### El bloque en la vista Montaje
+
+Debajo de los tres carriles de elementos sueltos (Imágenes; Textos, cuentas atrás y barras; Sonidos) hay un carril **Bloques**: cada instancia es una pieza del color de su definición, desde su inicio hasta el final de su contenido, y, si no está plegada (triángulo a su izquierda), sus miembros aparecen debajo en sub-filas. La pieza se **arrastra entera** (mueve el bloque, como el bloque de un clip en el carril de columnas); un miembro se selecciona, arrastra y redimensiona igual que un elemento suelto, pero cambia también a las demás copias enlazadas si las hay. Iconos sobre la pieza: bloqueado, oculto (rayada), enlazado y aviso (tiempos, ficheros o variables).
+
+Al seleccionar un bloque (clic en su pieza) o uno de sus miembros (clic en su sub-fila o en su caja de la miniatura), el panel de la derecha muestra sus propiedades en vez de la lista de clips, como con un elemento suelto.
+
+### Panel del bloque
+
+Con un bloque seleccionado, el panel muestra:
+
+- **Nombre** y **color** (de la definición: cambiarlos afecta a todas las copias enlazadas).
+- Si tiene copias enlazadas, un aviso "Vinculado: N copias comparten su contenido" con el botón **Desvincular** (hace de esta copia una definición independiente, editable por su cuenta).
+- **Oculto**: no se ve ni se oye en la previsualización ni en el vídeo final, pero sigue en el proyecto; lo anclado a él no se mueve. Mientras está oculto, **Desagrupar** queda desactivado (sus elementos aparecerían de golpe si se desagrupara).
+- **Bloqueado**: no se puede mover, editar, borrar, desagrupar, repetir ni cambiar de capa (se puede ocultar, plegar, duplicar y desbloquear). Si **cualquier** copia enlazada está bloqueada, el contenido compartido (los miembros, el nombre, el color) tampoco se edita en ninguna de ellas hasta desbloquearla o desvincular la copia que se quiera cambiar.
+- **Duplicar** (copia independiente), **Repetir…**, **Duración del bloque…** (ver abajo), **Desagrupar** y **Borrar**.
+- **Traer al frente / Enviar atrás / Subir / Bajar**: orden de capas entre bloques (los bloques se dibujan siempre por encima de los elementos sueltos, en este orden).
+- Avisos del bloque (tiempos fuera de vídeo, ciclos, ficheros que faltan de algún miembro con su **Localizar...**, variables sin valor).
+- **Ancla** del bloque (en un instante, anclado a un clip o a otro elemento/bloque, igual que un elemento suelto) y su **duración** (el fin del miembro que termina más tarde, sin contar la cola de los sonidos).
+- **Variables** (si algún texto del bloque tiene `{{marcadores}}`, opcionalmente con un valor por defecto, `{{marcador|valor}}`): un campo por variable, con su valor por defecto como marcador de posición; vacío usa ese valor por defecto. Son propias de esta copia: cada instancia enlazada puede llevar valores distintos. Una variable sin valor ni defecto deja el marcador (`{{nombre}}`) visible en el vídeo, con aviso.
+- La lista de sus **elementos**: un clic en uno abre su panel de propiedades (igual que un elemento suelto, con "Volver al bloque" para volver sin salir del panel de selección, y "Quitar del bloque" en vez de "Eliminar"), con un aviso "Bloque enlazado: los cambios se aplican a sus N copias" si el bloque tiene copias.
+
+### Repetir un bloque
+
+El botón **Repetir…** abre un diálogo con dos opciones:
+
+- **N veces cada X s**: el bloque original cuenta como la primera copia; se añaden N − 1 copias más, cada una desplazada `X` segundos de la anterior.
+- **Al inicio de cada clip seleccionado**: una copia por cada clip seleccionado (en la lista o en la vista Montaje), anclada a su inicio, salteando el clip en el que ya está el bloque original si coincide.
+
+Las copias son **instancias enlazadas**: comparten el contenido de la definición (editar los elementos de una cambia todas), pero cada una tiene su propia ancla, sus propias variables y su propio estado de oculto/bloqueado/plegado. **Desvincular** una copia (desde su panel) la convierte en una definición independiente, editable sin afectar a las demás.
+
+### Estirar la duración de un bloque
+
+**Duración del bloque…** pide la nueva duración en segundos y escala todos los tiempos internos (inicios relativos, desplazamientos entre miembros y duraciones) para que el bloque dure justo eso; los fundidos, la animación de entrada de los textos y la duración de los sonidos no cambian. Afecta a la definición, así que cambia también a todas las copias enlazadas.
+
+### Exportar, importar y la biblioteca de plantillas
+
+Menú **Proyecto → Plantillas de bloques** (**Insertar bloque…** e **Importar bloque…** están también como botones en la barra de la vista Montaje):
+
+| Acción | Qué hace |
+|---|---|
+| **Insertar bloque...** | Abre la **biblioteca** de plantillas: una cuadrícula con miniatura, nombre, número de elementos y duración de cada `.vmxblock` guardado (los ficheros con errores se muestran con su motivo); al elegir uno se abre el diálogo de importar, colocado por defecto **en el cursor** de la vista Montaje. **Abrir carpeta de la biblioteca** lleva a la carpeta en el explorador de ficheros. |
+| **Importar bloque...** | Abre un `.vmxblock` cualquiera del disco y el mismo diálogo de importar, colocado por defecto en sus **tiempos originales**. |
+| **Exportar bloque...** | Exporta a `.vmxblock` el bloque seleccionado en la vista Montaje (o, con solo elementos sueltos seleccionados, "Exportar selección como bloque"; también se puede exportar la selección múltiple con el botón **Exportar selección…** de su panel). Pide un nombre y, si el bloque usa ficheros (PNG, sonidos, fuentes), la casilla **Incluir ficheros** (desmarcada por defecto): sin ella, el `.vmxblock` guarda las rutas donde están; con ella, los copia a una carpeta `<nombre>_files` junto al fichero. |
+| **Guardar bloque en la biblioteca...** | Como exportar, pero siempre con sus ficheros incluidos (para que la biblioteca no dependa de dónde estén los originales) y guardado directamente en la carpeta de la biblioteca. |
+| **Abrir carpeta de la biblioteca** | Abre la carpeta de la biblioteca (propia de la aplicación) en el explorador de ficheros, para copiar `.vmxblock` a mano o compartirlos. |
+
+El **diálogo de importar** muestra una vista previa (fotograma central, con las variables aplicadas), la lista de sus elementos con sus tiempos, su duración y proporción de salida original, y:
+
+- **Colocación**: **tiempos originales** (el instante en el que estaba al exportarlo), **desplazado ± s**, **en el cursor** de la vista Montaje, o **anclado a un clip** del proyecto (inicio o fin, con un desplazamiento). Si el `.vmxblock` estaba anclado a un clip del proyecto de origen, se preselecciona (sin marcar la opción) el clip del proyecto actual con el mismo nombre, si existe.
+- **Variables**: un campo por cada `{{marcador}}` encontrado en los textos del bloque, con su valor del fichero o por defecto.
+- **Adaptar** a la proporción de salida del proyecto actual, si es distinta de la del bloque (marcada por defecto): conserva el tamaño de las cajas relativo a la altura y las recoloca dentro del fotograma nuevo, sin deformarlas.
+- **Importar desagrupado**: en vez de un bloque, deja sus elementos sueltos.
+- Si al `.vmxblock` le falta algún fichero (imagen, sonido o fuente), se lista con **Localizar...**; el botón **Importar** queda desactivado hasta encontrarlos todos. Un fichero con errores de validación los muestra uno por uno (campo y motivo) y no importa nada.
+
+Cada importación crea ids nuevos, así que el mismo `.vmxblock` se puede importar tantas veces como se quiera. Es un solo paso de deshacer.
+
+### El fichero `.vmxblock`
+
+Un bloque exportado es un fichero `.vmxblock`: JSON indentado y legible, con los tiempos de sus elementos relativos al inicio del bloque. Se puede **editar a mano** con cualquier editor de texto (se lee como JSON5: admite comentarios y comas finales) para crear plantillas propias o ajustar una exportada. La guía completa del formato, con ejemplos comentados y el JSON Schema para autocompletar en el editor, está en [`docs/videomix/guia-vmxblock.md`](guia-vmxblock.md) (y dos plantillas de muestra en [`docs/videomix/ejemplos/`](ejemplos)).
+
+## 9. Previsualizar y renderizar
 
 Con clips en el proyecto:
 
@@ -302,7 +376,7 @@ La ventana no se cierra con `Esc` ni haciendo clic fuera, para no cancelar un re
 
 Al terminar el render aparece un diálogo con la ruta del fichero y un botón para abrir la carpeta.
 
-### 8.1 Caché de render
+### 9.1 Caché de render
 
 VideoMix guarda en una carpeta oculta junto al proyecto (`.<nombre>.vmx.cache/`, o en una carpeta temporal de la aplicación mientras el proyecto no se ha guardado) los fragmentos de vídeo y audio ya codificados de renders y previsualizaciones anteriores. Si vuelves a renderizar sin haber cambiado nada relevante (mismo recorte, mismos ajustes, mismos ficheros), esos fragmentos se reutilizan tal cual en vez de volver a codificarlos, lo que acelera mucho los renders repetidos (por ejemplo, tras cambiar solo un elemento superpuesto al final del vídeo). Un cambio que sí afecta a un fragmento (otro recorte, otra transición, otro clip, otro codificador...) simplemente hace que ese fragmento se recodifique; el resto sigue viniendo de la caché.
 
@@ -310,7 +384,7 @@ VideoMix guarda en una carpeta oculta junto al proyecto (`.<nombre>.vmx.cache/`,
 
 En la misma carpeta, `converted/` guarda las versiones convertidas para el reproductor de las fuentes que no se pueden ver directamente (ver la sección 2). No son caché de render: ni el recorte automático por tamaño ni **Vaciar caché de render** las borran (convertir una fuente puede ser lento). Si se quiere liberar ese espacio, se puede borrar la carpeta `converted/` a mano con el proyecto cerrado; se vuelven a crear la próxima vez que se active cada fuente.
 
-## 9. Atajos de teclado
+## 10. Atajos de teclado
 
 Puedes ver y personalizar todos los atajos en **Ayuda → Atajos de teclado y ratón** (`Mayús+/`).
 
@@ -355,8 +429,8 @@ Si tenías una configuración de teclado de una versión anterior, los atajos nu
 
 Las acciones más nuevas (añadir texto, fijar/agrupar clips, aplicar/guardar estilo, vaciar la caché de render) no tienen atajo de teclado por defecto: se usan desde su botón, su menú contextual o el menú **Proyecto**; sí se pueden personalizar en el diálogo de atajos si se quiere.
 
-## 10. Otros ajustes
+## 11. Otros ajustes
 
 En **Ajustes** (`Ctrl/Cmd+,`) se mantienen las opciones generales de reproducción, captura de fotogramas, atajos de teclado y ratón, interfaz y notificaciones. Las opciones específicas de exportación de LosslessCut (formatos, pistas, corte sin pérdidas...) no aplican a VideoMix y no aparecen.
 
-El tamaño máximo de la caché de render (§8.1, 5 GB por defecto; `0` la desactiva) no tiene control en la interfaz: se cambia editando `renderCacheMaxBytes` en el fichero de configuración (**Ayuda → Fichero de configuración**).
+El tamaño máximo de la caché de render (§9.1, 5 GB por defecto; `0` la desactiva) no tiene control en la interfaz: se cambia editando `renderCacheMaxBytes` en el fichero de configuración (**Ayuda → Fichero de configuración**).

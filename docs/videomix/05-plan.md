@@ -97,7 +97,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T56 | v6: modelo de bloques, plantillas y lógica pura | M13 | Opus | — | hecha |
 | T57 | v6: bloques en la interfaz (H1, H5, H6, H8) | M13 | Opus | T56 | hecha |
 | T58 | v6: exportar, importar y biblioteca (H2, H3, H4, H7) | M13 | Opus | T56 | hecha |
-| T59 | v6: manual, i18n y cierre | M13 | Sonnet | T56–T58 | en curso |
+| T59 | v6: manual, i18n y cierre | M13 | Sonnet | T56–T58 | hecha |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 

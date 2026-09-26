@@ -2871,6 +2871,7 @@ function App() {
                       missingOverlayFiles={mixWorkspace.missingOverlayFiles}
                       mixOverlays={mixOverlays}
                       onLocate={mixWorkspace.userLocateOverlayFile}
+                      blockTemplates={mixBlockTemplates}
                     />
                   )}
                   {videoMixMode && showRightBar && !(showMixPlan && mixOverlays.hasOverlaySelection) && (
