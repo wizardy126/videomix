@@ -5,6 +5,7 @@ import type { PlanQuality } from './planMix';
 import { createRandom } from './random';
 import { getReorderWindowSize } from './types';
 import type { MixPlan, PlanMixInput, PlanPriority } from './types';
+import { getPlanLinks } from './units';
 
 // I2 (T61): "Optimize montage". A search over the order of the clip list, each candidate planned by the real planner
 // (planMixBest, the one the render uses, safety net included) and compared by the project's priority.
@@ -62,12 +63,44 @@ export function getFixedClipIds({ clips, sequence = [] }: Pick<PlanMixInput, 'cl
   return fixed;
 }
 
+/**
+ * The optimizer's movable content (E2, T63): a chain's members ({@link getPlanLinks}) become a single block that
+ * always moves together, contiguous and in chain order (the planner already gives the chain the list position of
+ * whichever of its members comes first, {@link getPlanUnits}, so scanning the list and grouping on first sight of a
+ * chain member matches it, and gathers a chain that the list currently has scattered). Everything else, including
+ * unpinned groups (which don't need to be contiguous to plan the same way), is a block of one.
+ * `slots` are the list positions available to movable clips, one per movable clip; `blocks` partitions them, in list
+ * order, into the ids (indices into `clips`) each block moves as a unit.
+ */
+export function getMovableBlocks({ clips, chains, sequence }: Pick<PlanMixInput, 'clips' | 'chains' | 'sequence'>): { slots: number[], blocks: number[][] } {
+  const fixed = getFixedClipIds({ clips, sequence });
+  const indexById = new Map(clips.map((clip, i) => [clip.id, i]));
+  const { chains: validChains } = getPlanLinks(clips, { chains, sequence });
+  const chainOfIndex = new Map<number, number>();
+  validChains.forEach((chain, ci) => chain.forEach((clip) => chainOfIndex.set(indexById.get(clip.id)!, ci)));
+
+  const slots = clips.flatMap((clip, i) => (fixed.has(clip.id) ? [] : [i]));
+  const blocks: number[][] = [];
+  const seenChain = new Set<number>();
+  slots.forEach((i) => {
+    const chainIndex = chainOfIndex.get(i);
+    if (chainIndex != null) {
+      if (seenChain.has(chainIndex)) return;
+      seenChain.add(chainIndex);
+      blocks.push(validChains[chainIndex]!.map((clip) => indexById.get(clip.id)!));
+    } else {
+      blocks.push([i]);
+    }
+  });
+  return { slots, blocks };
+}
+
 /** Why the order can't be optimized, if it can't: random order (the list isn't the base order) or nothing to move. */
-export function getOptimizeOrderBlocker(input: Pick<PlanMixInput, 'clips' | 'settings' | 'sequence'>): 'random-order' | 'no-window' | 'too-few-clips' | undefined {
+export function getOptimizeOrderBlocker(input: Pick<PlanMixInput, 'clips' | 'settings' | 'chains' | 'sequence'>): 'random-order' | 'no-window' | 'too-few-clips' | undefined {
   if (input.settings.order.mode === 'random') return 'random-order';
   if (getReorderWindowSize(input.settings.reorderWindow) < 1) return 'no-window';
-  const fixed = getFixedClipIds(input);
-  if (input.clips.filter((clip) => !fixed.has(clip.id)).length < 2) return 'too-few-clips';
+  const { blocks } = getMovableBlocks(input);
+  if (blocks.length < 2) return 'too-few-clips';
   return undefined;
 }
 
@@ -100,10 +133,12 @@ export const compareOrderQuality = (a: OrderQuality, b: OrderQuality, priority: 
 
 /**
  * Simulated annealing over the list order, a step at a time (so a caller can spread it over time and stop it). Moves
- * swap two clips or take one to another position; a move is only made if every clip ends up at most the reorder window
- * away from its original position (unlimited: anywhere). Fixed clips ({@link getFixedClipIds}) and clips outside the
- * input keep their positions; the constraints themselves (pins, groups, chains, sequence, maximum duration) are the
- * clips' and the settings', which the moves don't touch, and every candidate is planned with them.
+ * swap two blocks ({@link getMovableBlocks}: a chain moves whole, everything else is a block of one) or take one to
+ * another position; a move is only made if every block ends up at most the reorder window away from its own original
+ * position (unlimited: anywhere), checked once for the block (E2, T63), not per clip. Fixed clips
+ * ({@link getFixedClipIds}) and clips outside the input keep their positions; the constraints themselves (pins,
+ * groups, chains, sequence, maximum duration) are the clips' and the settings', which the moves don't touch, and every
+ * candidate is planned with them.
  *
  * Deterministic given the seed: the sequence of candidates doesn't depend on time, so the best order after `k`
  * evaluations is always the same. Runs in rounds of growing length, each one restarting from the best order so far
@@ -113,16 +148,43 @@ export function createOrderOptimizer(input: PlanMixInput, { seed = 1 }: { seed?:
   const { clips, settings } = input;
   const priority = settings.priority ?? 'duration';
   const N = getReorderWindowSize(settings.reorderWindow);
-  const fixedIds = getFixedClipIds(input);
-  /** List positions the moves may use (the rest keep their clip). */
-  const slots = clips.flatMap((clip, i) => (fixedIds.has(clip.id) ? [] : [i]));
+  const { slots, blocks } = getMovableBlocks(input);
+  const blockSize = blocks.map((block) => block.length);
+  const numBlocks = blocks.length;
+  /** Slot-offset (index into `slots`) where each block starts, before any move. */
+  const origOffset: number[] = [];
+  { let acc = 0; blocks.forEach((_block, i) => { origOffset[i] = acc; acc += blockSize[i]!; }); }
+  /** The list position a block started at (its earliest member's, like the planner's own rule for a chain). */
+  const origPos = (block: number) => slots[origOffset[block]!]!;
   const random = createRandom(seed);
   const cache = new Map<string, OrderQuality>();
 
   let evaluations = 0;
 
-  // perm[p] = original index of the clip at list position p
-  function evaluate(perm: readonly number[]): OrderQuality {
+  /** Cumulative slot-offset (index into `slots`) where each order-index's block starts, for a given block order. */
+  const offsetsOf = (order: readonly number[]): number[] => {
+    const offsets: number[] = [];
+    let acc = 0;
+    order.forEach((block, k) => { offsets[k] = acc; acc += blockSize[block]!; });
+    return offsets;
+  };
+
+  /** Expands a block order into a full clip permutation (perm[p] = original index of the clip at list position p). */
+  function toPerm(order: readonly number[]): number[] {
+    const perm = clips.map((_clip, i) => i);
+    let slot = 0;
+    order.forEach((block) => {
+      blocks[block]!.forEach((clip) => {
+        perm[slots[slot]!] = clip;
+        slot += 1;
+      });
+    });
+    return perm;
+  }
+
+  // order[k] = which block sits at block-order index k
+  function evaluate(order: readonly number[]): OrderQuality {
+    const perm = toPerm(order);
     const key = perm.join(',');
     const cached = cache.get(key);
     if (cached != null) return cached;
@@ -135,51 +197,60 @@ export function createOrderOptimizer(input: PlanMixInput, { seed = 1 }: { seed?:
     return result;
   }
 
-  const identity = clips.map((_clip, i) => i);
+  const identity = blocks.map((_block, i) => i);
   const initial = evaluate(identity);
-  let best: { perm: number[], quality: OrderQuality, evaluation: number } = { perm: identity, quality: initial, evaluation: evaluations };
+  let best: { order: number[], quality: OrderQuality, evaluation: number } = { order: identity, quality: initial, evaluation: evaluations };
   const scale = Math.max(priority === 'fill' ? initial.fill : initial.duration, 1);
 
-  const inWindow = (clip: number, position: number) => Math.abs(clip - position) <= N;
-  const randomSlot = () => Math.floor(random() * slots.length);
-  /** A slot index whose list position is within the window of `clip`, or any slot when the window is unlimited. */
-  const randomSlotNear = (clip: number) => {
-    if (!Number.isFinite(N)) return randomSlot();
-    // slots are sorted by position: the range of those within [clip − N, clip + N]
+  const inWindow = (block: number, position: number) => Math.abs(origPos(block) - position) <= N;
+  const randomBlock = () => Math.floor(random() * numBlocks);
+  /** A block-order index whose block, in `order`, would start within the window of `block`'s original position. */
+  const randomBlockNear = (order: readonly number[], block: number) => {
+    if (!Number.isFinite(N)) return randomBlock();
+    const offsets = offsetsOf(order);
+    const pos = origPos(block);
+    // order-indices are sorted by position: the range of those within [pos − N, pos + N]
     let from = 0;
-    while (from < slots.length && slots[from]! < clip - N) from += 1;
+    while (from < numBlocks && slots[offsets[from]!]! < pos - N) from += 1;
     let to = from;
-    while (to < slots.length && slots[to]! <= clip + N) to += 1;
+    while (to < numBlocks && slots[offsets[to]!]! <= pos + N) to += 1;
+    if (to <= from) return from;
     return from + Math.floor(random() * (to - from));
   };
 
-  /** Swaps the clips of slots `a` and `b`, or takes the clip of `a` to `b` shifting those in between by one slot. */
-  function tryMove(perm: readonly number[], a: number, b: number, swap: boolean): number[] | undefined {
-    const clipA = perm[slots[a]!]!;
-    if (a === b || !inWindow(clipA, slots[b]!)) return undefined;
-    const next = [...perm];
+  /**
+   * Swaps the blocks at order-indices `a` and `b`, or takes the block of `a` to `b` shifting those in between by one
+   * order-index. Blocks can differ in size, so this can shift the list position of every block from `a` to `b`: each
+   * must still keep its own start within its window at its new position.
+   */
+  function tryMove(order: readonly number[], a: number, b: number, swap: boolean): number[] | undefined {
+    if (a === b) return undefined;
+    const next = [...order];
     if (swap) {
-      const clipB = perm[slots[b]!]!;
-      if (!inWindow(clipB, slots[a]!)) return undefined;
-      next[slots[a]!] = clipB;
+      next[a] = order[b]!;
+      next[b] = order[a]!;
     } else {
       const step = b > a ? 1 : -1;
-      for (let s = a; s !== b; s += step) {
-        const moved = perm[slots[s + step]!]!;
-        if (!inWindow(moved, slots[s]!)) return undefined;
-        next[slots[s]!] = moved;
+      for (let k = a; k !== b; k += step) next[k] = order[k + step]!;
+      next[b] = order[a]!;
+    }
+    if (Number.isFinite(N)) {
+      const offsets = offsetsOf(next);
+      const lo = Math.min(a, b);
+      const hi = Math.max(a, b);
+      for (let k = lo; k <= hi; k += 1) {
+        if (!inWindow(next[k]!, slots[offsets[k]!]!)) return undefined;
       }
     }
-    next[slots[b]!] = clipA;
     return next;
   }
 
-  /** A neighbour of `perm` that keeps every clip in its window, or undefined if none was found. */
-  function getMove(perm: readonly number[]): number[] | undefined {
+  /** A neighbour of `order` that keeps every touched block in its window, or undefined if none was found. */
+  function getMove(order: readonly number[]): number[] | undefined {
     for (let attempt = 0; attempt < MOVE_TRIES; attempt += 1) {
-      const a = randomSlot();
-      const b = randomSlotNear(perm[slots[a]!]!);
-      const next = tryMove(perm, a, b, random() < 0.5);
+      const a = randomBlock();
+      const b = randomBlockNear(order, order[a]!);
+      const next = tryMove(order, a, b, random() < 0.5);
       if (next != null) return next;
     }
     return undefined;
@@ -188,41 +259,42 @@ export function createOrderOptimizer(input: PlanMixInput, { seed = 1 }: { seed?:
   let round = 0;
   let roundLength = FIRST_ROUND;
   let roundStep = 0;
-  let current = { perm: best.perm, quality: best.quality, energy: getEnergy(best.quality, initial, priority) };
+  let current = { order: best.order, quality: best.quality, energy: getEnergy(best.quality, initial, priority) };
 
   function stepOnce() {
     if (roundStep >= roundLength) {
       round += 1;
       roundLength *= 2;
       roundStep = 0;
-      current = { perm: best.perm, quality: best.quality, energy: getEnergy(best.quality, initial, priority) };
+      current = { order: best.order, quality: best.quality, energy: getEnergy(best.quality, initial, priority) };
     }
     const temperature = START_TEMPERATURE * scale * END_TEMPERATURE ** (roundStep / roundLength);
     roundStep += 1;
-    const perm = getMove(current.perm);
-    if (perm == null) return;
-    const quality = evaluate(perm);
+    const order = getMove(current.order);
+    if (order == null) return;
+    const quality = evaluate(order);
     const energy = getEnergy(quality, initial, priority);
     if (energy <= current.energy || random() < Math.exp((current.energy - energy) / temperature)) {
-      current = { perm, quality, energy };
+      current = { order, quality, energy };
     }
-    if (keepsSecond(quality, initial, priority) && compareOrderQuality(quality, best.quality, priority) < 0) best = { perm, quality, evaluation: evaluations };
+    if (keepsSecond(quality, initial, priority) && compareOrderQuality(quality, best.quality, priority) < 0) best = { order, quality, evaluation: evaluations };
   }
 
   return {
     /** The original order's quality. */
     initial,
-    /** False when no clip can move (see {@link getOptimizeOrderBlocker}): stepping does nothing. */
-    canMove: slots.length >= 2 && N >= 1,
+    /** False when no block can move (see {@link getOptimizeOrderBlocker}): stepping does nothing. */
+    canMove: numBlocks >= 2 && N >= 1,
     /** Tries `count` more moves (a revisited order isn't planned again, so it doesn't count as an evaluation). */
     step(count: number) {
-      if (slots.length < 2 || N < 1) return;
+      if (numBlocks < 2 || N < 1) return;
       for (let i = 0; i < count; i += 1) stepOnce();
     },
     get evaluations() { return evaluations; },
     get round() { return round; },
     getBest(): OrderOptimizerBest {
-      return { order: best.perm.map((i) => clips[i]!.id), quality: best.quality, evaluation: best.evaluation };
+      const perm = toPerm(best.order);
+      return { order: perm.map((i) => clips[i]!.id), quality: best.quality, evaluation: best.evaluation };
     },
   };
 }

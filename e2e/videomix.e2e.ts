@@ -2259,6 +2259,17 @@ test.describe('VideoMix (optimize the mix)', () => {
       const twoThirds = { x: 320, y: 0, width: 1280, height: 1080 };
       const spec = [...[2, 3, 2.5, 3, 2].map((d) => ['1/3', d] as const), ...[3, 2, 3, 2.5, 3].map((d) => ['2/3', d] as const)];
       saved.clips = spec.map(([kind, d], i) => ({ ...template, id: `opt-clip-${i}`, name: `${kind} #${i + 1}`, start: 0, end: d, maxRect: kind === '1/3' ? third : twoThirds, link: 'break' }));
+      // E2 (T63): clip 0 and clip 5 are one chain (adjacent in the source, forced), far apart in the list — the
+      // "scattered chain" the bug report is about. The other clips get their own, later, non-adjacent source times so
+      // they don't join in.
+      saved.clips[5]!.start = saved.clips[0]!.end;
+      saved.clips[5]!.end = saved.clips[5]!.start + spec[5]![1];
+      saved.clips[5]!.link = 'force';
+      saved.clips = saved.clips.map((clip, i) => {
+        if (i === 0 || i === 5) return clip;
+        const start = 1000 + i * 10;
+        return { ...clip, start, end: start + spec[i]![1] };
+      });
       saved.settings.reorderWindow = 3;
       writeFileSync(projectPath, JSON5.stringify(saved, null, 2));
       await sendMenuAction(ctx.app, 'newProject');
@@ -2308,8 +2319,17 @@ test.describe('VideoMix (optimize the mix)', () => {
       const estimate = page.getByTestId('mix-duration-estimate');
       await expect.poll(async () => seconds((await estimate.textContent())!.replace('≈ ', ''))).toBeCloseTo(seconds(rows[0]![2]), -0.5);
       expect([...optimized].sort()).toEqual([...original].sort());
-      // no clip is more than 3 positions away from where it was
-      optimized.forEach((name, i) => expect(Math.abs(original.indexOf(name) - i)).toBeLessThanOrEqual(3));
+      // no clip is more than 3 positions away from where it was, except the chain's second clip: the window applies
+      // to the chain as a unit (its first clip), not to each of its own clips (E2, T63)
+      const [chainFirst, chainSecond] = ['1/3 #1', '2/3 #6'];
+      optimized.forEach((name, i) => {
+        if (name === chainSecond) return;
+        expect(Math.abs(original.indexOf(name) - i)).toBeLessThanOrEqual(3);
+      });
+      const chainIndex = optimized.indexOf(chainFirst);
+      expect(Math.abs(original.indexOf(chainFirst) - chainIndex)).toBeLessThanOrEqual(3);
+      // the chain stays contiguous and in order wherever it moves, instead of scattered across the list
+      expect(optimized[chainIndex + 1]).toBe(chainSecond);
       await screenshot(page, '26c-optimize-applied');
       await pressShortcut(page, 'Control+z');
       await expect.poll(async () => clipNames(page)).toEqual(original);

@@ -100,7 +100,15 @@ describe('optimizeOrder', () => {
     for (let i = 0; i < 6; i += 1) {
       optimizer.step(10);
       const { order } = optimizer.getBest();
-      order.forEach((id, position) => expect(Math.abs(position - initialIds.indexOf(id))).toBeLessThanOrEqual(2));
+      const chainStart = order.indexOf(clips[20]!.id);
+      // the window applies to the chain as a unit (its earliest member, T63), not to each of its clips
+      expect(Math.abs(chainStart - initialIds.indexOf(clips[20]!.id))).toBeLessThanOrEqual(2);
+      // E2 (T63): the chain stays contiguous and in chain order wherever it moves
+      expect(order[chainStart + 1]).toBe(clips[25]!.id);
+      order.forEach((id, position) => {
+        if (id === clips[25]!.id) return;
+        expect(Math.abs(position - initialIds.indexOf(id))).toBeLessThanOrEqual(2);
+      });
       expect(order[5]).toBe(clips[5]!.id);
       expect(order[10]).toBe(clips[10]!.id);
     }
@@ -110,6 +118,29 @@ describe('optimizeOrder', () => {
     const best = reordered(input, order);
     expect(validatePlan(planMixBest(best).plan, best)).toEqual([]);
     expect(comparePlanQuality(quality, optimizer.initial)).toBeLessThan(0);
+  }, 60_000);
+
+  test('E2 (T63): chains scattered across the list stay contiguous, in chain order, after optimizing', () => {
+    const base = userCase(10);
+    const { clips } = base;
+    // three chains, their members far apart in the list, like the bug report ("cadenas repartidas por la lista")
+    const chains = [
+      [clips[2]!.id, clips[37]!.id],
+      [clips[5]!.id, clips[20]!.id, clips[33]!.id],
+      [clips[15]!.id, clips[28]!.id],
+    ];
+    const input: PlanMixInput = { ...base, chains };
+
+    const result = optimizeOrder(input, { steps: 80 });
+    chains.forEach((chain) => {
+      const start = result.order.indexOf(chain[0]!);
+      expect(result.order.slice(start, start + chain.length)).toEqual(chain);
+    });
+    // the plan applied to the list must be the one evaluated during the search (Alcance #2)
+    const best = reordered(input, result.order);
+    const plan = planMixBest(best);
+    expect(plan.quality).toMatchObject({ duration: result.quality.duration, fill: result.quality.fill });
+    expect(validatePlan(plan.plan, best)).toEqual([]);
   }, 60_000);
 
   test('nothing to optimize: random order, window 0, fewer than two movable clips', () => {
