@@ -242,7 +242,16 @@ Además, en M10 (sin ID): **modal de progreso del render** (fase, barra, transcu
 | H7 | **Adaptar a otra proporción** (E5) | Si el bloque se hizo para otra proporción de salida, el diálogo de importación ofrece **"Adaptar"** (marcado por defecto): conserva el tamaño relativo a la altura y recoloca las cajas dentro del fotograma nuevo. |
 | H8 | **Ocultar y bloquear** (E6) | Ocultar un bloque (no sale en previsualización ni render, sin borrarlo) y bloquearlo (no se puede mover ni editar sin desbloquear). |
 
-## 15. Fuera de alcance (backlog)
+## 15. Encaje con visión de futuro (v7, decidido con el usuario)
+
+Caso real del usuario: 40 clips (16 de 1/3, 6 de 1/2 y 18 de 2/3). Aun con ventana ilimitada, los 1/3 se agrupan en tríos porque están cerca en la lista, y los 2/3 se quedan solos con relleno. El planificador es voraz: un trío de 1/3 y un 2/3 + 1/3 llenan igual la pantalla, y ante el empate gana el orden de la lista, sin prever que los 1/3 son los únicos compañeros de los 2/3.
+
+| ID | Mejora | Decisiones |
+|---|---|---|
+| I1 | **Planificador consciente de los complementos** (modo normal) | Al elegir entre opciones, penaliza gastar clips que harán falta más adelante como compañeros (p. ej. los 1/3 si quedan 2/3 pendientes) y favorece emparejar los que solo encajan con otros concretos. Sigue siendo instantáneo. |
+| I2 | **"Optimizar montaje"** (modo intensivo) | Búsqueda global (p. ej. recocido simulado) sobre el orden de los clips: evalúa miles de variantes con el planificador real y el criterio de "Priorizar". **Respeta la ventana de reorden** del proyecto (con ventana 3, un clip se mueve como mucho 3 posiciones; con ilimitada, libre) y todas las restricciones (fijaciones, grupos, cadenas, secuencia, duración máxima). En segundo plano, sin congelar la interfaz, con barra de progreso, **tiempo elegible 5 / 15 / 60 s (15 por defecto)** y botón de parar (se queda con el mejor encontrado). Al terminar muestra **antes/después** (duración, relleno, columnas vacías) y el usuario decide aplicar. Aplicar **reordena la lista de clips** (un paso de deshacer). |
+
+## 16. Fuera de alcance (backlog)
 
 - Notas en los clips.
 - Resolución libre.

@@ -110,3 +110,6 @@
 | T57 | [T57-v6-bloques-ui.md](T57-v6-bloques-ui.md) |
 | T58 | [T58-v6-exportar-importar.md](T58-v6-exportar-importar.md) |
 | T59 | [T59-v6-cierre.md](T59-v6-cierre.md) |
+| T60 | [T60-v7-complementos.md](T60-v7-complementos.md) |
+| T61 | [T61-v7-optimizar.md](T61-v7-optimizar.md) |
+| T62 | [T62-v7-cierre.md](T62-v7-cierre.md) |

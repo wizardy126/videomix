@@ -27,6 +27,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | **M11 · Mejoras v4** | F1, F2, A5, A7, A9 | T44, T44b, T45–T50 |
 | **M12 · Mejoras v5 y correcciones** | G1–G5, A3 | T51–T55 |
 | **M13 · Bloques de overlays y plantillas** | H1–H8 | T56–T59 |
+| **M14 · Encaje con visión de futuro** | I1, I2 | T60–T62 |
 
 ## Tareas
 
@@ -98,6 +99,9 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T57 | v6: bloques en la interfaz (H1, H5, H6, H8) | M13 | Opus | T56 | hecha |
 | T58 | v6: exportar, importar y biblioteca (H2, H3, H4, H7) | M13 | Opus | T56 | hecha |
 | T59 | v6: manual, i18n y cierre | M13 | Sonnet | T56–T58 | hecha |
+| T60 | v7: planificador consciente de los complementos (I1) | M14 | Opus | — | en curso |
+| T61 | v7: "Optimizar montaje" (I2) | M14 | Opus | — | en curso |
+| T62 | v7: medición conjunta, manual y cierre | M14 | Sonnet | T60, T61 | pendiente |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 
@@ -171,6 +175,11 @@ T02 ─┤       ├─ T06 ─────────┴─ T07 ─┐
 1. T56.
 2. T57 ∥ T58.
 3. T59.
+
+## Oleadas de M14
+
+1. T60 ∥ T61.
+2. T62.
 
 ## Pendientes al integrar en la rama por defecto
 
