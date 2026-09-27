@@ -121,6 +121,16 @@ const OLDEST_SHARE = 0.75;
  */
 const DUE_CONTENT_FACTOR = 1;
 
+/**
+ * I1 (T60): look-ahead for complements (04-diseno §3.11). A pending clip that fills the row only next to one partner
+ * (a dependent: e.g. a 2/3 clip, which only a 1/3 clip completes) makes its partners scarce when the dependents need
+ * as much of them as is left. Starting a scarce partner where it fits its column but keeps no dependent company (e.g.
+ * three 1/3 clips side by side) costs the fill a dependent will likely play with instead: this weight × the partner's
+ * width × its duration, as {@link FILL_WEIGHT} does. Measured on the user's case and T52's bench (see T60's notes):
+ * 0.5 and 1 are alike; 0.5 is slightly better.
+ */
+const COMPLEMENT_WEIGHT = 0.5;
+
 const EPS = 1e-9;
 
 /**
@@ -517,6 +527,204 @@ function planAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput,
     return cost * ORDER_WEIGHT;
   }
 
+  // I1 (T60): complements (see COMPLEMENT_WEIGHT)
+
+  /** Target width of a row of `n` columns, as in `distributeWidths`. */
+  const rowTarget = (n: number) => floorEven(W - (n - 1) * gap);
+  /** `a` and `b` fill a row of two columns without fill (within the aspect tolerance, T44b). */
+  const pairFits = (a: Clip, b: Clip) => {
+    const target = rowTarget(2);
+    return a.tolerantWidths.min + b.tolerantWidths.min <= target && target <= a.tolerantWidths.max + b.tolerantWidths.max;
+  };
+  /**
+   * With a finite window, two single clips further apart in the base order than this are taken as never sharing the
+   * row, so one isn't the other's partner: each starts at most N positions away from its index, and a row holds at
+   * most `maxColumns − 1` other picks. Without it, a small window would keep the partners of dependents it can't reach
+   * yet (e.g. a block of 1/3 clips before a block of 2/3 ones) and leave fill instead (measured: much worse).
+   */
+  const partnerReach = N > LARGE_WINDOW ? Infinity : 2 * N + maxColumns - 1;
+
+  interface Complements {
+    /** The clip fills the row only next to a single partner (see `getComplements`). */
+    isDependent: (clip: Clip) => boolean,
+    /**
+     * For a scarce pending partner (its dependents need as much of it as is left), the width it would take next to
+     * them (the mean over its dependents, by demand); undefined for any other clip.
+     */
+    scarceWidth: (clip: Clip) => number | undefined,
+  }
+  /** Bumped when clips start (the pending clips change). */
+  let pendingVersion = 0;
+  let complements: { version: number, value: Complements } | undefined;
+
+  /** Sorted, merged union of intervals that start within [0, W]. */
+  const mergeIntervals = (list: [number, number][]) => {
+    const sorted = list.filter(([lo]) => lo <= W).sort((a, b) => a[0] - b[0]);
+    const merged: [number, number][] = [];
+    sorted.forEach(([lo, hi]) => {
+      const last = merged.at(-1);
+      if (last != null && lo <= last[1]) last[1] = Math.max(last[1], hi);
+      else merged.push([lo, hi]);
+    });
+    return merged;
+  };
+
+  /** Width `partner` takes next to `dependent` in a row of two. */
+  const widthNextTo = (partner: Clip, dependent: Clip) => Math.min(partner.widths.max, Math.max(partner.widths.min, rowTarget(2) - dependent.widths.preferred));
+
+  /**
+   * I1 (T60): dependents and scarce partners among the pending clips (units to start, pins), for as long as they
+   * don't change. Worked out lazily, for the clips the options ask about.
+   * - A clip is a **dependent** when it can't fill the row alone nor with 2 or more other pending clips (sums of their
+   *   width ranges; a clip may be counted twice there, an approximation that only matters with the last clips of a
+   *   kind): it needs a **partner**, a clip it fills a row of two with.
+   * - Each dependent spreads its duration over its partners in proportion to theirs. A partner is **scarce** when
+   *   that demand, `Σ duration(dependent) / Σ duration(its partners)`, reaches 1: its dependents need all of it.
+   *   Below 1 there are partners to spare (weighing them anyway, in proportion, made plans worse: T60's notes).
+   * - With a finite window only the clips within {@link partnerReach} count; with a large one, clips of the same
+   *   widths are taken together, so it stays fast with many clips.
+   */
+  function getComplements(): Complements {
+    if (complements?.version === pendingVersion) return complements.value;
+    const pool = [...remaining, ...pins, ...overdue].flatMap((unit) => unit.clips);
+    const ranges = mergeIntervals(pool.map((clip) => [clip.tolerantWidths.min, clip.tolerantWidths.max]));
+    // sums[k]: widths k pending clips can fill together (k ≥ 2, without the gaps)
+    const sums: [number, number][][] = [[], ranges];
+    for (let k = 2; k < maxColumns; k += 1) {
+      sums.push(mergeIntervals(sums[k - 1]!.flatMap(([a, b]) => ranges.map(([c, d]): [number, number] => [a + c, b + d]))));
+    }
+    const dependents = new Map<Clip, boolean>();
+    const isDependent = (clip: Clip) => {
+      let dependent = dependents.get(clip);
+      if (dependent == null) {
+        const { min, max } = clip.tolerantWidths;
+        dependent = !(min <= rowTarget(1) && rowTarget(1) <= max);
+        for (let k = 2; dependent && k < maxColumns; k += 1) {
+          const target = rowTarget(k + 1);
+          if (sums[k]!.some(([lo, hi]) => lo <= target - min && target - max <= hi)) dependent = false;
+        }
+        dependents.set(clip, dependent);
+      }
+      return dependent;
+    };
+
+    /** Demand on a partner and the width it takes (summed by demand), from its dependents. */
+    let getDemand: (partner: Clip) => { value: number, width: number };
+    if (Number.isFinite(partnerReach)) {
+      // the single clips within reach (in base order) and the others (pins, groups)
+      const singles = pool.filter((clip) => clip.singleBase >= 0).sort((a, b) => a.singleBase - b.singleBase);
+      const others = pool.filter((clip) => clip.singleBase < 0);
+      const firstFrom = (base: number) => {
+        let [lo, hi] = [0, singles.length];
+        while (lo < hi) {
+          const mid = Math.floor((lo + hi) / 2);
+          if (singles[mid]!.singleBase < base) lo = mid + 1;
+          else hi = mid;
+        }
+        return lo;
+      };
+      const near = (clip: Clip) => (clip.singleBase < 0 ? pool : [
+        ...singles.slice(firstFrom(clip.singleBase - partnerReach), firstFrom(clip.singleBase + partnerReach + 1)),
+        ...others,
+      ]);
+      const supplies = new Map<Clip, number>();
+      const supplyOf = (dependent: Clip) => {
+        let supply = supplies.get(dependent);
+        if (supply == null) {
+          supply = near(dependent).reduce((acc, clip) => acc + (clip !== dependent && pairFits(clip, dependent) ? clip.duration : 0), 0);
+          supplies.set(dependent, supply);
+        }
+        return supply;
+      };
+      getDemand = (partner) => {
+        const demand = { value: 0, width: 0 };
+        near(partner).forEach((dependent) => {
+          if (dependent === partner || !isDependent(dependent) || !pairFits(partner, dependent)) return;
+          const value = dependent.duration / supplyOf(dependent);
+          demand.value += value;
+          demand.width += value * widthNextTo(partner, dependent);
+        });
+        return demand;
+      };
+    } else {
+      interface Kind { first: Clip, clips: Clip[], duration: number }
+      const kinds = new Map<string, Kind>();
+      const kindOf = new Map<Clip, Kind>();
+      pool.forEach((clip) => {
+        const { widths: w, tolerantWidths: t } = clip;
+        const key = `${w.min}:${w.max}:${w.preferred}:${t.min}:${t.max}`;
+        let kind = kinds.get(key);
+        if (kind == null) {
+          kind = { first: clip, clips: [], duration: 0 };
+          kinds.set(key, kind);
+        }
+        kind.clips.push(clip);
+        kind.duration += clip.duration;
+        kindOf.set(clip, kind);
+      });
+      const list = [...kinds.values()];
+      /** Per dependent kind: each dependent's share, `duration / Σ duration(its partners but itself)`, and their sum. */
+      const shares = new Map<Kind, { of: Map<Clip, number>, total: number }>();
+      const sharesOf = (kind: Kind) => {
+        let result = shares.get(kind);
+        if (result == null) {
+          const supply = list.reduce((acc, other) => acc + (pairFits(other.first, kind.first) ? other.duration : 0), 0);
+          const self = pairFits(kind.first, kind.first);
+          const of = new Map(kind.clips.map((clip) => {
+            const rest = supply - (self ? clip.duration : 0);
+            return [clip, rest > EPS ? clip.duration / rest : 0];
+          }));
+          result = { of, total: [...of.values()].reduce((acc, v) => acc + v, 0) };
+          shares.set(kind, result);
+        }
+        return result;
+      };
+      getDemand = (partner) => {
+        const demand = { value: 0, width: 0 };
+        const own = kindOf.get(partner);
+        if (own == null) return demand;
+        list.forEach((kind) => {
+          if (!isDependent(kind.first) || !pairFits(partner, kind.first)) return;
+          const { of, total } = sharesOf(kind);
+          const value = total - (kind === own ? of.get(partner)! : 0);
+          demand.value += value;
+          demand.width += value * widthNextTo(partner, kind.first);
+        });
+        return demand;
+      };
+    }
+    const widths = new Map<Clip, number | undefined>();
+    const scarceWidth = (clip: Clip) => {
+      if (!widths.has(clip)) {
+        const { value, width } = getDemand(clip);
+        widths.set(clip, value >= 1 - EPS ? width / value : undefined);
+      }
+      return widths.get(clip);
+    };
+    complements = { version: pendingVersion, value: { isDependent, scarceWidth } };
+    return complements.value;
+  }
+
+  /**
+   * I1 (T60): complement cost (≥ 0) of starting `picks` in a row (all its clips at their widths, picks included): each
+   * scarce partner that fits its column but keeps no dependent of the row company (they don't fill a row of two)
+   * costs the fill a dependent will likely play with instead, {@link COMPLEMENT_WEIGHT} × its width × its duration.
+   * A partner in a column it doesn't fit (pillarbox/letterbox) already pays for it, and is often still worth it.
+   */
+  function complementCost(row: readonly { clip: Clip, width: number }[], picks: readonly Clip[]) {
+    if (maxColumns < 2 || picks.length === 0) return 0;
+    const { scarceWidth, isDependent } = getComplements();
+    let cost = 0;
+    row.forEach(({ clip, width }) => {
+      if (!picks.includes(clip)) return;
+      const partnerWidth = scarceWidth(clip);
+      if (partnerWidth == null || getColumnFit(clip.range, width, H) !== 'fill') return;
+      if (row.some(({ clip: other }) => other !== clip && isDependent(other) && pairFits(clip, other))) return;
+      cost += COMPLEMENT_WEIGHT * fillCost(partnerWidth, clip.duration);
+    });
+    return cost;
+  }
+
   /** A chunk of a group larger than `maxColumns` waits until the previous chunk has started. */
   const isWaitingChunk = (unit: Unit) => unit.groupId != null
     && remaining.some((other) => other !== unit && other.groupId === unit.groupId && other.unitBase < unit.unitBase && !other.started);
@@ -693,6 +901,7 @@ function planAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput,
 
   /** Takes placed clips out of their units, and their units out of the queues, advancing the order positions. */
   function commit(clips: Clip[]) {
+    pendingVersion += 1;
     for (const unit of new Set(clips.map((clip) => clip.unit))) {
       if (unit.pinTime == null && !unit.started) {
         if (isSingle(unit)) singlePosition += 1;
@@ -762,7 +971,8 @@ function planAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput,
           const dist = orderCost != null ? distribute(clips, squeeze) : undefined;
           if (orderCost != null && dist != null) {
             const cost = orderCost + fillCost(dist.fill, ROW_FILL_SECONDS)
-            + rowCost(clips.map((clip, i) => ({ clip, width: dist.widths[i]!, seconds: clip.duration })));
+            + rowCost(clips.map((clip, i) => ({ clip, width: dist.widths[i]!, seconds: clip.duration })))
+            + complementCost(clips.map((clip, i) => ({ clip, width: dist.widths[i]! })), picked);
             const option: Option = { violation: getViolation(clips.map((clip) => ({ clip, end: clip.duration }))), cost, assignments: [] };
             const missing = due != null && !units.includes(due) ? 1 : 0;
             if (best == null || missing < best.missing || (missing === best.missing && isBetter(option, best.option))) {
@@ -922,10 +1132,15 @@ function planAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput,
     // unless the row has structural fill: then a re-layout that clearly reduces it goes first (see CLEAR_FILL_REDUCTION).
     // With pins pending, it must also leave room for them.
     const singleWindow = getWindow(1).filter((unit) => isSingle(unit));
+    /** The row's clips if `clip` takes the trigger's column. */
+    const inPlaceRow = (clip: Clip) => order.map((id) => ({ clip: id === trigger.id ? clip : columns.get(id)!.clip, width: widthOf.get(id)! }));
     let direct: Option | undefined;
     for (const unit of singleWindow) {
       const clip = unit.clips[0]!;
       if (getColumnFit(clip.range, w1, H) === 'fill' && getOrderCost([unit]) != null) {
+        // I1 (T60): a scarce partner that keeps no dependent company is no longer a sure pick: it is weighed against
+        // the other options (it is among the in-place ones, with its cost)
+        if (complementCost(inPlaceRow(clip), [clip]) > 0) break;
         const transitionIn = getTransition(a1, clip, e1, lastStart);
         const start = e1 - transitionIn;
         direct = { violation: getViolation(inPlaceItems(trigger, clip, start + clip.duration)), cost: 0, assignments: [{ column: trigger.id, clip, start, transitionIn }] };
@@ -966,11 +1181,11 @@ function planAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput,
             ? { clip, width: w1, seconds: clip.duration }
             : { clip: col.clip, width: widthOf.get(id)!, seconds: col.end - e1 };
         });
-        consider({
-          violation: getViolation(inPlaceItems(trigger, clip, start + clip.duration)),
-          cost: orderCost + fillCost(rowFill, rowFillSeconds(e1, order.filter((id) => id !== trigger.id))) + rowCost(items),
-          assignments: [{ column: trigger.id, clip, start, transitionIn }],
-        });
+        const cost = orderCost + fillCost(rowFill, rowFillSeconds(e1, order.filter((id) => id !== trigger.id))) + rowCost(items)
+          + complementCost(inPlaceRow(clip), [clip]);
+        // (the reserve is only worked out for an option that may win)
+        if (cannotBeat(cost)) return;
+        consider({ violation: getViolation(inPlaceItems(trigger, clip, start + clip.duration)), cost, assignments: [{ column: trigger.id, clip, start, transitionIn }] });
       });
     }
 
@@ -1143,6 +1358,7 @@ function planAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput,
       row.forEach((item, i) => {
         if (item.outgoing != null) cost += misfitCost(item.outgoing.clip, dist.widths[i]!, item.outgoing.end - e1);
       });
+      cost += complementCost(row.map((item, i) => ({ clip: item.clip, width: dist.widths[i]! })), picks);
 
       consider({
         violation: getViolation(row),
@@ -1306,7 +1522,8 @@ function planAxis({ clips: rawClips, settings, chains, sequence }: PlanMixInput,
         ));
         if (D > 0 && duration <= EPS) return;
         const cost = orderCost + fillCost(dist.fill, rowFillSeconds(e1, others)) + RELAYOUT_WEIGHT
-          + rowCost(row.map((item, i) => ({ clip: item.clip, width: dist.widths[i]!, seconds: Math.min(item.clip.duration, item.end - e1) })));
+          + rowCost(row.map((item, i) => ({ clip: item.clip, width: dist.widths[i]!, seconds: Math.min(item.clip.duration, item.end - e1) })))
+          + complementCost(row.map((item, i) => ({ clip: item.clip, width: dist.widths[i]! })), picks);
         const option: Option = {
           violation: getViolation(row),
           cost,

@@ -161,6 +161,16 @@ Para decidir entre varios montajes posibles con esa ventana, VideoMix calcula ta
 - **Duración más corta** (por defecto): gana el plan que dura menos; en caso de empate, el que tenga menos relleno, después el más cercano al orden de la lista y por último el que cambie menos veces de disposición. Con este criterio, el montaje puede aceptar unas franjas negras (pillarbox/letterbox) breves en algún clip si eso hace que el vídeo final sea más corto.
 - **Menos relleno**: gana el plan con menos huecos de relleno; en caso de empate, el más corto, luego el más cercano al orden de la lista y por último el que cambie menos veces de disposición.
 
+### Optimizar montaje
+
+El planificador decide hueco a hueco, sin mirar muy lejos: si la lista tiene juntos los clips de un mismo tamaño (p. ej. todos los de 1/3 al principio y todos los de 2/3 al final), puede emparejar los de 1/3 entre sí y dejar los de 2/3 solos, con relleno. **Optimizar montaje…** (botón en la vista **Montaje**, junto al zoom, o menú **Proyecto**) busca un orden mejor de la lista de clips: prueba miles de variantes con el mismo planificador del render y se queda con la mejor según **Priorizar**.
+
+- Elige el **tiempo de búsqueda** (5 s, 15 s —por defecto— o 1 min) y pulsa **Iniciar**. La búsqueda va en segundo plano: la barra muestra el avance, las variantes probadas y el mejor resultado hasta ahora. **Parar** la termina antes y se queda con lo mejor encontrado.
+- Al terminar compara **antes y después**: duración, relleno (en segundos de fotograma completo vacío) y tiempo con columnas vacías (al final del vídeo, cuando algunas columnas se quedan sin clip). **Aplicar** reordena la lista de clips (se deshace con `Ctrl/Cmd+Z` en un solo paso); **Descartar** la deja como estaba.
+- Respeta la **ventana de reordenación**: con 3, ningún clip se mueve más de 3 posiciones en la lista; con **Ilimitado**, cualquier orden. Los clips fijados y los de la secuencia siempre visible no se mueven, y los grupos, las cadenas y la duración máxima se respetan igual que en el render.
+- Solo propone un orden que mejora lo que manda **Priorizar** sin empeorar lo otro: con "Duración más corta", uno más corto sin más relleno; con "Menos relleno", uno con menos relleno sin durar más. Si no lo encuentra, lo dice y no cambia nada.
+- No está disponible con el **orden aleatorio** (el orden de la lista no se usa) ni con ventana 0.
+
 ## 5. Ajustes de montaje
 
 Se abren con **Proyecto → Ajustes de montaje...** (`Ctrl/Cmd+Shift+M`) o el botón **Ajustes** de la barra inferior:

@@ -305,6 +305,13 @@ export default ({ app, mainWindow, newVersion, isStoreBuild, openExternal }: {
           },
         },
         {
+          // I2 (T61)
+          label: esc(t('Optimize mix...')),
+          click() {
+            mainWindow.webContents.send('optimizeMix');
+          },
+        },
+        {
           label: esc(t('Clear render cache')),
           click() {
             mainWindow.webContents.send('clearRenderCache');

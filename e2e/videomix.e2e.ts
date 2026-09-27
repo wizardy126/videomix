@@ -2233,6 +2233,107 @@ test.describe('VideoMix (blocks of overlays)', () => {
   });
 });
 
+test.describe('VideoMix (optimize the mix)', () => {
+  test('26. "Optimize mix" finds a better order in the background, stops on request, compares before/after, applies it as one undo step (I2, T61)', async () => {
+    const ctx = await launchApp();
+    const { page } = ctx;
+    const workDir = mkdtempSync(join(tmpdir(), 'videomix-e2e-optimize-'));
+    try {
+      await mockOpenDialog(ctx.app, [media(sourceFiles[0]!)]);
+      await page.getByTestId('add-sources').click();
+      await expect(page.getByTestId('source-row')).toHaveCount(1);
+      await waitIdle(page);
+      await activateSource(page, 0, sourceFiles[0]!);
+      await pressShortcut(page, 'n');
+      await expect(clipRows(page)).toHaveCount(1);
+      const projectPath = join(workDir, 'optimize.vmx');
+      await mockSaveDialog(ctx.app, projectPath);
+      await pressShortcut(page, 'Control+s');
+      await expect(page).toHaveTitle(/^optimize - /);
+
+      // a bad order: five clips fitted to 1/3 of the frame, then five fitted to 2/3 (their only partners are the 1/3
+      // ones), with a reorder window of 3
+      const saved = JSON5.parse(readFileSync(projectPath, 'utf8')) as { clips: (SavedProject['clips'][number] & { link?: string })[], settings: SavedProject['settings'] };
+      const template = saved.clips[0]!;
+      const third = { x: 640, y: 0, width: 640, height: 1080 };
+      const twoThirds = { x: 320, y: 0, width: 1280, height: 1080 };
+      const spec = [...[2, 3, 2.5, 3, 2].map((d) => ['1/3', d] as const), ...[3, 2, 3, 2.5, 3].map((d) => ['2/3', d] as const)];
+      saved.clips = spec.map(([kind, d], i) => ({ ...template, id: `opt-clip-${i}`, name: `${kind} #${i + 1}`, start: 0, end: d, maxRect: kind === '1/3' ? third : twoThirds, link: 'break' }));
+      saved.settings.reorderWindow = 3;
+      writeFileSync(projectPath, JSON5.stringify(saved, null, 2));
+      await sendMenuAction(ctx.app, 'newProject');
+      await expect(page.getByTestId('source-row')).toHaveCount(0);
+      await mockOpenDialog(ctx.app, [projectPath]);
+      await sendMenuAction(ctx.app, 'openProject');
+      await expect.poll(async () => clipNames(page)).toHaveLength(10);
+      await waitIdle(page);
+      const original = await clipNames(page);
+
+      await page.getByRole('button', { name: 'Mix', exact: true }).click();
+      await page.getByTestId('mix-optimize').click();
+      const dialog = page.getByTestId('optimize-dialog');
+      await expect(dialog.getByRole('heading', { name: 'Optimize mix' })).toBeVisible();
+      await expect(dialog.getByText('No clip moves more than 3 positions in the list (the reorder window).')).toBeVisible();
+      // 15 s by default; a minute, stopped as soon as it has tried enough variants
+      await expect(dialog.getByTestId('optimize-time')).toHaveValue('15');
+      await dialog.getByTestId('optimize-time').selectOption('60');
+      await textButton(page, 'Start').click();
+      await expect(dialog.getByRole('progressbar')).toBeVisible();
+      await expect.poll(async () => isOnTop(dialog)).toBe(true);
+      await expect.poll(async () => Number(await dialog.getByTestId('optimize-evaluations').textContent()), { timeout: 30_000 }).toBeGreaterThanOrEqual(400);
+      await expect(dialog.getByTestId('optimize-best')).toHaveText(/^\d+:\d\d\.\d · fill \d+\.\d s$/);
+      // Esc doesn't close it while it searches
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeVisible();
+      await screenshot(page, '26a-optimize-running');
+      await textButton(page, 'Stop').click();
+
+      const comparison = dialog.getByTestId('optimize-comparison');
+      await expect(comparison).toBeVisible();
+      const rows = await comparison.locator('tbody tr').evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent)));
+      console.log('Optimize before/after:', JSON.stringify(rows));
+      expect(rows.map((r) => r[0])).toEqual(['Duration', 'Fill (seconds of a whole frame)', 'Time with empty columns']);
+      const seconds = (time: string | null | undefined) => time!.split(':').reduce((acc, v) => acc * 60 + Number(v), 0);
+      expect(seconds(rows[0]![2])).toBeLessThan(seconds(rows[0]![1]));
+      expect(parseFloat(rows[1]![2]!)).toBeLessThanOrEqual(parseFloat(rows[1]![1]!));
+      await expect(dialog.getByText(/clips? changes? (its|their) place in the list/)).toBeVisible();
+      await screenshot(page, '26b-optimize-result');
+
+      // Apply: the list is reordered, in one undo step
+      await textButton(page, 'Apply').click();
+      await expect(dialog).toHaveCount(0);
+      await expect.poll(async () => clipNames(page)).not.toEqual(original);
+      const optimized = await clipNames(page);
+      // the mix is planned again with the new order: the estimate is the "after" duration
+      const estimate = page.getByTestId('mix-duration-estimate');
+      await expect.poll(async () => seconds((await estimate.textContent())!.replace('≈ ', ''))).toBeCloseTo(seconds(rows[0]![2]), -0.5);
+      expect([...optimized].sort()).toEqual([...original].sort());
+      // no clip is more than 3 positions away from where it was
+      optimized.forEach((name, i) => expect(Math.abs(original.indexOf(name) - i)).toBeLessThanOrEqual(3));
+      await screenshot(page, '26c-optimize-applied');
+      await pressShortcut(page, 'Control+z');
+      await expect.poll(async () => clipNames(page)).toEqual(original);
+      await expect.poll(async () => seconds((await estimate.textContent())!.replace('≈ ', ''))).toBeCloseTo(seconds(rows[0]![1]), -0.5);
+      await pressShortcut(page, 'Control+Shift+z');
+      await expect.poll(async () => clipNames(page)).toEqual(optimized);
+
+      // from the Project menu too; Discard leaves the list as it is
+      await sendMenuAction(ctx.app, 'optimizeMix');
+      await expect(dialog).toBeVisible();
+      await dialog.getByTestId('optimize-time').selectOption('5');
+      await textButton(page, 'Start').click();
+      await expect(textButton(page, 'Discard')).toBeVisible({ timeout: 30_000 });
+      await textButton(page, 'Discard').click();
+      await expect(dialog).toHaveCount(0);
+      expect(await clipNames(page)).toEqual(optimized);
+      expect(ctx.consoleErrors).toEqual([]);
+    } finally {
+      await ctx.close();
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  });
+});
+
 test.describe('VideoMix (Spanish UI)', () => {
   test('10. the UI is in Spanish', async () => {
     const ctx = await launchApp({ language: 'es' });

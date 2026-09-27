@@ -271,7 +271,7 @@ Simulación por eventos "termina el clip de una columna". `D` = duración de la 
 2. **Fila inicial**: se evalúan todos los subconjuntos de 1..`maxColumns` candidatos de la ventana, se reparten con `distributeWidths` y se elige el de menor puntuación. Un clip solo que no cabe ni con su mín. se pone a ancho completo con letterbox.
 3. **Evento** en `e` (fin del clip de la columna `c`; empates por posición visual):
    1. **Sustitución directa**: el primer candidato en orden de la ventana cuyo intervalo admite el ancho de `c` (con la tolerancia `ASPECT_TOLERANCE`; desde T44b el recorte absorbe ese desajuste sin deformar, §2.7). Entra con `transitionIn` y no cambia el layout.
-      - Si la fila **no tiene relleno estructural** (≤ 1 px), tiene prioridad absoluta (evita animaciones innecesarias).
+      - Si la fila **no tiene relleno estructural** (≤ 1 px), tiene prioridad absoluta (evita animaciones innecesarias), salvo que el clip sea un compañero escaso que no acompaña a ningún dependiente (I1, T60, §3.11): entonces compite con las demás opciones.
       - Si la fila **tiene relleno** (T10b, "relleno antes que sustitución directa"), se puntúan los re-layouts del paso 2 que lo **reducen claramente** (dejan como mucho `CLEAR_FILL_REDUCTION` = 50 % del relleno actual, o ≤ 1 px) y no dejan ningún clip con pillarbox/letterbox. Si hay alguno, gana el mejor; si no, la sustitución directa.
    2. Si no hay sustitución directa, se puntúan y se elige la mejor de:
       - **en su sitio con relleno**: un candidato en el ancho actual de `c`, con pillarbox o letterbox;
@@ -296,12 +296,13 @@ Simulación por eventos "termina el clip de una columna". `D` = duración de la 
 | Recorte respecto a `aPref` | `PREF_WEIGHT` = 4 hasta `MAX_CROP_LOSS` = 0,4; `EXCESS_CROP_WEIGHT` = 40 por encima | por columna, fracción del máx. que no se ve (`1 − min(a/aPref, aPref/a)`): `4 · min(p, 0,4) + 40 · max(0, p − 0,4)` |
 | Upscale > ×2 | `UPSCALE_WEIGHT` = 5 | por columna, por unidad de factor por encima de 2 (estimado con los rects) |
 | Columnas fuera de 2–3 | `COLUMN_COUNT_WEIGHT` = 4 | por columna de distancia |
+| Complementos (I1, T60) | `COMPLEMENT_WEIGHT` = 0,5 × `FILL_WEIGHT` | por compañero escaso que llena su columna sin acompañar a un dependiente: ancho que ocuparía junto a ellos / W × su duración (§3.11) |
 
 Escala orientativa: 1 % de relleno durante 5 s ≈ un re-layout ≈ 3 posiciones de desorden.
 
 **Duración máxima** (E4, T38): hay *presión* mientras `t + contenido pendiente / LIMIT_DENSITY (2 columnas) > maxDuration` (contenido pendiente: clips por empezar con sus cadenas, fijados y lo que le queda a la fila). Con presión, cada columna por debajo de `maxColumns` cuesta `LIMIT_COLUMN_WEIGHT` = 4, no se penaliza pasar de 3 columnas, el recorte "barato" sube a `LIMIT_MAX_CROP_LOSS` = 0,55 y la sustitución directa pierde su prioridad absoluta mientras la fila tenga sitio para más columnas. Ejemplo a 16:9 con 3 columnas: dos 16:9 flexibles a 960 px (50 % de recorte) cuestan 2 × 4 × 0,5 + 4 = 8 frente a 4 + 2 × 4 = 12 de uno a pantalla completa. Sin límite, o si el contenido cabe, la puntuación no cambia. La puntuación global (`PlanScore`, 1:1) no depende del límite.
 
-**Criterio equilibrado de columnas** (T10b, requisitos §4.3): una fila de una sola columna cuesta 4, más que recortar dos clips hasta el umbral (2 × 0,4 × 4 = 3,2). Así se prefieren 2–3 columnas, estrechando los horizontales flexibles hacia su mín., salvo que haya que perder más de ~40 % del máx. de algún clip; entonces gana el clip a pantalla completa. Ejemplos a 1920×1080: un 16:9 flexible junto a un 9:16 se queda en 1312 px (pierde el 32 %) → 2 columnas; junto a un 1:1 rígido se quedaría en 840 px (pierde el 56 %) → pantalla completa; dos 16:9 a 960 px pierden el 50 % cada uno → pantalla completa.
+**Criterio equilibrado de columnas** (T10b, requisitos §4.3): una fila de una sola columna cuesta 4, más que recortar dos clips hasta el umbral (2 × 0,4 × 4 = 3,2). Así se prefieren 2–3 columnas, estrechando los horizontales flexibles hacia su mín., salvo que haya que perder más de ~40 % del máx. de algún clip; entonces gana el clip a pantalla completa. Ejemplos a 1920×1080: un 16:9 flexible junto a un 9:16 se queda en 1312 px (pierde el 32 %) → 2 columnas; junto a un 1:1 rígido se quedaría en 840 px (pierde el 56 %) → pantalla completa; dos 16:9 a 960 px pierden el 50 % cada uno → pantalla completa. Desde T60, si el 16:9 es el **único compañero** del 1:1 (§3.11), comparten la fila: el 1:1 no se queda luego solo con relleno.
 
 ### 3.5 Aleatoriedad
 
@@ -405,6 +406,37 @@ Detalle, banco de pruebas y mediciones en las notas de [T52](execution/T52-v5-pl
   - En proyectos realistas de 200 clips: 30–180 ms.
   - En el peor caso sintético (1:1, 6 columnas, fijados, grupos, cadenas, secuencia y límite): unos 0,7 s, frente a unos 0,4 s con una sola ventana.
 - **Modelo**: v6, migración v5 → v6 aditiva (`planPriority` se rellena con `'duration'`).
+
+### 3.11 Planificador consciente de los complementos (I1, T60)
+
+Detalle, reproducción del caso del usuario, banco de pruebas y mediciones en las notas de [T60](execution/T60-v7-complementos.md).
+
+- **Causa**: el planificador es voraz. Un trío de 1/3 y un 2/3 + 1/3 llenan igual la fila (coste 0), el orden de la lista desempata y, una vez formado el trío, cada 1/3 que termina se sustituye directamente por otro 1/3 (prioridad absoluta, §3.3). Nada veía que los 1/3 son los **únicos** compañeros de los 2/3: al acabarse, los 2/3 suenan solos con 1/3 de relleno.
+- **Dependientes y compañeros** (`getComplements`, sobre los clips pendientes: unidades por empezar y fijados; se recalcula cuando empieza algún clip):
+  - un clip es **dependiente** si no llena la fila solo ni con 2 o más clips pendientes (sumas de sus intervalos de anchos, con la tolerancia de T44b; aproximación: un clip puede contarse dos veces, lo que solo importa con los últimos de un tipo). Ejemplos a 16:9 con 3 columnas: 2/3 (solo lo completa un 1/3) y 1/2 (solo otro 1/2); el 1/3 no lo es (tres 1/3 llenan la fila);
+  - sus **compañeros** son los clips pendientes con los que llena una fila de dos (`pairFits`);
+  - cada dependiente reparte su duración entre sus compañeros en proporción a la de ellos. Un compañero es **escaso** si esa demanda, `Σ duración(dependiente) / Σ duración(sus compañeros)`, llega a 1: sus dependientes lo necesitan entero;
+  - con ventana finita solo cuentan los clips a ≤ `2N + maxColumns − 1` posiciones en el orden base (`partnerReach`): más lejos no pueden coincidir en la fila. Sin ese alcance, una ventana pequeña guardaba los 1/3 para 2/3 que aún no podía alcanzar y dejaba relleno. Con ventana grande se agrupan los clips de mismos anchos, para que siga siendo rápido.
+- **Coste** (`complementCost`, término nuevo de §3.4, ≥ 0): un compañero escaso que entra en una columna que **llena** (sin pillarbox/letterbox) pero **sin ningún dependiente suyo en la fila** cuesta `COMPLEMENT_WEIGHT` (0,5) × `FILL_WEIGHT` × (ancho que ocuparía junto a sus dependientes / W) × su duración: el relleno con el que probablemente sonará un dependiente. Un compañero en una columna que no llena ya paga su relleno y a menudo sigue compensando (p. ej. un 1/2 con letterbox junto a un 2/3 que, si no, sonaría solo).
+  - Se suma en la fila inicial, en "en su sitio", en los re-layouts y en las columnas nuevas de un cambio de cadena. No en las opciones forzadas (grupos obligatorios, fijados, drenado): siguen como antes.
+  - **Sustitución directa**: si el primer clip que encaja tiene coste de complementos, pierde la prioridad absoluta y compite con las demás opciones (está entre las "en su sitio", con su coste). Así, en un trío de 1/3 con 2/3 pendientes, quitar la columna o esperar a la siguiente puede ganar a meter otro 1/3.
+  - Emparejar primero a los que tienen menos opciones sale solo: un 1/3 junto a un 2/3 no cuesta nada y en un trío sí.
+  - Las cotas de §3.9 siguen siendo exactas (el término es ≥ 0 y se suma después).
+- **Restricciones**: fijaciones, grupos, cadenas, secuencia, duración máxima, clips debidos (§3.10) y ventana no cambian: el término solo cambia la puntuación entre opciones válidas. La red de seguridad (§3.10) sigue garantizando que una ventana mayor nunca sale peor.
+- **Efecto**: se aplica con **cualquier ventana**. Caso del usuario (40 clips, 1/3 en bloque, ilimitada): de 236 s y 40 s·fotograma de relleno a 210 s y 6. En el banco de T52 (200 proyectos × 3 formatos × ventanas 3, 10 e ilimitada × 2 prioridades) bajan la duración y el relleno totales en todas las combinaciones. Sin dependientes con compañeros escasos, los planes no cambian (los *snapshots* no cambian).
+- **Coste de cálculo**: proyectos realistas de 200 clips, unos 0,2 s o menos con la red; el peor caso sintético (1:1, 6 columnas, con todo, ilimitada) pasa de unos 0,3 s a unos 0,35 s sin la red y de unos 0,55 s a unos 0,9 s con ella. Lo caro no es el cálculo de los complementos (perezoso, solo cuando cambian los pendientes) sino evaluar más opciones cuando la sustitución directa deja de ser segura.
+
+### 3.12 Optimizar montaje (I2, T61)
+
+Detalle, mediciones y justificación en las notas de [T61](execution/T61-v7-optimizar.md).
+
+- **Búsqueda** (`planner/optimizeOrder.ts`, puro): recocido simulado sobre el **orden de la lista**. Cada candidato se planifica con `planMixBest` (el planificador del render, red de seguridad incluida) y se compara con `comparePlanQuality` según `priority`, sumando al `order` del plan el desplazamiento de la lista respecto al original (`compareOrderQuality`).
+  - Movimientos: intercambiar dos clips o llevar uno a otra posición. Solo se aceptan si **cada clip queda a ≤ N posiciones de su posición original** (N = ventana del proyecto; ilimitada = libre). Los clips fijados (propios o por grupo fijado) y los de la secuencia no se mueven (`getFixedClipIds`); fijaciones, grupos, cadenas, secuencia y duración máxima son de los clips y de los ajustes, y todos los candidatos se planifican con ellos.
+  - Solo cuenta como mejor un orden que **no empeora la otra medida** respecto al original (`keepsSecond`: con `duration`, no más relleno; con `fill`, no más largo).
+  - Rondas de 200, 400, 800… evaluaciones que reempiezan desde el mejor con temperatura decreciente (0,5 % → 0,005 % de la medida principal original). **Determinista dada la semilla**: la secuencia de candidatos no depende del tiempo; el presupuesto (evaluaciones o tiempo) solo decide dónde se corta.
+  - `getOptimizeOrderBlocker`: no se optimiza con orden aleatorio, ventana 0 o menos de dos clips movibles.
+- **Segundo plano**: un Web Worker (`optimize/optimizeOrderWorker.ts`, importado con `?worker` como `worker/eval.ts`) recibe el `PlanMixInput` (sin tamaños de fuente: E7 no cambia las decisiones) y el tiempo, y publica el mejor orden en cuanto mejora y el progreso cada 200 ms. **Parar** termina el worker y se queda con el último mejor recibido.
+- **Interfaz** (`MixOptimizeDialog`, `useMixOptimize`): botón "Optimizar montaje…" en la barra de la vista Montaje y menú Proyecto (acción `optimizeMix`, sin atajo por defecto). Tiempo 5 / 15 / 60 s (15 por defecto), barra, variantes probadas y mejor hasta ahora, Parar; al terminar, antes/después (`getMixOrderMetrics`: duración, relleno en segundos de fotograma completo y tiempo con columnas vacías, `getEmptyColumnTime`) y Aplicar / Descartar. Aplicar hace un solo `reorderClips` (un paso de deshacer; `applyPlannerOrder` deja en su sitio los clips que el planificador no ve) y no aplica nada si los clips o los ajustes cambiaron durante la búsqueda.
 
 ## 4. Render de vídeo con ffmpeg
 

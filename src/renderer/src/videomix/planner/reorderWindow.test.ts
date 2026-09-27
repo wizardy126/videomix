@@ -197,7 +197,7 @@ describe('properties with large and unlimited windows', () => {
     }
   });
 
-  test('200 clips with an unlimited window are planned in well under a second (two with the safety net), also with pins, groups, chains and a limit', () => {
+  test('200 clips with an unlimited window are planned in under 1.5 s (2 s with the safety net), also with pins, groups, chains and a limit', () => {
     const clips = Array.from({ length: 200 }, (_v, i) => clip(`c${i}`, 3 + (i % 11), presets[(i * 7) % presets.length]!));
     const busy = clips.map((c, i) => ({
       ...c,
@@ -213,8 +213,9 @@ describe('properties with large and unlimited windows', () => {
         ];
         for (const input of inputs) {
           // the unlimited window alone, and with the safety net (T52: the plans of windows 10, 3 and 0 too, about twice
-          // as long at worst; see T52's notes)
-          for (const [bestOfWindows, limit] of [[false, 1000], [true, 2000]] as const) {
+          // as long at worst; see T52's notes). T60: the complements cost about 30 % more in the worst case here (1:1, 6
+          // columns, with everything: ~0.3 → ~0.4 s alone, warm), so the margin for a loaded machine is 1.5 s
+          for (const [bestOfWindows, limit] of [[false, 1500], [true, 2000]] as const) {
             const netInput = { ...input, settings: { ...input.settings, bestOfWindows } };
             // best of 3: a single wall-clock sample is noisy when the whole suite runs in parallel
             let best = Infinity;

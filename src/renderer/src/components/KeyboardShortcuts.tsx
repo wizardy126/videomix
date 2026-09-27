@@ -847,6 +847,11 @@ const KeyboardShortcuts = memo(({
         name: t('Clear render cache'),
         category: mixProjectCategory,
       },
+      // I2 (T61)
+      optimizeMix: {
+        name: t('Optimize mix'),
+        category: mixProjectCategory,
+      },
       // H2, H3 (T58): block templates
       importBlock: {
         name: t('Import block'),

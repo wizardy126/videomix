@@ -221,8 +221,10 @@ describe('decisions after T10 (T10b)', () => {
   });
 
   test('balanced columns: full screen when sharing would crop more than ~40 % of the max', () => {
-    // next to a square clip the 16:9 one would keep 840 px (44 % of its max): it goes alone, full screen
-    const p = plan({ clips: [clip('h0', 10, H169_NARROW), clip('s1', 10, rigid(1))], settings: settings() });
+    // next to a square clip the 16:9 one would keep 840 px (44 % of its max): it goes alone, full screen. (I1, T60: h2
+    // is there so that the square has partners to spare; with h0 as its only partner they share the row, see
+    // complements.test.ts)
+    const p = plan({ clips: [clip('h0', 10, H169_NARROW), clip('s1', 10, rigid(1)), clip('h2', 10, H169_NARROW)], settings: settings() });
     expect(p.layouts[0]!.columns.map((c) => c.width)).toEqual([1920]);
     // two 16:9 clips side by side would keep 50 % each
     const pair = plan({ clips: [clip('a', 10, H169_NARROW), clip('b', 10, H169_NARROW)], settings: settings() });

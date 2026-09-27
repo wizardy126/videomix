@@ -3,7 +3,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { FaCaretDown, FaCaretRight, FaCut, FaExclamationTriangle, FaEye, FaEyeSlash, FaFont, FaImage, FaLink, FaLock, FaPlus, FaSearchMinus, FaSearchPlus, FaStopwatch, FaThumbtack, FaVolumeUp } from 'react-icons/fa';
-import { MdLinearScale, MdOpenInFull } from 'react-icons/md';
+import { MdAutoFixHigh, MdLinearScale, MdOpenInFull } from 'react-icons/md';
 
 import { useSegColors } from '../../contexts';
 import useUserSettings from '../../hooks/useUserSettings';
@@ -533,7 +533,7 @@ interface BlockDrag { pointerId: number, mode: BlockDragMode, startX: number, ax
 interface BoxDrag { pointerId: number, handle: DragHandle, startX: number, startY: number, scale: number, start: Exclude<MixOverlay, { type: 'sound' }>, moved: boolean, target: DragTarget }
 interface PieceDrag { pointerId: number, blockId: string, startX: number, axisWidth: number, anchor: OverlayAnchor, rawStart: number, moved: boolean }
 
-function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOverlays, overlays, missingOverlayFiles, blockTemplates }: {
+function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOverlays, overlays, missingOverlayFiles, blockTemplates, onOptimize }: {
   clips: MixClip[],
   settings: MixSettings,
   /** Selection (with the multi-selection), pins and groups (A4, T30). */
@@ -547,6 +547,8 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
   missingOverlayFiles: readonly MissingOverlayFile[],
   /** "Insert block…" and "Import block…" (T58). */
   blockTemplates?: Pick<UseBlockTemplates, 'userInsertBlockFromLibrary' | 'userImportBlock'> | undefined,
+  /** "Optimize mix…" (I2, T61). */
+  onOptimize?: (() => void) | undefined,
 }) {
   const { t } = useTranslation();
   const { darkMode } = useUserSettings();
@@ -974,6 +976,9 @@ function MixPlanView({ clips, settings, clipPins, onSelect, thumbnailUrls, mixOv
           <span style={{ fontSize: '.7em', opacity: 0.7, marginLeft: truncated != null ? undefined : 'auto' }} title={t('New overlays are added at the cursor. Click on the lanes to move it.')}>
             {t('Cursor: {{time}}', { time: formatDuration({ seconds: cursorTime, shorten: true }) })}
           </span>
+          {onOptimize != null && (
+            <button type="button" data-testid="mix-optimize" style={toolbarButtonStyle} onClick={onOptimize} title={t('Search for a better order of the clip list')}><MdAutoFixHigh />{t('Optimize mix…')}</button>
+          )}
           {/* A3 (T53) */}
           <span style={{ display: 'inline-flex', gap: '.2em' }}>
             <button type="button" data-testid="mix-zoom-out" style={{ ...toolbarButtonStyle, ...(zoom <= 1 && disabledButtonStyle) }} disabled={zoom <= 1} onClick={handleZoomOut} title={t('Zoom out (Ctrl + mouse wheel)')}><FaSearchMinus /></button>

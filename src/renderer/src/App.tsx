@@ -43,6 +43,7 @@ import useClipKeyframes from './videomix/hooks/useClipKeyframes';
 import useMixToolbarSlot from './videomix/hooks/useMixToolbarSlot';
 import useMixRender from './videomix/hooks/useMixRender';
 import MixSettingsDialog from './videomix/components/MixSettingsDialog';
+import MixOptimizeDialog from './videomix/components/MixOptimizeDialog';
 import MixRenderButtons from './videomix/components/MixRenderButtons';
 import MixPlanView from './videomix/components/MixPlanView';
 import OverlaySelectionPanel from './videomix/components/OverlaySelectionPanel';
@@ -1641,6 +1642,8 @@ function App() {
   // VideoMix: preview and render of the mix (T13), and the mix settings dialog (T14). They replace LosslessCut's export
   const mixRender = useMixRender({ mixProject, workingRef, setWorking, setProgress, withErrorHandling, showGenericDialog, openExportFinishedDialog, appendFfmpegCommandLog });
   const [mixSettingsOpen, setMixSettingsOpen] = useState(false);
+  // I2 (T61)
+  const [mixOptimizeOpen, setMixOptimizeOpen] = useState(false);
   // VideoMix: Source/Mix tabs above the bottom timeline area (T15). "Mix" shows the plan instead of the active source.
   const [showMixPlan, setShowMixPlan] = useState(false);
 
@@ -2346,6 +2349,7 @@ function App() {
       previewMix: () => { mixRender.userPreviewMix(); },
       renderMix: () => { mixRender.userRenderMix(); },
       clearRenderCache: () => { mixRender.userClearRenderCache(); },
+      optimizeMix: () => setMixOptimizeOpen(true),
       // H2, H3 (T58)
       importBlock: () => { mixBlockTemplates.userImportBlock(); },
       exportBlock: () => { mixBlockTemplates.userExportBlock(); },
@@ -2982,6 +2986,7 @@ function App() {
                       overlays={mixProject.project.overlays}
                       missingOverlayFiles={mixWorkspace.missingOverlayFiles}
                       blockTemplates={mixBlockTemplates}
+                      onOptimize={() => setMixOptimizeOpen(true)}
                     />
                   ) : (
                     <Timeline
@@ -3134,6 +3139,7 @@ function App() {
                 </Dialog.Root>
 
                 {videoMixMode && <MixSettingsDialog open={mixSettingsOpen} onOpenChange={setMixSettingsOpen} settings={mixProject.project.settings} onChange={mixProject.updateSettings} />}
+                {videoMixMode && mixOptimizeOpen && <MixOptimizeDialog open onOpenChange={setMixOptimizeOpen} clips={mixProject.project.clips} settings={mixProject.project.settings} onApply={mixClips.userReorderClips} />}
 
                 <LastCommands visible={lastCommandsVisible} onTogglePress={toggleLastCommands} ffmpegCommandLog={ffmpegCommandLog} setFfmpegCommandLog={setFfmpegCommandLog} />
 

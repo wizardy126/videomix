@@ -1,6 +1,6 @@
 # T62 · v7: medición conjunta, manual y cierre
 
-- **Hito**: M14 · **Modelo**: Sonnet · **Depende de**: T60, T61 · **Estado**: pendiente
+- **Hito**: M14 · **Modelo**: Sonnet · **Depende de**: T60, T61 · **Estado**: en curso
 
 ## Contexto (leer antes de empezar)
 
