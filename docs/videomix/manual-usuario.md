@@ -163,13 +163,14 @@ Para decidir entre varios montajes posibles con esa ventana, VideoMix calcula ta
 
 ### Optimizar montaje
 
-El planificador decide hueco a hueco, sin mirar muy lejos: si la lista tiene juntos los clips de un mismo tamaño (p. ej. todos los de 1/3 al principio y todos los de 2/3 al final), puede emparejar los de 1/3 entre sí y dejar los de 2/3 solos, con relleno. **Optimizar montaje…** (botón en la vista **Montaje**, junto al zoom, o menú **Proyecto**) busca un orden mejor de la lista de clips: prueba miles de variantes con el mismo planificador del render y se queda con la mejor según **Priorizar**.
+Al decidir qué clip entra en cada hueco, el planificador ya tiene en cuenta qué clips pendientes son **complementos escasos** de otros: por ejemplo, si los únicos clips que pueden compartir fila con un 2/3 son los de 1/3, evita gastarlos todos formando tríos de 1/3 y dejar luego los 2/3 sonando solos con relleno. Aun así, esto solo funciona **dentro de la ventana de reordenación**: si la lista agrupa muchos clips del mismo tamaño (p. ej. primero todos los de 1/3 y después todos los de 2/3) y la ventana es pequeña (3 o 10), un 2/3 puede quedar demasiado lejos en la lista para alcanzar un 1/3 todavía disponible. **Optimizar montaje…** (botón en la vista **Montaje**, junto al zoom, o menú **Proyecto**) busca un orden mejor de **toda la lista** de clips (no solo dentro de la ventana): prueba miles de variantes con el mismo planificador del render y se queda con la mejor según **Priorizar**.
 
 - Elige el **tiempo de búsqueda** (5 s, 15 s —por defecto— o 1 min) y pulsa **Iniciar**. La búsqueda va en segundo plano: la barra muestra el avance, las variantes probadas y el mejor resultado hasta ahora. **Parar** la termina antes y se queda con lo mejor encontrado.
 - Al terminar compara **antes y después**: duración, relleno (en segundos de fotograma completo vacío) y tiempo con columnas vacías (al final del vídeo, cuando algunas columnas se quedan sin clip). **Aplicar** reordena la lista de clips (se deshace con `Ctrl/Cmd+Z` en un solo paso); **Descartar** la deja como estaba.
 - Respeta la **ventana de reordenación**: con 3, ningún clip se mueve más de 3 posiciones en la lista; con **Ilimitado**, cualquier orden. Los clips fijados y los de la secuencia siempre visible no se mueven, y los grupos, las cadenas y la duración máxima se respetan igual que en el render.
 - Solo propone un orden que mejora lo que manda **Priorizar** sin empeorar lo otro: con "Duración más corta", uno más corto sin más relleno; con "Menos relleno", uno con menos relleno sin durar más. Si no lo encuentra, lo dice y no cambia nada.
 - No está disponible con el **orden aleatorio** (el orden de la lista no se usa) ni con ventana 0.
+- **En la práctica**: con una lista que agrupa muchos clips de un mismo tamaño, la ventana de reordenación **Ilimitada** (más arriba en esta sección) ya deja que el planificador normal los empareje bien, sin pasar por este diálogo. Con una ventana pequeña (3 o 10, para que el resto del montaje no se reordene demasiado) es donde más se nota **Optimizar montaje…**: puede mover un clip por toda la lista aunque la ventana del render solo le deje moverse unas pocas posiciones al montar. Con la prioridad **Menos relleno** el resultado nunca añade franjas (pillarbox/letterbox) por acortar el vídeo, a diferencia de "Duración más corta", que puede aceptar alguna franja breve si así el vídeo final es más corto.
 
 ## 5. Ajustes de montaje
 
@@ -437,7 +438,7 @@ Los más importantes:
 
 Si tenías una configuración de teclado de una versión anterior, los atajos nuevos pueden no aparecer hasta que restablezcas los atajos (botón "Restablecer" en el diálogo de atajos).
 
-Las acciones más nuevas (añadir texto, fijar/agrupar clips, aplicar/guardar estilo, vaciar la caché de render) no tienen atajo de teclado por defecto: se usan desde su botón, su menú contextual o el menú **Proyecto**; sí se pueden personalizar en el diálogo de atajos si se quiere.
+Las acciones más nuevas (añadir texto, fijar/agrupar clips, aplicar/guardar estilo, vaciar la caché de render, optimizar montaje) no tienen atajo de teclado por defecto: se usan desde su botón, su menú contextual o el menú **Proyecto**; sí se pueden personalizar en el diálogo de atajos si se quiere.
 
 ## 11. Otros ajustes
 

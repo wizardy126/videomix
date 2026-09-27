@@ -101,7 +101,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T59 | v6: manual, i18n y cierre | M13 | Sonnet | T56–T58 | hecha |
 | T60 | v7: planificador consciente de los complementos (I1) | M14 | Opus | — | hecha |
 | T61 | v7: "Optimizar montaje" (I2) | M14 | Opus | — | hecha |
-| T62 | v7: medición conjunta, manual y cierre | M14 | Sonnet | T60, T61 | en curso |
+| T62 | v7: medición conjunta, manual y cierre | M14 | Sonnet | T60, T61 | hecha |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 
