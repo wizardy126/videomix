@@ -102,6 +102,7 @@ El estado vivo de cada tarea está en su task-doc (`execution/`). Esta tabla es 
 | T60 | v7: planificador consciente de los complementos (I1) | M14 | Opus | — | hecha |
 | T61 | v7: "Optimizar montaje" (I2) | M14 | Opus | — | hecha |
 | T62 | v7: medición conjunta, manual y cierre | M14 | Sonnet | T60, T61 | hecha |
+| T63 | Bug: "Optimizar montaje" separa en la lista los clips enlazados | M14 | Sonnet | T61 | en curso |
 
 La numeración T08 queda libre: la limpieza de UI se movió a T16, cuando ya existe el flujo nuevo completo.
 

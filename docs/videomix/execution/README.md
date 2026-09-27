@@ -113,3 +113,4 @@
 | T60 | [T60-v7-complementos.md](T60-v7-complementos.md) |
 | T61 | [T61-v7-optimizar.md](T61-v7-optimizar.md) |
 | T62 | [T62-v7-cierre.md](T62-v7-cierre.md) |
+| T63 | [T63-optimizar-cadenas.md](T63-optimizar-cadenas.md) |
